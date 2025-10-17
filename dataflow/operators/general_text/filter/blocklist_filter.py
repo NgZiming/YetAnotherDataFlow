@@ -1,5 +1,7 @@
 from tqdm import tqdm
 import numpy as np
+import nltk
+import os
 from dataflow import get_logger
 from dataflow.core import OperatorABC
 from dataflow.utils.storage import DataFlowStorage
@@ -16,6 +18,17 @@ class BlocklistFilter(OperatorABC):
         self.threshold = threshold
         self.use_tokenizer = use_tokenizer
         self.logger.info(f"Initializing {self.__class__.__name__} with language = {self.language}, threshold = {self.threshold}, use_tokenizer = {self.use_tokenizer}...")
+        
+        # 设置 NLTK 数据路径（如果环境变量中有的话）
+        if 'NLTK_DATA' in os.environ:
+            nltk.data.path.insert(0, os.environ['NLTK_DATA'])
+        
+        # 尝试查找数据，如果不存在则下载
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt')
+        
         self.blocklist = self.load_blocklist()
 
     @staticmethod

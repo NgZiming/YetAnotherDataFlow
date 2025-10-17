@@ -391,7 +391,18 @@ class AlphaWordsFilter(OperatorABC):
 
     def __init__(self, threshold: float, use_tokenizer: bool):
         import nltk
-        nltk.download('punkt_tab')
+        import os
+        
+        # 设置 NLTK 数据路径（如果环境变量中有的话）
+        if 'NLTK_DATA' in os.environ:
+            nltk.data.path.insert(0, os.environ['NLTK_DATA'])
+        
+        # 尝试查找数据，如果不存在则下载
+        try:
+            nltk.data.find('tokenizers/punkt_tab')
+        except LookupError:
+            nltk.download('punkt_tab')
+        
         self.logger = get_logger()
         self.threshold = threshold
         self.use_tokenizer = use_tokenizer
@@ -899,9 +910,23 @@ class StopWordFilter(OperatorABC):
         self.use_tokenizer = use_tokenizer
         self.logger.info(f"Initializing {self.__class__.__name__} with threshold = {self.threshold}, use_tokenizer = {self.use_tokenizer}...")
         import nltk
-        # Download stopwords for the English language
-        nltk.data.path.append('./dataflow/operators/filter/GeneralText/nltkdata/')
-        nltk.download('stopwords', download_dir='./dataflow/operators/filter/GeneralText/nltkdata/')
+        import os
+        from nltk.corpus import stopwords
+        
+        # 设置 NLTK 数据路径（如果环境变量中有的话）
+        if 'NLTK_DATA' in os.environ:
+            nltk.data.path.insert(0, os.environ['NLTK_DATA'])
+        else:
+            nltk.data.path.append('./dataflow/operators/filter/GeneralText/nltkdata/')
+        
+        # 尝试查找数据，如果不存在则下载
+        try:
+            nltk.data.find('corpora/stopwords')
+        except LookupError:
+            nltk.download('stopwords', download_dir='./dataflow/operators/filter/GeneralText/nltkdata/')
+        
+        # 加载停用词
+        self.stw = set(stopwords.words('english'))
 
     @staticmethod
     def get_desc(lang: str = "zh"):
@@ -1045,6 +1070,21 @@ class CapitalWordsFilter(OperatorABC):
         self.threshold = threshold
         self.use_tokenizer = use_tokenizer
         self.logger.info(f"Initializing {self.__class__.__name__} with threshold = {self.threshold}, use_tokenizer = {self.use_tokenizer}...")
+        
+        # 如果使用分词器，配置 NLTK 数据路径
+        if self.use_tokenizer:
+            import nltk
+            import os
+            
+            # 设置 NLTK 数据路径（如果环境变量中有的话）
+            if 'NLTK_DATA' in os.environ:
+                nltk.data.path.insert(0, os.environ['NLTK_DATA'])
+            
+            # 尝试查找数据，如果不存在则下载
+            try:
+                nltk.data.find('tokenizers/punkt')
+            except LookupError:
+                nltk.download('punkt')
 
     @staticmethod
     def get_desc(lang: str = "zh"):
@@ -1202,7 +1242,7 @@ class UniqueWordsFilter(OperatorABC):
                 "运行参数：\n"
                 "- storage：DataFlowStorage对象\n"
                 "- input_key：输入文本字段名\n"
-                "- output_key：输出标签字段名，默认为'unique_words_filter_label'\n"
+                "- output_key：输出标签字段名，默认为'unique_words_filter'\n"
                 "返回值：\n"
                 "- 包含output_key的列表"
             )
@@ -1214,14 +1254,14 @@ class UniqueWordsFilter(OperatorABC):
                 "Run Parameters:\n"
                 "- storage: DataFlowStorage object\n"
                 "- input_key: Input text field name\n"
-                "- output_key: Output label field name, default is 'unique_words_filter_label'\n"
+                "- output_key: Output label field name, default is 'unique_words_filter'\n"
                 "Returns:\n"
                 "- List containing output_key"
             )
         else:
             return "UniqueWordsFilter checks unique word ratio using set operations and threshold comparison."
         
-    def run(self, storage: DataFlowStorage, input_key: str, output_key: str='unique_words_filter_label'):
+    def run(self, storage: DataFlowStorage, input_key: str, output_key: str='unique_words_filter'):
         self.input_key = input_key
         self.output_key = output_key
         dataframe = storage.read("dataframe")

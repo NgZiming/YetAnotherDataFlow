@@ -1,4 +1,5 @@
 import nltk
+import os
 from nltk.corpus import stopwords
 from tqdm import tqdm
 from dataflow import get_logger
@@ -8,12 +9,19 @@ from dataflow.utils.registry import OPERATOR_REGISTRY
 
 @OPERATOR_REGISTRY.register()
 class RemoveStopwordsRefiner(OperatorABC):
-    def __init__(self, model_cache_dir: str = './dataflow_cache'):
+    def __init__(self):
         self.logger = get_logger()
         self.logger.info(f"Initializing {self.__class__.__name__} ...")
-        self.model_cache_dir = model_cache_dir
-        nltk.data.path.append(self.model_cache_dir)
-        nltk.download('stopwords', download_dir=self.model_cache_dir)
+        
+        # 设置 NLTK 数据路径（如果环境变量中有的话）
+        if 'NLTK_DATA' in os.environ:
+            nltk.data.path.insert(0, os.environ['NLTK_DATA'])
+        
+        # 尝试下载，如果已存在则跳过
+        try:
+            nltk.data.find('corpora/stopwords')
+        except LookupError:
+            nltk.download('stopwords')
     
     def remove_stopwords(self, text):
         words = text.split()
