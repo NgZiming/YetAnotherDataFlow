@@ -19,7 +19,7 @@ class CodeInstructionGenerator(OperatorABC):
     and enhance instruction datasets for programming tasks.
     """
 
-    def __init__(self, llm_serving: LLMServingABC, prompt_template=None, num_few_shot: int = 3):
+    def __init__(self, llm_serving: LLMServingABC, prompt_template=None, num_few_shot: int = 3, num_generate: int = 10):
         """
         Initializes the operator with a language model serving endpoint.
         
@@ -29,6 +29,7 @@ class CodeInstructionGenerator(OperatorABC):
             num_few_shot: Number of few-shot examples to use (default: 3)
         """
         self.logger = get_logger()
+        self.num_generate = num_generate
         self.llm_serving = llm_serving
         self.num_few_shot = num_few_shot
         self.prompt_template = CodeInstructionGenerate()
@@ -43,8 +44,6 @@ class CodeInstructionGenerator(OperatorABC):
                 "该算子用于生成新的指令,从数据池中随机抽取few-shot样本,生成类似难度的指令。\n\n"
                 "输入参数:\n"
                 "- input_key: 包含原始指令的字段名 (默认: 'prompt')\n"
-                "- num_few_shot: few-shot样本数量 (默认: 3)\n"
-                "- num_generate: 要生成的新指令数量 (默认: 10)\n"
                 "输出参数:\n"
                 "- output_key: 用于存储生成指令的字段名 (默认: 'generated_instruction')\n"
             )
@@ -54,8 +53,6 @@ class CodeInstructionGenerator(OperatorABC):
                 "to create instructions of similar difficulty.\n\n"
                 "Input Parameters:\n"
                 "- input_key: Field name containing the original instructions (default: 'prompt')\n"
-                "- num_few_shot: Number of few-shot examples (default: 3)\n"
-                "- num_generate: Number of new instructions to generate (default: 10)\n"
                 "Output Parameters:\n"
                 "- output_key: Field name to store the generated instruction (default: 'generated_instruction')\n"
             )
@@ -135,8 +132,6 @@ class CodeInstructionGenerator(OperatorABC):
         storage: DataFlowStorage, 
         input_key: str = "prompt", 
         output_key: str = "generated_instruction",
-        num_few_shot: int = 3,
-        num_generate: int = 10
     ) -> List[str]:
         """
         Executes the instruction synthesis process.
@@ -146,23 +141,18 @@ class CodeInstructionGenerator(OperatorABC):
             storage: DataFlow storage instance
             input_key: Field name containing the original instructions
             output_key: Field name to store generated instructions
-            num_few_shot: Number of few-shot examples (overrides __init__ value)
-            num_generate: Number of new instructions to generate
         
         Returns:
             A list containing the name of the output column.
         """
         self.input_key = input_key
         self.output_key = output_key
-
-        if num_few_shot is not None:
-            self.num_few_shot = num_few_shot
         
         dataframe = storage.read("dataframe")
         self._validate_dataframe(dataframe)
         random.seed(42)
 
-        formatted_prompts = self._build_prompts(dataframe, num_generate)
+        formatted_prompts = self._build_prompts(dataframe, self.num_generate)
 
         responses = self.llm_serving.generate_from_input(formatted_prompts)
 
