@@ -5,7 +5,7 @@ torch
 torchvision
 torchaudio
 tqdm
-transformers
+transformers<4.54.0
 aisuite
 math_verify
 word2number
