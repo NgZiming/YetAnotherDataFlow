@@ -38,7 +38,7 @@ class PromptTemplatedGenerator(OperatorABC):
         self.logger.info("Running PromptTemplatedGenerator...")
         self.input_keys = input_keys
 
-        need_fields = getattr(self.prompt_template, "fields", None)
+        need_fields = set(input_keys.keys())
 
     # Load the raw dataframe from the input file
         dataframe = storage.read('dataframe')
@@ -49,7 +49,7 @@ class PromptTemplatedGenerator(OperatorABC):
             key_dict = {}
             for key in need_fields:
                 key_dict[key] = row[input_keys[key]]
-            prompt_text = self.prompt_template.build_prompt(**key_dict)
+            prompt_text = self.prompt_template.build_prompt(need_fields, **key_dict)
             llm_inputs.append(prompt_text)
         self.logger.info(f"Prepared {len(llm_inputs)} prompts for LLM generation.")
         # Create a list to hold all generated contents
