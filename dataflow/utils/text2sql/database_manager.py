@@ -5,11 +5,14 @@ import threading
 import hashlib
 import time
 import os
+import json
+import re
 from dataflow import get_logger
 from .base import DatabaseInfo, QueryResult
 from .database_connector.sqlite_connector import SQLiteConnector
 from .database_connector.sqlite_vec_connector import SQLiteVecConnector
 from .database_connector.mysql_connector import MySQLConnector
+from dataflow.core import LLMServingABC
 
 
 # ============== Cache Manager ==============
@@ -79,6 +82,10 @@ class CacheManager:
 
 # ============== Database Manager ==============
 class DatabaseManager:
+    _LEMBED_PATTERN = re.compile(
+        r"lembed\s*\(\s*(['\"]?)[^,]*?\1\s*,\s*(['\"])(.*?)\2\s*\)",
+        re.IGNORECASE | re.DOTALL
+    )
     
     # Registry of available connectors
     # You must add the database connector class here if you want to support a new database type
@@ -90,9 +97,12 @@ class DatabaseManager:
         # 'postgres': PostgresConnector
     }
     
-    def __init__(self, db_type: str = "sqlite", config: Optional[Dict] = None):
+    def __init__(self, db_type: str = "sqlite", config: Optional[Dict] = None,
+                 embedding_serving: Optional[LLMServingABC] = None):
         self.db_type = db_type.lower()
         self.config = config or {}
+        self.embedding_serving = embedding_serving
+        self._embedding_cache: Dict[str, List[float]] = {}
 
         self.logger = get_logger()
         self.max_connections_per_db = 100
@@ -143,6 +153,11 @@ class DatabaseManager:
         """Query execution with timeout control"""
         if not sql or not sql.strip():
             return QueryResult(success=False, error="Query cannot be empty")
+
+        try:
+            sql = self._preprocess_sql_for_execution(sql)
+        except Exception as exc:
+            return QueryResult(success=False, error=f"Preprocessing error: {exc}")
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(self._execute_query_sync, db_id, sql, params)
@@ -206,7 +221,7 @@ class DatabaseManager:
 
     def batch_execute_queries(self, queries: List[Tuple[str, str]]) -> List[QueryResult]:
         results = [QueryResult(success=False, error="Not executed") for _ in queries]
-        
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             semaphore = threading.Semaphore(self.max_connections_per_db)
@@ -224,14 +239,20 @@ class DatabaseManager:
                         )
             
             for idx, (db_id, sql) in enumerate(queries):
-                futures[executor.submit(execute_with_limit, idx, db_id, sql)] = idx
-            
+                try:
+                    processed_sql = self._preprocess_sql_for_execution(sql)
+                except Exception as exc:
+                    results[idx] = QueryResult(success=False, error=f"Preprocessing error: {exc}")
+                    continue
+                futures[executor.submit(execute_with_limit, idx, db_id, processed_sql)] = idx
+
             try:
-                for future in as_completed(futures, timeout=self.query_timeout*len(queries)):
-                    future.result()
+                if futures:
+                    for future in as_completed(futures, timeout=self.query_timeout*len(futures)):
+                        future.result()
             except TimeoutError:
                 self.logger.warning("Batch execution timed out")
-        
+
         return results
 
     def compare_queries(self, db_id: str, sql1: str, sql2: str) -> Dict[str, Any]:
@@ -377,3 +398,29 @@ class DatabaseManager:
         """get the number of secial column"""
         with self.get_connection(db_id) as conn:
             return self.connector.get_number_of_special_column(conn)
+
+    def _get_embedding_vector(self, text: str) -> List[float]:
+        if text in self._embedding_cache:
+            return self._embedding_cache[text]
+
+        if not self.embedding_serving:
+            raise RuntimeError("Embedding serving is not configured.")
+
+        vectors = self.embedding_serving.generate_embedding_from_input([text])
+        if not vectors:
+            raise RuntimeError("Embedding serving returned empty result.")
+
+        embedding = vectors[0]
+        self._embedding_cache[text] = embedding
+        return embedding
+
+    def _preprocess_sql_for_execution(self, sql: str) -> str:
+        if not sql or self.embedding_serving is None or self.db_type != 'sqlite-vec':
+            return sql
+
+        def replacer(match: re.Match) -> str:
+            text = match.group(3)
+            embedding = self._get_embedding_vector(text)
+            return "'" + json.dumps(embedding, ensure_ascii=False) + "'"
+
+        return self._LEMBED_PATTERN.sub(replacer, sql)
