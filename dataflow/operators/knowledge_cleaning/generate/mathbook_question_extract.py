@@ -11,22 +11,32 @@ from dataflow.prompts.kbcleaning import MathbookQuestionExtractPrompt
 import re
 from openai import OpenAI
 import base64
-from typing import List, Literal
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Literal, Union
 from dataflow.core import LLMServingABC
 from dataflow.serving import APIVLMServing_openai
-
-
+from dataflow.core.prompt import DIYPromptABC
+from dataflow.utils.storage import DataFlowStorage
 
 @OPERATOR_REGISTRY.register()
 class MathBookQuestionExtract(OperatorABC):
-    def __init__(self, llm_serving: APIVLMServing_openai, prompt_template = None):
+    def __init__(self, 
+                 llm_serving: APIVLMServing_openai, 
+                 prompt_template: Union[MathbookQuestionExtractPrompt, DIYPromptABC] = MathbookQuestionExtractPrompt(),
+                 mineru_backend: str = "vlm-vllm-engine",
+                 dpi: int = 300,
+                 key_name_of_api_key: str = "DF_API_KEY",
+                 model_name: str = "o4-mini",
+                 max_workers: int = 20
+                ):
         self.logger = get_logger()
         self.llm_serving = llm_serving
-        if prompt_template:
-            self.prompt_template = prompt_template
-        else:
-            self.prompt_template = MathbookQuestionExtractPrompt()
+        self.prompt_template = prompt_template
+        
+        self.mineru_backend = mineru_backend
+        self.dpi = dpi
+        self.key_name_of_api_key = key_name_of_api_key
+        self.model_name = model_name
+        self.max_workers = max_workers # 注意：这个参数在原逻辑中并未被使用，但仍按要求移入init
 
     @staticmethod   
     def get_desc(lang: str = "zh"):
@@ -80,7 +90,6 @@ class MathBookQuestionExtract(OperatorABC):
                         # pipeline|vlm-transformers|vlm-vllm-engine|vlm-http-client
                         mineru_backend: Literal["pipeline", "vlm-transformers", "vlm-vllm-engine", "vlm-http-client"] = "pipeline"
                         ):
-
         try:
             import mineru
         except ImportError:
@@ -227,6 +236,7 @@ Please make sure you have GPU on your machine.
         return full_input_image_list,full_input_label_list
 
     def analyze_and_save(self,result_list,save_folder,img_folder,output_file_name):
+        # ... (analyze_and_save 方法保持不变)
         # make save_folder if not exist
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
@@ -281,34 +291,30 @@ Please make sure you have GPU on your machine.
 
     def run(
         self,
-        pdf_file_path: str,
+        storage: DataFlowStorage,
+        input_pdf_file_path: str,
         output_file_name: str,
         output_folder: str,
-        MinerU_Backend: str = "vlm-sglang-engine",
-        dpi: int = 300,
-        api_url: str = "http://123.129.219.111:3000/v1",
-        key_name_of_api_key: str = "DF_API_KEY",
-        model_name: str = "o4-mini",
-        max_workers: int = 20
     ):
-        api_key = os.environ.get(key_name_of_api_key)
+        # get the configuration parameters from self
+        api_key = os.environ.get(self.key_name_of_api_key)
         if not api_key:
-            raise ValueError(f"API key not found in environment variable {key_name_of_api_key}")
+            raise ValueError(f"API key not found in environment variable {self.key_name_of_api_key}")
         
         # 1. convert pdf to images
-        pdf2images_folder_name = output_folder+"/pdfimages"
-        self.pdf2images(pdf_file_path, pdf2images_folder_name, dpi)
+        pdf2images_folder_name = os.path.join(output_folder, "pdfimages")
+        self.pdf2images(input_pdf_file_path, pdf2images_folder_name, self.dpi)
 
         # 2. use mineru to extract content and pics
-        json_content_file, pic_folder = self.mineru2_runner(pdf_file_path, output_folder, MinerU_Backend)
+        json_content_file, pic_folder = self.mineru2_runner(input_pdf_file_path, output_folder, self.mineru_backend)
 
         # 3. organize_pics
-        output_image_folder = output_folder+"/organized_images"
-        output_json_file = output_folder+"/organized_images/organized_info.json"
-        self.organize_pics(json_content_file, pic_folder,output_json_file, output_image_folder)
+        output_image_folder = os.path.join(output_folder, "organized_images")
+        output_json_file = os.path.join(output_image_folder, "organized_info.json")
+        self.organize_pics(json_content_file, pic_folder, output_json_file, output_image_folder)
 
         # 4. process input
-        full_input_image_list,full_input_label_list = self.process_input(pdf2images_folder_name, output_json_file)
+        full_input_image_list, full_input_label_list = self.process_input(pdf2images_folder_name, output_json_file)
 
         # 5. init server and generate
         system_prompt = self.prompt_template.build_prompt()
@@ -316,7 +322,7 @@ Please make sure you have GPU on your machine.
             list_of_image_paths=full_input_image_list,
             list_of_image_labels=full_input_label_list,
             system_prompt=system_prompt,
-            model=model_name,
+            model=self.model_name,
             timeout=1800
         )
 
