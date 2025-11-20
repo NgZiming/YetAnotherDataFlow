@@ -26,6 +26,8 @@
 https://github.com/user-attachments/assets/19742159-cfe0-42a6-9d3d-152466d2d588
 
 ## 📰 1. News
+🎉 [2025-11-20] **New Data Agents are now available in DataFlow!**
+You can try them out and follow the tutorial on Bilibili for a quick start.
 🎉 [2025-06-28] We’re excited to announce that DataFlow, our Data-centric AI system, is now released! Stay tuned for future updates.
 
 ## 🔍 2. Overview
