@@ -54,9 +54,16 @@ class FairAnswerJudgePrompt:
 # Judge Model Configuration (local strong model as judge)
 JUDGE_MODEL_CONFIG = {
     "model_path": "./Qwen2.5-7B-Instruct",  # 用更强的模型做裁判
-    "tensor_parallel_size": 1,
-    "max_tokens": 512,
-    "gpu_memory_utilization": 0.8,
+    "hf_cache_dir" : "",
+    "hf_local_dir" : "",
+    "vllm_tensor_parallel_size": 2,
+    "vllm_temperature" : 0.9,
+    "vllm_top_p" : 0.9,
+    "vllm_max_tokens": 512,
+    "vllm_repetition_penalty" : 1.0,
+    "vllm_seed" : None,
+    "vllm_max_model_len" : None,
+    "vllm_gpu_memory_utilization" : 0.9
 }
 
 # Target Models Configuration (字典格式 - 必需)
@@ -73,11 +80,14 @@ TARGET_MODELS = [
     {
         "name": "qwen_7b",
         "path": "./Qwen2.5-7B-Instruct",
-
         # 大模型可以用不同的参数
-        "tensor_parallel_size": 2,
-        "max_tokens": 2048,
-        "gpu_memory_utilization": 0.9,
+        "vllm_tensor_parallel_size": 2,
+        "vllm_temperature" : 0.1,
+        "vllm_top_p" :0.9,
+        "vllm_max_tokens": 2048,
+        "vllm_repetition_penalty":1.0,
+        "vllm_seed":None,
+        "vllm_gpu_memory_utilization": 0.9,
 
         # 可以为每个模型自定义提示词
         "answer_prompt": """please answer the following question:"""
@@ -93,12 +103,30 @@ TARGET_MODELS = [
 ]
 
 # Data Configuration
-DATA_CONFIG = {
-    "input_file": "/data1/fyl/workspace/.cache/data/qa.json",  # 输入数据文件
-    "output_dir": "./eval_results",  # 输出目录
-    "question_key": "input",  # 原始数据中的问题字段
-    "reference_answer_key": "output"  # 原始数据中的参考答案字段
-}
+BENCH_CONFIG = [
+    {
+        "name": "math_bench",  # bench名称
+        "input_file": "./.cache/data/qa.json",  # 数据文件
+        "question_key": "input",  # 问题字段名
+        "reference_answer_key": "output",  # 答案字段名
+        "output_dir": "./eval_results/math_bench",  # 输出目录
+    },
+    # {
+    #     "name": "reasoning_bench",
+    #     "input_file": "./.cache/data/reasoning_qa.jsonl",
+    #     "question_key": "input",
+    #     "reference_answer_key": "output",
+    #     "output_dir": "./eval_results/reasoning_bench",
+    # },
+    # {
+    #     "name": "code_bench",
+    #     "input_file": "./.cache/data/code_qa.json",
+    #     "question_key": "problem",
+    #     "reference_answer_key": "solution",
+    #     "output_dir": "./eval_results/code_bench",
+    # },
+    
+]
 
 # Evaluator Run Configuration (parameters passed to BenchDatasetEvaluator.run)
 EVALUATOR_RUN_CONFIG = {
@@ -136,9 +164,16 @@ def create_judge_serving():
     # Enhanced VLLM configuration
     vllm_config = {
         "hf_model_name_or_path": model_path,
-        "vllm_tensor_parallel_size": JUDGE_MODEL_CONFIG.get("tensor_parallel_size", 1),
+        "hf_cache_dir" : JUDGE_MODEL_CONFIG.get("hf_cache_dir", None),
+        "hf_local_dir" : JUDGE_MODEL_CONFIG.get("hf_local_dir", None),
+        "vllm_tensor_parallel_size": JUDGE_MODEL_CONFIG.get("vllm_tensor_parallel_size", 1),
+        "vllm_temperature" : JUDGE_MODEL_CONFIG.get("vllm_temperature",0.9),
+        "vllm_top_p" : JUDGE_MODEL_CONFIG.get("vllm_top_p",0.9),
         "vllm_max_tokens": JUDGE_MODEL_CONFIG.get("max_tokens", 512),
-        "vllm_gpu_memory_utilization": JUDGE_MODEL_CONFIG.get("gpu_memory_utilization", 0.8)
+        "vllm_repetition_penalty" : JUDGE_MODEL_CONFIG.get("vllm_repetition_penalty", 1.0),
+        "vllm_seed" : JUDGE_MODEL_CONFIG.get("vllm_seed",None),
+        "vllm_max_model_len" : JUDGE_MODEL_CONFIG.get("vllm_max_model_len",None),
+        "vllm_gpu_memory_utilization": JUDGE_MODEL_CONFIG.get("gpu_memory_utilization", 0.9)
     }
 
     # Add optional VLLM parameters if they exist
@@ -165,7 +200,7 @@ def create_storage(data_file, cache_path):
     return FileStorage(
         first_entry_file_name=data_file,
         cache_path=cache_path,
-        file_name_prefix="eval_result",
+        file_name_prefix="eval",
         cache_type="json"
     )
 
