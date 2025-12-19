@@ -18,14 +18,10 @@
 ![PyPI - Downloads](https://img.shields.io/pypi/dw/open-dataflow?style=flat&logo=python)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/open-dataflow?style=flat&logo=python)
 [![Downloads](https://static.pepy.tech/badge/open-dataflow)](https://pepy.tech/project/open-dataflow)
-[![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://github.com/user-attachments/assets/3c2e5d4d-d1ea-4d8c-9146-ff14e657e857)
-
-
 
 [![Documents](https://img.shields.io/badge/官方文档-单击此处-brightgreen?logo=read-the-docs)](https://OpenDCAI.github.io/DataFlow-Doc/)
 [![Arxiv](https://img.shields.io/badge/技术报告-2512.16676-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2512.16676)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenDCAI/DataFlow)
-
 
 [![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://github.com/user-attachments/assets/3c2e5d4d-d1ea-4d8c-9146-ff14e657e857)
 <!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
