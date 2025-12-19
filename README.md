@@ -16,7 +16,9 @@
 <!--[![](https://img.shields.io/github/issues-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues) -->
 🎉 If you like our project, please give us a star ⭐ on GitHub for the latest update.
 
-**Beginner-friendly learning resources (continuously updated)**: 🎬 [DataFlow Video Tutorials](https://space.bilibili.com/3546929239689711?spm_id_from=333.337.0.0); 📚 [DataFlow Written Tutorials](https://wcny4qa9krto.feishu.cn/wiki/I9tbw2qnBi0lEakmmAGclTysnFd)
+**Beginner-friendly learning resources (continuously updated)**: 
+ [[🎬 Video Tutorials]](https://space.bilibili.com/3546929239689711?spm_id_from=333.337.0.0) 
+ [[📚 Written Tutorials]](https://wcny4qa9krto.feishu.cn/wiki/I9tbw2qnBi0lEakmmAGclTysnFd)
 
 
 [简体中文](./README-zh.md) | English
@@ -29,7 +31,7 @@
   We welcome you to read and cite our work if you find it helpful.  
   👉 Read the full report on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
 - **[2025-11-20] Introducing New Data Agents for DataFlow!** 🤖
-You can try them out now and follow the tutorial on Bilibili for a quick start.
+You can try them out now and follow the tutorial on [Bilibili](https://space.bilibili.com/3546929239689711/lists/6761342?type=season) for a quick start.
 
 - [2025-06-28] 🎉 We’re excited to announce that DataFlow, our Data-centric AI system, is now released! Stay tuned for future updates.
 
