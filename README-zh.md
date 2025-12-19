@@ -9,6 +9,7 @@
 [![](https://img.shields.io/github/issues-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
 [![](https://img.shields.io/github/contributors/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/graphs/contributors)
 [![](https://img.shields.io/github/repo-size/OpenDCAI/DataFlow?color=green)](https://github.com/OpenDCAI/DataFlow)
+[![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://private-user-images.githubusercontent.com/62173481/502178131-c04cc04c-f1f4-49b0-9758-56d9d8d37c4a.jpg?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NjYxMjc1MDMsIm5iZiI6MTc2NjEyNzIwMywicGF0aCI6Ii82MjE3MzQ4MS81MDIxNzgxMzEtYzA0Y2MwNGMtZjFmNC00OWIwLTk3NTgtNTZkOWQ4ZDM3YzRhLmpwZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTEyMTklMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUxMjE5VDA2NTMyM1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTVjMzJkMTAyYzAwZDA1MTBiMzc0Zjg3ZmJlYzZjY2QxMDQ2ZDUxY2MxMThiNTYxYjRlMzk3MTUyZDQwN2RlNTUmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.R2tu1Vli-v2FBQ2EhxYVrErqcmm3Rv1wwbC7aLOv31o)
 
 <!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
 <!-- [![](https://img.shields.io/github/last-commit/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/commits/main/) -->
@@ -174,45 +175,119 @@ dataflow -v
 
 详细**使用说明**和**入门指南**，请参考我们的 [项目文档](https://OpenDCAI.github.io/DataFlow-Doc/)。
 
-## 🧪 6. 实验结果
-
-如需详细的实验设置，请参考[DataFlow技术报告](https://arxiv.org/abs/2512.16676)。
-
-### 📝 6.1 文本流程（Text Pipeline）
-
-#### 6.1.1 预训练数据过滤流程
-
-我们将 `预训练数据处理流程` 应用于从 RedPajama 数据集中随机采样的数据，最终保留率为 **13.65%**。使用 `QuratingScorer` 进行质量评估，结果如下图所示：在**写作风格、专业性要求、事实准确性和教育价值**四个维度上，过滤后的数据显著优于原始数据，验证了 DataFlow 预训练数据处理流程的有效性。
-
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/bc756c64-6640-4f46-b8ed-a4cd9be0a623" width="60%">
-</div>
+## 🧪 6. Experimental Results
+For Detailed Experiments setting, please visit our [DataFlow Technical Report](https://arxiv.org/abs/2512.16676).
 
 
+### 6.1 Text Pipeline
 
-#### 6.1.2 微调（SFT）数据过滤流程
+#### 6.1.1 预训练数据过滤
+我们从 SlimPajama-627B 语料库中抽取了一个 100B token 的子集，并对其应用了多种 DataFlow 文本预训练过滤器。随后，我们基于 Megatron-DeepSpeed 训练框架，从零开始训练了一个 Qwen2.5-0.5B 模型，总训练规模为 30B tokens。实验结果如下所示。
 
-我们从 `alpaca` 数据集中筛选了 3000 条高质量数据，与随机选取的 3000 条 `alpaca` 数据进行对比，并在 Qwen2.5-7B 模型上进行 SFT 训练。对比结果如下：
+| Methods            | ARC-C | ARC-E | MMLU | HellaSwag | WinoGrande | Gaokao-MathQA | Avg   |
+|--------------------|:-----:|:-----:|:----:|:---------:|:----------:|:-------------:|:-----:|
+| **Random-30B**     | 25.26 | 43.94 | 27.03 | 37.02 | 50.99 | 27.35 | 35.26 |
+| **Qurating-30B**   | 25.00 | 43.14 | 27.50 | 37.03 | 50.67 | 26.78 | 35.02 |
+| **FineWeb-Edu-30B**| 26.45 | 45.41 | 27.41 | 38.06 | 50.43 | 25.64 | 35.57 |
+| **DataFlow-30B**   | 25.51 | 45.58 | 27.42 | 37.58 | 50.67 | 27.35 | **35.69** |
 
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/38d477d4-523d-4843-83f7-b7f518a18c1d" width="60%">
-</div>
+#### 6.1.2 小规模 SFT 数据过滤与合成
+为研究 小规模 SFT 数据的质量影响，我们使用 LLaMA-Factory 对 Qwen2.5-7B Base 模型进行了微调，所用数据集包括 WizardLM 和 Alpaca。
+对于每个数据集，我们比较了 随机采样的 5K 样本 与 经过 DataFlow SFT 流水线过滤的 5K 样本 在下游性能上的差异。此外，我们还基于 DataFlow 的 Condor Generator 与 Condor Refiner 流水线 合成了一个规模为 15K 的数据集（记为 DataFlow-SFT-15K），并进一步对其应用了 DataFlow 的 SFT 过滤流程（不包含 Instagram 过滤器）。评测覆盖了 数学、代码与知识 三大类的综合基准。
 
-### 🧠 6.2 推理流程（Reasoning Pipeline）
+### Math Benchmarks
+| Methods | math | gsm8k | aime24 | minerva | olympiad | Avg |
+|--------|:----:|:-----:|:------:|:-------:|:--------:|:---:|
+| **Alpaca (random)** | 54.9 | 77.2 | 13.3 | 14.0 | 27.0 | 37.3 |
+| **Alpaca (filtered)** | 60.3 | 80.0 | 13.3 | 14.7 | 30.7 | 39.8 |
+| **WizardLM (random)** | 61.1 | 84.2 | 6.7 | 18.0 | 29.3 | 39.9 |
+| **WizardLM (filtered)** | 69.7 | 88.8 | 10.0 | 19.9 | 35.4 | 44.8 |
+| **DataFlow-SFT-15K (random)** | 72.6 | 89.6 | 13.3 | 37.9 | 32.9 | **49.3** |
+| **DataFlow-SFT-15K (filtered)** | 73.3 | 90.2 | 13.3 | 36.0 | 35.9 | **49.7** |
 
-我们在 Qwen2.5-32B-Instruct 模型上，使用 Reasoning Pipeline 合成的 1000 条和 5000 条数据进行了微调训练（SFT），评估其对模型推理能力的提升，结果如下图所示：
+---
 
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/d3af9728-0372-4c2c-9cd3-73f1e337d4c0" width="60%">
-</div>
+### Code Benchmarks
+| Methods | HumanEval | MBPP | Avg |
+|--------|:---------:|:----:|:---:|
+| **Alpaca (random)** | 71.3 | 75.9 | 73.6 |
+| **Alpaca (filtered)** | 73.8 | 75.7 | 74.8 |
+| **WizardLM (random)** | 75.6 | 82.0 | **78.8** |
+| **WizardLM (filtered)** | 77.4 | 80.4 | **78.9** |
+| **DataFlow-SFT-15K (random)** | 79.9 | 75.9 | 77.9 |
+| **DataFlow-SFT-15K (filtered)** | 82.9 | 74.9 | **78.9** |
 
-### 🗃️ 6.3 Text2SQL 流程
+---
 
-我们使用 DataFlow-Text2SQL 流程构建数据，并分别通过监督微调（SFT）与强化学习（RL）对 Qwen2.5-Coder-7B-Instruct 模型进行了训练。实验结果如下：
+### Knowledge Benchmarks
+| Methods | MMLU | C-EVAL | Avg |
+|--------|:----:|:------:|:---:|
+| **Alpaca (random)** | 71.8 | 80.0 | 75.9 |
+| **Alpaca (filtered)** | 71.8 | 80.0 | 75.9 |
+| **WizardLM (random)** | 71.8 | 79.2 | 75.5 |
+| **WizardLM (filtered)** | 71.9 | 79.6 | 75.8 |
+| **DataFlow-SFT-15K (random)** | 72.1 | 80.0 | **76.1** |
+| **DataFlow-SFT-15K (filtered)** | 72.2 | 80.4 | **76.3** |
 
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/7809f57a-33c5-4792-b91b-10e4f39bafc1" width="60%">
-</div>
+#### 6.1.3 对话数据合成
+我们使用 DataFlow 的对话生成流水线 合成了 DataFlow-Chat-15K 数据集，并基于该数据对 Qwen2.5-7B-Base 模型进行了微调。对比方法包括 ShareGPT-15K、UltraChat-15K 及其 完整（未截断）版本。评测涵盖了 对话领域基准（TopDial、Light）以及 通用能力基准（MMLU、AlpacaEval、Arena-Hard）。
+
+### Conversation Benchmarks
+| Model | TopDial | Light | Avg |
+|------|:-------:|:-----:|:---:|
+| **Qwen2.5-7B** | 7.71 | 7.79 | 7.75 |
+| **+ ShareGPT-15K** | 7.75 | 6.72 | 7.24 |
+| **+ UltraChat-15K** | 7.72 | 6.83 | 7.28 |
+| **+ DataFlow-Chat-15K** | **7.98** | **8.10** | **8.04** |
+
+---
+
+### General Benchmarks
+| Model | MMLU | AlpacaEval | Arena-Hard | Avg |
+|------|:----:|:----------:|:----------:|:---:|
+| **Qwen2.5-7B** | 71.45 | 7.05 | 0.60 | 26.36 |
+| **+ ShareGPT-15K** | 73.09 | 3.70 | 1.30 | 26.03 |
+| **+ UltraChat-15K** | 72.97 | 3.97 | 0.80 | 25.91 |
+| **+ DataFlow-Chat-15K** | 73.41 | **10.11** | 1.10 | **28.21** |
+
+### 6.2 推理数据合成流水线
+我们采用 NuminaMath 数据集作为高质量的种子数据集，并比较了三种不同的训练数据来源：（1）从 Open-R1 中随机采样的 10K 子集，（2）从 Synthetic-1 中随机采样的 10K 子集，以及（3）使用 DataFlow 构建的、规模为 10K 的合成数据集 DataFlow-Reasoning-10K。
+
+| Setting | Model | gsm8k | math | amc23 | olympiad | gaokao24_mix | minerva | AIME24@32 | AIME25@32 | Avg |
+|--------|-------|:-----:|:----:|:-----:|:--------:|:-------------:|:--------:|:---------:|:---------:|:----:|
+| Baseline | **Qwen2.5-32B-Instruct** | 95.8 | 73.5 | 70.0 | 38.5 | 42.9 | 26.5 | 16.8 | 11.6 | 46.95 |
+| 1 Epoch | **+ SYNTHETIC-1-10k** | 92.9 | 71.8 | 52.5 | 38.4 | 23.1 | 24.3 | 35.6 | 34.0 | 46.6 |
+| 1 Epoch | **+ Open-R1-10k** | 91.5 | 72.3 | 65.0 | 38.4 | 20.9 | 24.6 | 43.0 | 33.5 | 48.7 |
+| 1 Epoch | **+ DataFlow-Reasoning-10K** | 93.9 | 72.3 | 72.5 | 38.7 | 38.5 | 26.5 | 35.9 | 34.5 | **51.6** |
+| 2 Epochs | **+ SYNTHETIC-1-10k** | 94.5 | 78.4 | 75.0 | 45.0 | 24.2 | 28.3 | 48.4 | 37.9 | 54.0 |
+| 2 Epochs | **+ Open-R1-10k** | 93.9 | 77.2 | 80.0 | 44.1 | 20.9 | 25.4 | 51.0 | 40.7 | 54.2 |
+| 2 Epochs | **+ DataFlow-Reasoning-10K** | 94.4 | 76.6 | 75.0 | 45.2 | 42.9 | 25.7 | 45.4 | 40.0 | **55.7** |
+
+### 6.3 代码数据构建流水线
+我们从 Ling-Coder-SFT 语料库中随机采样 20K 条实例，并将其输入 DataFlow Code Pipeline 进行处理，从而得到三个不同规模的高质量代码指令数据集：DataFlow-Code-1K、DataFlow-Code-5K 和 DataFlow-Code-10K。这些数据集旨在为代码生成任务提供经过流水线精炼的高质量监督信号。
+我们将所合成的数据集与 Code-Alpaca-1K 以及 Self-OSS-Instruct-SC2-Exec-Filter-1K 进行对比评测。
+
+#### Trained on Qwen2.5-7B-Instruct
+| Training Data | BigCodeBench | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) | HumanEval+ | Avg |
+|--------------|:------------:|:------------------:|:----------------:|:-----------------:|:----------:|:---:|
+| **Qwen2.5-7B-Instruct** | 35.3 | 23.4 | 44.8 | 43.9 | 72.6 | 44.0 |
+| **+ Code Alpaca-1K** | 33.3 | 18.7 | 45.6 | 46.4 | 66.5 | 42.1 |
+| **+ Self-OSS** | 31.9 | 21.4 | 46.9 | 45.9 | 70.1 | 43.2 |
+| **+ DataFlow-Code-1K** | 35.5 | 25.7 | 48.0 | 45.1 | 72.6 | 45.4 |
+| **+ DataFlow-Code-5K** | 36.2 | **26.4** | 48.6 | 45.0 | 73.2 | 45.9 |
+| **+ DataFlow-Code-10K** | **36.8** | 26.0 | **48.8** | **45.4** | **73.8** | **46.2** |
+
+---
+
+#### Trained on Qwen2.5-14B-Instruct
+| Training Data | BigCodeBench | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) | HumanEval+ | Avg |
+|--------------|:------------:|:------------------:|:----------------:|:-----------------:|:----------:|:---:|
+| **Qwen2.5-14B-Instruct** | 37.5 | 33.4 | 48.0 | 48.5 | 74.4 | 48.4 |
+| **+ Code Alpaca-1K** | 37.0 | 28.2 | 50.2 | 49.6 | 71.3 | 47.3 |
+| **+ Self-OSS** | 36.9 | 22.3 | 52.6 | 50.1 | 68.3 | 46.0 |
+| **+ DataFlow-Code-1K** | 41.4 | **33.7** | 51.0 | 50.9 | **77.3** | 50.9 |
+| **+ DataFlow-Code-5K** | 41.1 | 33.2 | 52.5 | 50.6 | 76.2 | 50.7 |
+| **+ DataFlow-Code-10K** | **41.9** | 33.2 | **52.9** | **51.0** | 76.2 | **51.0** |
 
 
 ## 📄 7. 发表论文

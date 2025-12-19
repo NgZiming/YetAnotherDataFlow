@@ -10,6 +10,7 @@
 [![](https://img.shields.io/github/contributors/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/graphs/contributors)
 [![](https://img.shields.io/github/repo-size/OpenDCAI/DataFlow?color=green)](https://github.com/OpenDCAI/DataFlow)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenDCAI/DataFlow)
+[![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://private-user-images.githubusercontent.com/62173481/502178131-c04cc04c-f1f4-49b0-9758-56d9d8d37c4a.jpg?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NjYxMjc1MDMsIm5iZiI6MTc2NjEyNzIwMywicGF0aCI6Ii82MjE3MzQ4MS81MDIxNzgxMzEtYzA0Y2MwNGMtZjFmNC00OWIwLTk3NTgtNTZkOWQ4ZDM3YzRhLmpwZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTEyMTklMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUxMjE5VDA2NTMyM1omWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTVjMzJkMTAyYzAwZDA1MTBiMzc0Zjg3ZmJlYzZjY2QxMDQ2ZDUxY2MxMThiNTYxYjRlMzk3MTUyZDQwN2RlNTUmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.R2tu1Vli-v2FBQ2EhxYVrErqcmm3Rv1wwbC7aLOv31o)
 
 <!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
 <!-- [![](https://img.shields.io/github/last-commit/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/commits/main/) -->
