@@ -4,7 +4,8 @@
   <img src="https://github.com/user-attachments/assets/3fe636ad-3026-4faf-aa44-c84b8f97a05d">
 
 [![Documents](https://img.shields.io/badge/官方文档-单击此处-brightgreen?logo=read-the-docs)](https://OpenDCAI.github.io/DataFlow-Doc/)
-[![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE)
+<!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
+[![Arxiv](https://img.shields.io/badge/技术报告-2512.16676-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2512.16676)
 [![](https://img.shields.io/github/stars/OpenDCAI/DataFlow?style=social)](https://github.com/OpenDCAI/DataFlow)
 [![](https://img.shields.io/github/issues-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
 [![](https://img.shields.io/github/contributors/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/graphs/contributors)
@@ -22,6 +23,10 @@
 </div>
 
 ## 📰 1. 最新动态
+- **[2025-12-19] 🎉 我们的 DataFlow 技术报告正式发布！**  
+  如果我们的工作对你有所帮助，欢迎查阅并引用。  
+  👉 在 arXiv 阅读完整报告：[https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
+
 - **[2025-11-20] DataFlow 全新上线 Data Agents！** 🤖  欢迎体验，并可查看 Bilibili 上的教程快速上手。
 
 - [2025-06-28] 🎉 我们全新发布的以数据为中心的系统**DataFlow**已开源 —— 敬请关注后续更新！
@@ -169,7 +174,7 @@ dataflow -v
 
 ## 🧪 6. 实验结果
 
-如需详细的实验设置，请参考文档或论文说明。
+如需详细的实验设置，请参考[DataFlow技术报告](https://arxiv.org/abs/2512.16676)。
 
 ### 📝 6.1 文本流程（Text Pipeline）
 
@@ -254,7 +259,8 @@ dataflow -v
 
 ## 💐 9. 致谢
 我们衷心感谢 [MinerU](https://github.com/opendatalab/MinerU) 的卓越工作，其强大的 PDF/文档文本提取功能为数据加载提供了关键支持。
-
+同时，我们感谢 [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) 提供的高效、易用的大模型微调框架，为我们在模型训练与实验流程上的快速迭代带来了极大便利。  
+感谢所有开源社区的贡献者，你们的工作共同推动了 DataFlow 的发展。
 ## 🤝 10. 社区与支持
 
 欢迎加入 DataFlow 开源社区，提出问题、分享想法、与其他开发者一起共建项目！
@@ -275,12 +281,14 @@ dataflow -v
 如果 DataFlow 对你的研究或项目有帮助，欢迎引用支持我们：
 
 ```bibtex
-@misc{dataflow2025,
-  author       = {DataFlow Develop Team},
-  title        = {DataFlow: A Unified Framework for Data-Centric AI},
-  year         = {2025},
-  howpublished = {\url{https://github.com/OpenDCAI/DataFlow}},
-  note         = {Accessed: 2025-07-08}
+@misc{liang2025dataflowllmdrivenframeworkunified,
+      title={DataFlow: An LLM-Driven Framework for Unified Data Preparation and Workflow Automation in the Era of Data-Centric AI}, 
+      author={Hao Liang and Xiaochen Ma and Zhou Liu and Zhen Hao Wong and Zhengyang Zhao and Zimo Meng and Runming He and Chengyu Shen and Qifeng Cai and Zhaoyang Han and Meiyi Qiang and Yalin Feng and Tianyi Bai and Zewei Pan and Ziyi Guo and Yizhen Jiang and Jingwen Deng and Qijie You and Peichao Lai and Tianyu Guo and Chi Hsu Tsai and Hengyi Feng and Rui Hu and Wenkai Yu and Junbo Niu and Bohan Zeng and Ruichuan An and Lu Ma and Jihao Huang and Yaowei Zheng and Conghui He and Linpeng Tang and Bin Cui and Weinan E and Wentao Zhang},
+      year={2025},
+      eprint={2512.16676},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2512.16676}, 
 }
 ```
 

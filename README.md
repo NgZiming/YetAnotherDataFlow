@@ -5,7 +5,8 @@
 
 
 [![Documents](https://img.shields.io/badge/Documents-Click_here-brightgreen?logo=read-the-docs)](https://OpenDCAI.github.io/DataFlow-Doc/)
-[![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE)
+<!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
+[![Arxiv](https://img.shields.io/badge/Paper-2512.16676-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2512.16676)
 [![](https://img.shields.io/github/stars/OpenDCAI/DataFlow?style=social)](https://github.com/OpenDCAI/DataFlow)
 [![](https://img.shields.io/github/contributors/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/graphs/contributors)
 [![](https://img.shields.io/github/repo-size/OpenDCAI/DataFlow?color=green)](https://github.com/OpenDCAI/DataFlow)
@@ -24,6 +25,9 @@
 </div>
 
 ## 📰 1. News
+- **[2025-12-19] 🎉 Our DataFlow technical report is now available!**  
+  We welcome you to read and cite our work if you find it helpful.  
+  👉 Read the full report on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
 - **[2025-11-20] Introducing New Data Agents for DataFlow!** 🤖
 You can try them out now and follow the tutorial on Bilibili for a quick start.
 
@@ -178,7 +182,7 @@ dataflow -v
 For detailed **usage instructions** and **getting started guide**, please visit our [Documentation](https://OpenDCAI.github.io/DataFlow-Doc/).
 
 ## 🧪 6. Experimental Results
-For Detailed Experiments setting, please visit our documentation.
+For Detailed Experiments setting, please visit our [DataFlow Technical Report](https://arxiv.org/abs/2512.16676).
 
 
 ### 📝 6.1 Text Pipeline
@@ -257,9 +261,11 @@ We are honored to have received **first-place awards** in two major internationa
 
 </div>
 
-
 ## 💐 9. Acknowledgements
-We sincerely appreciate [MinerU](https://github.com/opendatalab/MinerU)'s outstanding contribution, particularly its robust text extraction capabilities from PDFs and documents, which greatly facilitate data loading.
+We sincerely thank [MinerU](https://github.com/opendatalab/MinerU) for their outstanding work, whose powerful PDF/document text extraction capabilities provided essential support for our data loading process.  
+We also thank [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) for offering an efficient and user-friendly framework for large model fine-tuning, which greatly facilitated rapid iteration in our training and experimentation workflows.  
+Our gratitude extends to all contributors in the open-source community—their efforts collectively drive the development of DataFlow.
+
 
 ## 🤝 10. Community & Support
 Join the DataFlow open-source community to ask questions, share ideas, and collaborate with other developers!
@@ -278,12 +284,14 @@ Join the DataFlow open-source community to ask questions, share ideas, and colla
 ## 📜 11. Citation
 If you use DataFlow in your research, feel free to give us a cite.
 ```bibtex
-@misc{dataflow2025,
-  author       = {DataFlow Develop Team},
-  title        = {DataFlow: A Unified Framework for Data-Centric AI},
-  year         = {2025},
-  howpublished = {\url{https://github.com/OpenDCAI/DataFlow}},
-  note         = {Accessed: 2025-07-08}
+@misc{liang2025dataflowllmdrivenframeworkunified,
+      title={DataFlow: An LLM-Driven Framework for Unified Data Preparation and Workflow Automation in the Era of Data-Centric AI}, 
+      author={Hao Liang and Xiaochen Ma and Zhou Liu and Zhen Hao Wong and Zhengyang Zhao and Zimo Meng and Runming He and Chengyu Shen and Qifeng Cai and Zhaoyang Han and Meiyi Qiang and Yalin Feng and Tianyi Bai and Zewei Pan and Ziyi Guo and Yizhen Jiang and Jingwen Deng and Qijie You and Peichao Lai and Tianyu Guo and Chi Hsu Tsai and Hengyi Feng and Rui Hu and Wenkai Yu and Junbo Niu and Bohan Zeng and Ruichuan An and Lu Ma and Jihao Huang and Yaowei Zheng and Conghui He and Linpeng Tang and Bin Cui and Weinan E and Wentao Zhang},
+      year={2025},
+      eprint={2512.16676},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2512.16676}, 
 }
 ```
 
