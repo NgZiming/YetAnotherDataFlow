@@ -371,14 +371,11 @@ For Detailed Experiments setting, please visit our [DataFlow Technical Report](h
 如果 DataFlow 对你的研究或项目有帮助，欢迎引用支持我们：
 
 ```bibtex
-@misc{liang2025dataflowllmdrivenframeworkunified,
-      title={DataFlow: An LLM-Driven Framework for Unified Data Preparation and Workflow Automation in the Era of Data-Centric AI}, 
-      author={Hao Liang and Xiaochen Ma and Zhou Liu and Zhen Hao Wong and Zhengyang Zhao and Zimo Meng and Runming He and Chengyu Shen and Qifeng Cai and Zhaoyang Han and Meiyi Qiang and Yalin Feng and Tianyi Bai and Zewei Pan and Ziyi Guo and Yizhen Jiang and Jingwen Deng and Qijie You and Peichao Lai and Tianyu Guo and Chi Hsu Tsai and Hengyi Feng and Rui Hu and Wenkai Yu and Junbo Niu and Bohan Zeng and Ruichuan An and Lu Ma and Jihao Huang and Yaowei Zheng and Conghui He and Linpeng Tang and Bin Cui and Weinan E and Wentao Zhang},
-      year={2025},
-      eprint={2512.16676},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2512.16676}, 
+@article{liang2025dataflow,
+  title={DataFlow: An LLM-Driven Framework for Unified Data Preparation and Workflow Automation in the Era of Data-Centric AI},
+  author={Liang, Hao and Ma, Xiaochen and Liu, Zhou and Wong, Zhen Hao and Zhao, Zhengyang and Meng, Zimo and He, Runming and Shen, Chengyu and Cai, Qifeng and Han, Zhaoyang and others},
+  journal={arXiv preprint arXiv:2512.16676},
+  year={2025}
 }
 ```
 
