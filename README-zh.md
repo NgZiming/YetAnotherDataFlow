@@ -6,9 +6,9 @@
 
 [![](https://img.shields.io/github/stars/OpenDCAI/DataFlow?style=social)](https://github.com/OpenDCAI/DataFlow)
 [![](https://img.shields.io/github/issues-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
-[![issue resolution](https://img.shields.io/github/issues-closed-raw/opendcai/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
-[![](https://img.shields.io/github/issues-pr-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
-[![issue resolution](https://img.shields.io/github/issues-pr-closed-raw/opendcai/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues)
+[![issue resolution](https://img.shields.io/github/issues-closed-raw/opendcai/DataFlow)](https://github.com/OpenDCAI/DataFlow/issues?q=is%3Aissue%20state%3Aclosed)
+[![](https://img.shields.io/github/issues-pr-raw/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/pulls)
+[![issue resolution](https://img.shields.io/github/issues-pr-closed-raw/opendcai/DataFlow)](https://github.com/OpenDCAI/DataFlow/pulls?q=is%3Apr+is%3Aclosed)
 [![](https://img.shields.io/github/contributors/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/graphs/contributors)
 [![](https://img.shields.io/github/repo-size/OpenDCAI/DataFlow?color=green)](https://github.com/OpenDCAI/DataFlow)
 
