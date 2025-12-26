@@ -14,8 +14,6 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/open-dataflow)](https://pypi.org/project/open-dataflow/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/open-dataflow)](https://pypi.org/project/open-dataflow/)
-![PyPI - Downloads](https://img.shields.io/pypi/dd/open-dataflow?style=flat&logo=python)
-![PyPI - Downloads](https://img.shields.io/pypi/dw/open-dataflow?style=flat&logo=python)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/open-dataflow?style=flat&logo=python)
 [![Downloads](https://static.pepy.tech/badge/open-dataflow)](https://pepy.tech/project/open-dataflow)
 
@@ -26,6 +24,9 @@
 [![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://github.com/user-attachments/assets/3c2e5d4d-d1ea-4d8c-9146-ff14e657e857)
 
 <a href="https://trendshift.io/repositories/16045" target="_blank"><img src="https://trendshift.io/api/badge/repositories/16045" alt="OpenDCAI%2FDataFlow | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
+<!-- ![PyPI - Downloads](https://img.shields.io/pypi/dd/open-dataflow?style=flat&logo=python) -->
+<!-- ![PyPI - Downloads](https://img.shields.io/pypi/dw/open-dataflow?style=flat&logo=python) -->
 <!-- [![](https://img.shields.io/github/license/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/blob/main/LICENSE) -->
 <!-- [![](https://img.shields.io/github/last-commit/OpenDCAI/DataFlow)](https://github.com/OpenDCAI/DataFlow/commits/main/) -->
 
