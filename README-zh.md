@@ -365,7 +365,7 @@ For Detailed Experiments setting, please visit our [DataFlow Technical Report](h
 •	💬 欢迎扫码加入下方社群（微信群、小红书、Twitter），与我们和其他开发者互动交流~
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/3c2e5d4d-d1ea-4d8c-9146-ff14e657e857" width="60%">
+  <img src="https://github.com/user-attachments/assets/090b8a20-6193-41b3-88a1-fe3f4791cb95" width="60%">
 </div>
 
 
