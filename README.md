@@ -18,6 +18,7 @@
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/open-dataflow?style=flat&logo=python)
 [![Downloads](https://static.pepy.tech/badge/open-dataflow)](https://pepy.tech/project/open-dataflow)
 
+[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1haosl2QS4N4HM7u7HvSsz_MnLabxexXl?usp=sharing)
 [![Documents](https://img.shields.io/badge/Documentation-Click_here-brightgreen?logo=read-the-docs)](https://OpenDCAI.github.io/DataFlow-Doc/)
 [![Arxiv](https://img.shields.io/badge/Technical_Report-2512.16676-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2512.16676)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenDCAI/DataFlow)
@@ -47,7 +48,7 @@
 
 ## 📰 1. News
 
-- **[2025-12-19] 🎉 Our DataFlow technical report is now available!**We welcome you to read and cite our work if you find it helpful.👉 Read the full report on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
+- **[2025-12-19] 🎉 Our DataFlow technical report is now available!** We welcome you to read and cite our work if you find it helpful.👉 Read the full report on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
 - **[2025-11-20] Introducing New Data Agents for DataFlow!** 🤖
   You can try them out now and follow the tutorial on [Bilibili](https://space.bilibili.com/3546929239689711/lists/6761342?type=season) for a quick start.
 - [2025-06-28] 🎉 We’re excited to announce that DataFlow, our Data-centric AI system, is now released! Stay tuned for future updates.
