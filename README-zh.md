@@ -17,6 +17,7 @@
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/open-dataflow?style=flat&logo=python)
 [![Downloads](https://static.pepy.tech/badge/open-dataflow)](https://pepy.tech/project/open-dataflow)
 
+[![Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1haosl2QS4N4HM7u7HvSsz_MnLabxexXl?usp=sharing)
 [![Documents](https://img.shields.io/badge/官方文档-单击此处-brightgreen?logo=read-the-docs)](https://OpenDCAI.github.io/DataFlow-Doc/)
 [![Arxiv](https://img.shields.io/badge/技术报告-2512.16676-b31b1b.svg?logo=arxiv)](https://arxiv.org/abs/2512.16676)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenDCAI/DataFlow)
