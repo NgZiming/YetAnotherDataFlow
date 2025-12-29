@@ -188,7 +188,13 @@ dataflow -v
 
 > **注意**：Docker 镜像包含 CUDA 12.4.1 支持，并预装了 vLLM 用于 GPU 加速。请确保您已安装 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 以使用 GPU 功能。
 
-### 📖 5.2 参考DataFlow项目文档
+### 🚀 5.2 用Google Colab快速开始
+你可以直接在 Google Colab 上启动你的第一个 DataFlow 翻译项目，无需任何本地环境配置。
+按照 Notebook 中提供的指导流程，你可以从基础的翻译示例逐步扩展到更复杂的 DataFlow 数据处理流水线。
+
+👉 [使用 Google Colab 启动 DataFlow](https://colab.research.google.com/drive/1haosl2QS4N4HM7u7HvSsz_MnLabxexXl?usp=sharing)
+
+### 📖 5.3 参考DataFlow项目文档
 
 详细**使用说明**和**入门指南**，请参考我们的 [项目文档](https://OpenDCAI.github.io/DataFlow-Doc/)。
 
