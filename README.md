@@ -206,7 +206,13 @@ dataflow -v
 
 > **Note**: The Docker image includes CUDA 12.4.1 support and comes with vLLM pre-installed for GPU acceleration. Make sure you have [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed to use GPU features.
 
-### 📖 5.2 Reference Project Documentation
+### 🚀 5.2 Quick Start with Google Colab
+You can start your first DataFlow translation project directly on Google Colab.
+By following the provided guidelines, you can seamlessly scale from a simple translation example to more complex DataFlow pipelines.
+
+👉 [Start DataFlow with Google Colab](https://colab.research.google.com/drive/1haosl2QS4N4HM7u7HvSsz_MnLabxexXl?usp=sharing)
+
+### 📖 5.3 Reference Project Documentation
 
 For detailed **usage instructions** and **getting started guide**, please visit our [Documentation](https://OpenDCAI.github.io/DataFlow-Doc/).
 
