@@ -355,12 +355,12 @@ Our team has published the following papers that form core components of the Dat
 | [Efficient Pretraining Data Selection for Language Models via Multi-Actor Collaboration](https://arxiv.org/pdf/2410.08102) | Multi-actor collaborative data selection mechanism for enhanced data filtering and processing | ACL   | 2025 |
 
 **Contributing Institutions**:
-`<img src="./static/logo/pku.png" alt="PKU" height="30"/>`
-`<img src="./static/logo/hkust.png" alt="HKUST" height="30"/>`
-`<img src="./static/logo/CAS.png" alt="CAS" height="30"/>`
-`<img src="./static/logo/shanghai_ailab.png" alt="Shanghai AI Lab" height="30"/>`
-`<img src="./static/logo/baichuan.png" alt="Baichuan" height="30"/>`
-`<img src="./static/logo/ant_group.png" alt="Ant Group" height="30"/>`
+<img src="./static/logo/pku.png" alt="PKU" height="30"/>
+<img src="./static/logo/hkust.png" alt="HKUST" height="30"/>
+<img src="./static/logo/CAS.png" alt="CAS" height="30"/>
+<img src="./static/logo/shanghai_ailab.png" alt="Shanghai AI Lab" height="30"/>
+<img src="./static/logo/baichuan.png" alt="Baichuan" height="30"/>
+<img src="./static/logo/ant_group.png" alt="Ant Group" height="30"/>
 
 ## 🏆 8. Awards & Achievements
 
