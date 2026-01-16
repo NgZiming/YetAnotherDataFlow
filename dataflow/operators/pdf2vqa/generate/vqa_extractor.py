@@ -22,13 +22,15 @@ class VQAExtractor(OperatorABC):
     def __init__(self, 
                  llm_serving: LLMServingABC = None,
                  mineru_backend: Literal["vlm-transformers","vlm-vllm-engine"] = "vlm-transformers",
-                 max_chunk_len: int = 128000,):
+                 max_chunk_len: int = 128000,
+                 strict_title_match = False):
         self.logger = get_logger()
         self.llm_serving = llm_serving
         self.prompt_template = QAExtractPrompt()
         self.mineru_backend = mineru_backend
         self.max_chunk_len = max_chunk_len
-    
+        self.strict_title_match = strict_title_match # 新参数，设置为True会对问答所属章节标题作严格匹配，否则会尝试提取标题中的序号
+
     @staticmethod
     def get_desc(lang: str = "zh"):
         if lang == "zh":
@@ -466,14 +468,14 @@ class VQAExtractor(OperatorABC):
             
             # 写入 question jsonl
             q_jsonl_path = os.path.join(output_root, "vqa_extracted_questions.jsonl")
-            if q_qa_list:
+            if q_qa_list is not None:
                 with open(q_jsonl_path, 'w', encoding='utf-8') as f:
                     for item in q_qa_list:
                         f.write(json.dumps(item, ensure_ascii=False) + '\n')
             
             # 写入 answer jsonl（如果不是 interleaved）
             a_jsonl_path = None
-            if not interleaved and a_qa_list:
+            if not interleaved and a_qa_list is not None:
                 a_jsonl_path = os.path.join(output_root, "vqa_extracted_answers.jsonl")
                 with open(a_jsonl_path, 'w', encoding='utf-8') as f:
                     for item in a_qa_list:
@@ -482,7 +484,7 @@ class VQAExtractor(OperatorABC):
             # 合并
             merged_jsonl = os.path.join(output_root, "vqa_merged_qa_pairs.jsonl")
             if not interleaved and a_jsonl_path:
-                merge_qa_pair(q_jsonl_path, a_jsonl_path, merged_jsonl)
+                merge_qa_pair(q_jsonl_path, a_jsonl_path, merged_jsonl, strict_title_match=self.strict_title_match)
             else:
                 os.system(f"cp {q_jsonl_path} {merged_jsonl}")
             
