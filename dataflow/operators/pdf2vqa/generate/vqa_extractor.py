@@ -196,6 +196,13 @@ class VQAExtractor(OperatorABC):
         raw_file = Path(input_pdf_file_path)
         pdf_name = raw_file.stem
         intermediate_dir = output_folder
+        output_json_file = os.path.join(intermediate_dir, pdf_name, MinerU_Version[mineru_backend], f"{pdf_name}_content_list.json")
+        output_layout_file = os.path.join(intermediate_dir, pdf_name, MinerU_Version[mineru_backend], f"{pdf_name}_layout.pdf")
+        # 如果已经存在则可以直接返回
+        if os.path.exists(output_json_file) and os.path.exists(output_layout_file):
+            self.logger.info(f"Layout files already exist for {input_pdf_file_path}, skipping extraction.")
+            return output_json_file, output_layout_file
+        
         args = [
             "-p", str(raw_file),
             "-o", str(intermediate_dir),
@@ -212,8 +219,6 @@ class VQAExtractor(OperatorABC):
             if e.code != 0:
                 raise RuntimeError(f"MinerU execution failed with exit code: {e.code}")
         
-        output_json_file = os.path.join(intermediate_dir, pdf_name, MinerU_Version[mineru_backend], f"{pdf_name}_content_list.json")
-        output_layout_file = os.path.join(intermediate_dir, pdf_name, MinerU_Version[mineru_backend], f"{pdf_name}_layout.pdf")
         return output_json_file, output_layout_file
     
     def _convert_response(self, input_response, input_json_path, image_prefix="images"):
