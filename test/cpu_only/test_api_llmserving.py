@@ -17,7 +17,9 @@ def test_non_stream_keepalive_then_json_parse_ok(dummy_server_base_url, monkeypa
         api_url=api_url,
         key_name_of_api_key="DF_API_KEY",
         model_name="dummy-model",
-        timeout=(1.0, 3.0),
+        # timeout=(1.0, 3.0),
+        connect_timeout=1.0,
+        read_timeout=3.0,
         max_retries=1,
         max_workers=1,
     )
@@ -54,7 +56,9 @@ def test_timeout_should_warn(dummy_server_base_url, monkeypatch):
         api_url=api_url,
         key_name_of_api_key="DF_API_KEY",
         model_name="dummy-model",
-        timeout=(1.0, 5.0),   # 不依赖 read timeout
+        # timeout=(1.0, 5.0),   # 不依赖 read timeout
+        connect_timeout=1.0,
+        read_timeout=5.0,
         max_retries=1,
         max_workers=1,
     )
@@ -81,7 +85,9 @@ def test_connection_error_should_raise(monkeypatch):
         api_url=api_url,
         key_name_of_api_key="DF_API_KEY",
         model_name="dummy-model",
-        timeout=(0.2, 0.2),
+        # timeout=(0.2, 0.2),
+        connect_timeout=0.2,
+        read_timeout=0.2,
         max_retries=1,
         max_workers=1,
     )
