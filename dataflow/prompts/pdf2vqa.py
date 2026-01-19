@@ -92,9 +92,9 @@ class QAExtractPrompt(PromptABC):
     def __init__(self):
         pass
 
-    def build_prompt(self, subject: str = "math") -> str:
+    def build_prompt(self) -> str:
         PROMPT = f"""
-        You are an expert in {subject}. You are given a json file. Your task is to segment the content, insert images tags, and extract labels:
+        You are an expert in answer college-level questions. You are given a json file. Your task is to segment the content, insert images tags, and extract labels:
 1. Every json item has an "id" field. Your main task is to output this field.
 2. You need to segment the content into multiple `<qa_pair>`…`</qa_pair>` blocks, each containing a question and its corresponding answer with solution.
 3. If the problem or answer/solution is not complete, omit them. An answer/solution should be considered complete as long as either the answer or solution exists.
@@ -120,7 +120,7 @@ Strict extraction rules:
 - Always enclose qa pairs in a `<chapter>`…`</chapter>` block, where <title>MAIN_TITLE_ID</title> is the id of the chapter title or section title.
 - Normally, chapter/section titles appear before the questions/answers in an independent json item.
 - There could be multiple `<chapter>`…`</chapter>` blocks if multiple chapters/sections exist. 
-- **Any title followed by a question/answer whose label/number is not 1, or title with a score, should NOT be extracted.**
+- **Any title followed by a question/answer whose label/number is not 1, or title with a score such as "一、选择题（每题1分，共10分）", should NOT be extracted.**
 - Do not use nested titles.
 - Leave the title blank if there is no chapter title. 
 ** About figures/diagrams **

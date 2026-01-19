@@ -19,6 +19,7 @@ def refine_title(title: str, strict_title_match=False):
     return title
 
 def merge_qa_pair(question_jsonl, answer_jsonl, output_jsonl, strict_title_match=False):
+    already_complete_count = 0
     with open(question_jsonl, 'r', encoding='utf-8') as q_file, open(answer_jsonl, 'r', encoding='utf-8') as a_file, open(output_jsonl, 'w', encoding='utf-8') as out_file:
         chapter_id = 0
         chapter_title = ""
@@ -47,9 +48,10 @@ def merge_qa_pair(question_jsonl, answer_jsonl, output_jsonl, strict_title_match
                     data["chapter_title"] = chapter_title
             label = data["label"]
             data["chapter_title"] = refine_title(data["chapter_title"], strict_title_match)
-            if data['label'] > 0 and data["chapter_title"]:
+            if data['label'] > 0:
                 # 已经完整的题目直接写入out_file
                 if data["answer"] or data["solution"]:
+                    already_complete_count += 1
                     qa_pair = {
                         "question_chapter_title": data["chapter_title"],
                         "answer_chapter_title": data["chapter_title"],
@@ -110,7 +112,7 @@ def merge_qa_pair(question_jsonl, answer_jsonl, output_jsonl, strict_title_match
                 }
                 out_file.write(json.dumps(qa_pair, ensure_ascii=False) + '\n')
         
-        print(f"Merged QA pairs: {len(questions.keys() & answers.keys())}")
+        print(f"Merged QA pairs: {len(questions.keys() & answers.keys()) + already_complete_count}")
         
 def jsonl_to_md(jsonl_file, md_file):
     with open(jsonl_file, 'r', encoding='utf-8') as in_file, open(md_file, 'w', encoding='utf-8') as out_file:

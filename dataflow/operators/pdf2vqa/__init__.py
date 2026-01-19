@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .generate.vqa_extractor import VQAExtractor
+    from .generate.pdf2vqa_formatter import MinerU2LLMInputOperator, LLMOutputParser, QA_Merger
 
 
 else:
