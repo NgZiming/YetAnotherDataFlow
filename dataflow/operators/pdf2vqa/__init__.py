@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .generate.pdf2vqa_formatter import MinerU2LLMInputOperator, LLMOutputParser, QA_Merger
+    from .generate.mineru_to_llm_input_operator import MinerU2LLMInputOperator
+    from .generate.llm_output_parser import LLMOutputParser
+    from .generate.qa_merger import QA_Merger
 
 
 else:

@@ -8,7 +8,7 @@ from dataflow.operators.core_text import ChunkedPromptedGenerator
 from dataflow.pipeline import PipelineABC
 from dataflow.prompts.pdf2vqa import QAExtractPrompt
 
-class VQA_extract_optimized_pipeline(PipelineABC):
+class PDF_VQA_extract_optimized_pipeline(PipelineABC):
     def __init__(self):
         super().__init__()
         self.storage = FileStorage(
@@ -102,6 +102,6 @@ class VQA_extract_optimized_pipeline(PipelineABC):
 if __name__ == "__main__":
     # jsonl中每一行包含question_pdf_path, answer_pdf_path, name (math1, math2, physics1, chemistry1, ...)
     # 如果question和answer在同一份pdf中，请将question_pdf_path和answer_pdf_path设置为相同的路径，会自动切换为interleaved模式
-    pipeline = VQA_extract_optimized_pipeline()
+    pipeline = PDF_VQA_extract_optimized_pipeline()
     pipeline.compile()
     pipeline.forward()
