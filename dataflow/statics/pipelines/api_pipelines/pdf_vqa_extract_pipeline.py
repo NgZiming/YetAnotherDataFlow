@@ -38,6 +38,11 @@ class VQA_extract_optimized_pipeline(PipelineABC):
         self.llm_output_answer_parser = LLMOutputParser(mode="answer", output_dir="./cache", intermediate_dir="intermediate")
         self.qa_merger = QA_Merger(output_dir="./cache", strict_title_match=False)
     def forward(self):
+        # 目前的处理逻辑是：MinerU处理问题-MinerU处理答案-格式化问题文本-格式化答案文本-问题文本输入LLM-答案文本输入LLM-解析问题输出-解析答案输出-合并问答对
+        # 由于问答对可能来自同一份pdf，也有可能来自不同pdf，而dataflow目前不支持分支，因此这里只能将question和answer的pdf都进行一次处理，
+        # 即使是同一份pdf也会被处理两次，最后再合并问答对。
+        # 未来会再思考如何优化这个流程，避免重复处理同一份pdf，提升性能。
+        
         self.mineru_executor.run(
             storage=self.storage.step(),
             input_key="question_pdf_path",

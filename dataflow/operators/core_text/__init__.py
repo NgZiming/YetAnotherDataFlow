@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .generate.prompted_generator import PromptedGenerator, ChunkedPromptedGenerator
+    from .generate.prompted_generator import PromptedGenerator
+    from .generate.chunked_prompted_generator import ChunkedPromptedGenerator
     from .generate.format_str_prompted_generator import FormatStrPromptedGenerator
     from .generate.random_domain_knowledge_row_generator import RandomDomainKnowledgeRowGenerator   
     from .generate.text2qa_generator import Text2QAGenerator
