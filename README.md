@@ -49,13 +49,21 @@
 
 ## 📰 1. News
 
-- **[2026-01-20] 🌟 Awesome Works Using DataFlow is now live!**  
-  We have added a new section to highlight open-source projects, research works, and applications built on top of DataFlow and its ecosystem.  
-  If you are using DataFlow in your project, feel free to submit a Pull Request and showcase your work to the community! 👉 [Awesome Works](#awesome-dataflow)
-- **[2025-12-19] 🎉 Our DataFlow technical report is now available!** We welcome you to read and cite our work if you find it helpful.👉 Read the full report on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
-- **[2025-11-20] Introducing New Data Agents for DataFlow!** 🤖
-  You can try them out now and follow the tutorial on [Bilibili](https://space.bilibili.com/3546929239689711/lists/6761342?type=season) for a quick start.
-- [2025-06-28] 🎉 We’re excited to announce that DataFlow, our Data-centric AI system, is now released! Stay tuned for future updates.
+* **[2026-02-02] 🖥️ DataFlow WebUI is now available!**
+  Launch the visual pipeline builder with a single command: `dataflow webui`. Build and run DataFlow pipelines through an intuitive web interface. 👉 [WebUI Docs](#54-webui)
+
+* **[2026-01-20] 🌟 Awesome Works Using DataFlow is now live!**
+  A new section showcasing open-source projects and research built on DataFlow. Contributions are welcome! 👉 [Awesome Works](#awesome-dataflow)
+
+* **[2025-12-19] 🎉 Our DataFlow technical report is now available!**
+  Read and cite our work on arXiv: [https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
+
+* **[2025-11-20] 🤖 Introducing New Data Agents for DataFlow!**
+  Try them out and follow the tutorial on Bilibili: [https://space.bilibili.com/3546929239689711/lists/6761342?type=season](https://space.bilibili.com/3546929239689711/lists/6761342?type=season)
+
+* **[2025-06-28] 🎉 DataFlow is officially released!**
+  Our data-centric AI system is now public. Stay tuned for future updates.
+
 
 ## 🔍 2. Overview
 
@@ -219,6 +227,33 @@ By following the provided guidelines, you can seamlessly scale from a simple tra
 ### 📖 5.3 Reference Project Documentation
 
 For detailed **usage instructions** and **getting started guide**, please visit our [Documentation](https://OpenDCAI.github.io/DataFlow-Doc/).
+
+
+
+<a id="54-webui"></a>
+
+### 🖥️ 5.4 WebUI
+
+DataFlow provides a **Web-based UI (WebUI)** for visual pipeline construction and execution.
+
+After installing the DataFlow main repository, simply run:
+
+```bash
+dataflow webui
+```
+
+This will automatically download and launch the latest **DataFlow-WebUI** and open it in your browser
+(`http://localhost:<port>/` if it does not open automatically).
+
+#### 📚 Documentation
+
+* Chinese: [https://wcny4qa9krto.feishu.cn/wiki/F4PDw76uDiOG42k76gGc6FaBnod](https://wcny4qa9krto.feishu.cn/wiki/F4PDw76uDiOG42k76gGc6FaBnod)
+* English: [https://wcny4qa9krto.feishu.cn/wiki/SYELwZhh9ixcNwkNRnhcLGmWnEg](https://wcny4qa9krto.feishu.cn/wiki/SYELwZhh9ixcNwkNRnhcLGmWnEg)
+
+#### 🛠️ Development Repository
+
+* [https://github.com/OpenDCAI/DataFlow-webui](https://github.com/OpenDCAI/DataFlow-webui)
+
 
 ## 🧪 6. Experimental Results
 

@@ -43,16 +43,20 @@
 </div>
 
 ## 📰 1. 最新动态
-- **[2026-01-20] 🌟 Awesome Works Using DataFlow 正式上线！**  
-  我们新增了 “Awesome Works Using DataFlow” 章节，用于展示基于 DataFlow 及其生态构建的优秀开源项目、研究工作与应用系统。  
-  欢迎社区通过 Pull Request 提交你的项目，一起共建 DataFlow 生态！👉 [Awesome Works](#awesome-dataflow)
-- **[2025-12-19] 🎉 我们的 DataFlow 技术报告正式发布！**  
-  如果我们的工作对你有所帮助，欢迎查阅并引用。  
-  👉 在 arXiv 阅读完整报告：[https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
 
-- **[2025-11-20] DataFlow 全新上线 Data Agents！** 🤖  欢迎体验，并可查看 [Bilibili](https://space.bilibili.com/3546929239689711/lists/6761342?type=season) 上的教程快速上手。
+* **[2026-02-02] 🖥️ DataFlow WebUI 正式发布！**
+  通过一条命令 `dataflow webui` 即可启动可视化流水线构建器，在直观的网页界面中构建并运行 DataFlow 流水线。👉 [WebUI 文档](#54-webui)
 
-- [2025-06-28] 🎉 我们全新发布的以数据为中心的系统**DataFlow**已开源 —— 敬请关注后续更新！
+* **[2026-01-20] 🌟 DataFlow Awesome Works 上线！**
+  新增板块用于展示基于 DataFlow 的开源项目与研究工作，欢迎提交 Pull Request 分享你的成果！👉 [Awesome Works](#awesome-dataflow)
+
+* **[2025-12-19] 🎉 DataFlow 技术报告正式发布！**
+  欢迎阅读并引用我们的 arXiv 论文：[https://arxiv.org/abs/2512.16676](https://arxiv.org/abs/2512.16676)
+
+* **[2025-11-20] 🤖 DataFlow 全新 Data Agents 发布！**
+  现在即可体验，并通过 Bilibili 教程快速上手：[https://space.bilibili.com/3546929239689711/lists/6761342?type=season](https://space.bilibili.com/3546929239689711/lists/6761342?type=season)
+
+* **[2025-06-28] 🎉 DataFlow 正式开源发布！** 我们全新发布的以数据为中心的系统**DataFlow**已开源 —— 敬请关注后续更新！
 
 ## 🔍 2. 项目概述
 
@@ -201,6 +205,32 @@ dataflow -v
 ### 📖 5.3 参考DataFlow项目文档
 
 详细**使用说明**和**入门指南**，请参考我们的 [项目文档](https://OpenDCAI.github.io/DataFlow-Doc/)。
+
+
+<a id="54-webui"></a>
+
+### 🖥️ 5.4 WebUI
+
+DataFlow 提供了一个 **基于网页的可视化界面（WebUI）**，用于直观地构建和执行 DataFlow 流水线。
+
+在完成 DataFlow 主仓库的安装后，只需执行：
+
+```bash
+dataflow webui
+```
+
+该命令会自动下载并启动最新版本的 **DataFlow-WebUI**，并在浏览器中打开网页界面
+（如果未自动打开，可手动访问 `http://localhost:<port>/`）。
+
+#### 📚 文档
+
+* 中文文档：[https://wcny4qa9krto.feishu.cn/wiki/F4PDw76uDiOG42k76gGc6FaBnod](https://wcny4qa9krto.feishu.cn/wiki/F4PDw76uDiOG42k76gGc6FaBnod)
+* 英文文档：[https://wcny4qa9krto.feishu.cn/wiki/SYELwZhh9ixcNwkNRnhcLGmWnEg](https://wcny4qa9krto.feishu.cn/wiki/SYELwZhh9ixcNwkNRnhcLGmWnEg)
+
+#### 🛠️ 开发仓库
+
+* [https://github.com/OpenDCAI/DataFlow-webui](https://github.com/OpenDCAI/DataFlow-webui)
+
 
 ## 🧪 6. Experimental Results
 For Detailed Experiments setting, please visit our [DataFlow Technical Report](https://arxiv.org/abs/2512.16676).
