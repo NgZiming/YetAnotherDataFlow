@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 
@@ -179,7 +180,7 @@ class S3JsonlStorage(DataFlowStorage):
 
     def step(self):
         self.operator_step += 1
-        return self
+        return copy.copy(self)
 
     def reset(self):
         self.operator_step = -1
@@ -214,7 +215,7 @@ class S3JsonlStorage(DataFlowStorage):
         if self.batch_size is None:
             file_path = file_path.with_suffix(".jsonl")
         else:
-            file_path = file_path.joinpath(f"{self.batch_size:08}").with_suffix(
+            file_path = file_path.joinpath(f"{self.batch_step:08}").with_suffix(
                 ".jsonl"
             )
 

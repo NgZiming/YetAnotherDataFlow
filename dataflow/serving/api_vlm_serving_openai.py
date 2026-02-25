@@ -44,10 +44,10 @@ class APIVLMServing_openai(LLMServingABC):
         self.logger = get_logger()
         self.timeout = timeout
         self.temperature = temperature
-        api_key = os.environ.get(key_name_of_api_key)
-        if not api_key:
-            self.logger.error(f"API key not found in environment variable '{key_name_of_api_key}'")
-            raise EnvironmentError(f"Missing environment variable '{key_name_of_api_key}'")
+        api_key = os.environ.get(key_name_of_api_key, "")
+        # if not api_key:
+        #     self.logger.error(f"API key not found in environment variable '{key_name_of_api_key}'")
+        #     raise EnvironmentError(f"Missing environment variable '{key_name_of_api_key}'")
 
         self.client = OpenAI(
             api_key=api_key,
