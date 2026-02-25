@@ -160,7 +160,14 @@ class LocalVLMServing_vllm(LLMServingABC):
         Replaces API _encode_image_to_base64 logic with PIL loading for vLLM.
         """
         try:
-            return Image.open(image_path).convert("RGB")
+            if image_path.startswith("s3://"):
+                from io import BytesIO
+                from dataflow.utils.s3_plugin import get_s3_client, read_s3_bytes
+
+                raw = read_s3_bytes(get_s3_client(), image_path)
+                return Image.open(BytesIO(raw)).convert("RGB")
+            else:
+                return Image.open(image_path).convert("RGB")
         except Exception as e:
             self.logger.error(f"Failed to load image at {image_path}: {e}")
             raise e

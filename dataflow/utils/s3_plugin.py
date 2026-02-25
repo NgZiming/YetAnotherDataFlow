@@ -15,6 +15,20 @@ from dataflow.utils.storage import DataFlowStorage
 __re_s3_path = re.compile("^s3a?://([^/]+)(?:/(.*))?$")
 
 
+__endpoint = ""
+__ak = ""
+__sk = ""
+
+
+def inject_s3_variables(endpoint: str, ak: str, sk: str):
+    global __endpoint
+    global __ak
+    global __sk
+    __endpoint = endpoint
+    __ak = ak
+    __sk = sk
+
+
 def split_s3_path(path: str):
     "split bucket and key from path"
     m = __re_s3_path.match(path)
@@ -60,27 +74,31 @@ def list_s3_objects_detailed(
             break
 
 
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        aws_access_key_id=__ak,
+        aws_secret_access_key=__sk,
+        endpoint_url=__endpoint,
+        config=Config(
+            s3={"addressing_style": "path"},
+            retries={"max_attempts": 8, "mode": "standard"},
+            connect_timeout=600,
+            read_timeout=600,
+        ),
+    )
+
+
+def read_s3_bytes(client, s3_path: str) -> bytes:
+    bucket_name, object_key = split_s3_path(s3_path)
+    response = client.get_object(Bucket=bucket_name, Key=object_key)
+    streaming_body = response["Body"]
+    return streaming_body.read()
+
+
 class S3JsonlStorage(DataFlowStorage):
-    def __init__(
-        self,
-        endpoint: str,
-        ak: str,
-        sk: str,
-        s3_paths: list[str],
-        output_s3_path: str,
-    ) -> None:
-        self.client = boto3.client(
-            "s3",
-            aws_access_key_id=ak,
-            aws_secret_access_key=sk,
-            endpoint_url=endpoint,
-            config=Config(
-                s3={"addressing_style": "path"},
-                retries={"max_attempts": 8, "mode": "standard"},
-                connect_timeout=600,
-                read_timeout=600,
-            ),
-        )
+    def __init__(self, s3_paths: list[str], output_s3_path: str) -> None:
+        self.client = get_s3_client()
         self.s3_paths = s3_paths
         self.output_s3_path = output_s3_path
 

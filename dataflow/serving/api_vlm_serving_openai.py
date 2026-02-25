@@ -61,8 +61,13 @@ class APIVLMServing_openai(LLMServingABC):
         :return: Tuple of (base64-encoded string, image format, e.g. 'jpeg' or 'png').
         :raises ValueError: If the image format is unsupported.
         """
-        with open(image_path, "rb") as f:
-            raw = f.read()
+        if image_path.startswith("s3://"):
+            from dataflow.utils.s3_plugin import get_s3_client, read_s3_bytes
+
+            raw = read_s3_bytes(get_s3_client(), image_path)
+        else:
+            with open(image_path, "rb") as f:
+                raw = f.read()
         b64 = base64.b64encode(raw).decode("utf-8")
         ext = image_path.rsplit('.', 1)[-1].lower()
 
