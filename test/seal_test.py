@@ -8,7 +8,7 @@ from dataflow.operators.core_vision import PromptedVQAGenerator
 from dataflow.pipeline.Pipeline import StreamBatchedPipelineABC
 from dataflow.serving.api_vlm_serving_openai import APIVLMServing_openai
 from dataflow.utils.registry import OPERATOR_REGISTRY
-from dataflow.utils.s3_plugin import S3JsonlStorage, inject_s3_variables
+from dataflow.utils.s3_plugin import S3JsonlStorage, FileMediaStorage
 from dataflow.utils.storage import DataFlowStorage
 
 
@@ -139,21 +139,36 @@ class SealPipeline(StreamBatchedPipelineABC):
     def __init__(self):
         super().__init__()
         self.storage = S3JsonlStorage(
+            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "81E020BE381B41CEBE7C1034F6AE451A",
+            "68440A553C9D4DB2AC751852B76E1E51",
             ["s3://pedia-doc-ai/wuziming/DFT/imgs-samples.jsonl"],
             "s3://pedia-doc-ai/wuziming/DFT-output/",
         )
 
-        self.serving = APIVLMServing_openai(
+        self.media_storage = FileMediaStorage()
+
+        self.serving1 = APIVLMServing_openai(
             api_url="http://app-cae22541ad874411aa1026c89bff7180.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
             model_name="/data/share/models/Qwen3-VL-235B-A22B-Instruct/",
+            media_storage=self.media_storage,
         )
+        # self.serving2 = APIVLMServing_openai(
+        #     api_url="http://app-cae22541ad874411aa1026c89bff7180.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
+        #     model_name="/data/share/models/Qwen3-VL-235B-A22B-Instruct/",
+        # )
 
         self.op1 = PromptedVQAGenerator(
-            self.serving,
+            self.serving1,
             prompt,
         )
 
         self.op2 = JsonParseFilter()
+
+        # self.op3 = PromptedVQAGenerator(
+        #     self.serving2,
+        #     prompt,
+        # )
 
     def forward(self):
         self.op1.run(self.storage.step(), "image", "seal_desc_json")
@@ -161,11 +176,6 @@ class SealPipeline(StreamBatchedPipelineABC):
 
 
 def main():
-    inject_s3_variables(
-        endpoint="http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
-        ak="81E020BE381B41CEBE7C1034F6AE451A",
-        sk="68440A553C9D4DB2AC751852B76E1E51",
-    )
     pipeline = SealPipeline()
     pipeline.compile()
     pipeline.forward(

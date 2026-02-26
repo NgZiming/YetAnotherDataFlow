@@ -2,6 +2,7 @@ import copy
 import json
 import re
 
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Generator, Optional, Literal
 
@@ -14,20 +15,6 @@ from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
 
 __re_s3_path = re.compile("^s3a?://([^/]+)(?:/(.*))?$")
-
-
-__endpoint = ""
-__ak = ""
-__sk = ""
-
-
-def inject_s3_variables(endpoint: str, ak: str, sk: str):
-    global __endpoint
-    global __ak
-    global __sk
-    __endpoint = endpoint
-    __ak = ak
-    __sk = sk
 
 
 def split_s3_path(path: str):
@@ -75,12 +62,12 @@ def list_s3_objects_detailed(
             break
 
 
-def get_s3_client():
+def get_s3_client(endpoint: str, ak: str, sk: str):
     return boto3.client(
         "s3",
-        aws_access_key_id=__ak,
-        aws_secret_access_key=__sk,
-        endpoint_url=__endpoint,
+        aws_access_key_id=ak,
+        aws_secret_access_key=sk,
+        endpoint_url=endpoint,
         config=Config(
             s3={"addressing_style": "path"},
             retries={"max_attempts": 8, "mode": "standard"},
@@ -97,9 +84,43 @@ def read_s3_bytes(client, s3_path: str) -> bytes:
     return streaming_body.read()
 
 
+class MediaStorage(ABC):
+    @abstractmethod
+    def read_media_bytes(self, media_path: str) -> bytes:
+        raise NotImplementedError
+
+
+class S3MediaStorage(MediaStorage):
+    def __init__(
+        self,
+        endpoint: str,
+        ak: str,
+        sk: str,
+    ) -> None:
+        self.client = get_s3_client(endpoint, ak, sk)
+
+    def read_media_bytes(self, media_path: str) -> bytes:
+        return read_s3_bytes(self.client, media_path)
+
+
+class FileMediaStorage(MediaStorage):
+    def __init__(self) -> None:
+        pass
+
+    def read_media_bytes(self, media_path: str) -> bytes:
+        return open(media_path, "rb").read()
+
+
 class S3JsonlStorage(DataFlowStorage):
-    def __init__(self, s3_paths: list[str], output_s3_path: str) -> None:
-        self.client = get_s3_client()
+    def __init__(
+        self,
+        endpoint: str,
+        ak: str,
+        sk: str,
+        s3_paths: list[str],
+        output_s3_path: str,
+    ) -> None:
+        self.client = get_s3_client(endpoint, ak, sk)
         self.s3_paths = s3_paths
         self.output_s3_path = output_s3_path
 

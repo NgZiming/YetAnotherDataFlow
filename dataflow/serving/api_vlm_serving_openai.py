@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from ..logger import get_logger
 
+from dataflow.utils.s3_plugin import MediaStorage
 
 class APIVLMServing_openai(LLMServingABC):
     """
@@ -23,6 +24,7 @@ class APIVLMServing_openai(LLMServingABC):
 
     def __init__(
         self,
+        media_storage: MediaStorage,
         api_url: str = "https://api.openai.com/v1",
         key_name_of_api_key: str = "DF_API_KEY",
         model_name: str = "o4-mini",
@@ -38,6 +40,7 @@ class APIVLMServing_openai(LLMServingABC):
         :param model_name: Default model name to use for requests.
         :param max_workers: Maximum number of threads for concurrent requests.
         """
+        self.media_storage = media_storage
         self.api_url = api_url
         self.model_name = model_name
         self.max_workers = max_workers
@@ -61,13 +64,7 @@ class APIVLMServing_openai(LLMServingABC):
         :return: Tuple of (base64-encoded string, image format, e.g. 'jpeg' or 'png').
         :raises ValueError: If the image format is unsupported.
         """
-        if image_path.startswith("s3://"):
-            from dataflow.utils.s3_plugin import get_s3_client, read_s3_bytes
-
-            raw = read_s3_bytes(get_s3_client(), image_path)
-        else:
-            with open(image_path, "rb") as f:
-                raw = f.read()
+        raw = self.media_storage.read_media_bytes(image_path)
         b64 = base64.b64encode(raw).decode("utf-8")
         ext = image_path.rsplit('.', 1)[-1].lower()
 
