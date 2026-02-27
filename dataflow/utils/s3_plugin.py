@@ -10,7 +10,7 @@ import boto3
 import pandas as pd
 
 from botocore.client import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ResponseStreamingError
 
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
@@ -172,8 +172,27 @@ class S3JsonlStorage(DataFlowStorage):
         else:
             data_paths = self._get_s3_file_names()
         for x in data_paths:
-            for line in self._read_file_line(x):
-                yield json.loads(line)
+            counter = 0
+            while True:
+                try:
+                    reader = self._read_file_line(x)
+                    if counter > 0:
+                        resume = 0
+                        for _ in reader:
+                            resume += 1
+                            if resume == counter:
+                                break
+
+                    for line in self._read_file_line(x):
+                        yield json.loads(line)
+                        counter += 1
+
+                    break
+                except ResponseStreamingError:
+                    self.logger.warning(
+                        f"response stream timeout for file {x}, resume read from line: {counter}."
+                    )
+            self.logger.info(f"read {counter} line(s) from file {x}.")
 
     def get_record_count(self) -> int:
         lines = 0
