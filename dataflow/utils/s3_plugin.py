@@ -159,12 +159,22 @@ class S3JsonlStorage(DataFlowStorage):
                     rtn.append(x)
         return rtn
 
-    def _read_file_line(self, s3_path: str) -> Generator[str, None, None]:
+    def _read_file_line(
+        self,
+        s3_path: str,
+        skip_bytes: int,
+    ) -> Generator[tuple[str, int], None, None]:
         bucket_name, object_key = split_s3_path(s3_path)
-        response = self.client.get_object(Bucket=bucket_name, Key=object_key)
+        response = self.client.get_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            Range=f"bytes={skip_bytes}-",
+        )
         streaming_body = response["Body"]
+        counter = skip_bytes
         for line_bytes in streaming_body.iter_lines():
-            yield line_bytes.decode("utf-8")
+            counter += len(line_bytes)
+            yield line_bytes.decode("utf-8"), counter
 
     def _read_results(self) -> Generator[dict, None, None]:
         if self.operator_step == 0:
@@ -172,27 +182,19 @@ class S3JsonlStorage(DataFlowStorage):
         else:
             data_paths = self._get_s3_file_names()
         for x in data_paths:
-            counter = 0
+            from_bytes = 0
             while True:
                 try:
-                    reader = self._read_file_line(x)
-                    if counter > 0:
-                        resume = 0
-                        for _ in reader:
-                            resume += 1
-                            if resume == counter:
-                                break
-
-                    for line in self._read_file_line(x):
+                    for line, next_bytes in self._read_file_line(x, from_bytes):
+                        from_bytes = next_bytes
                         yield json.loads(line)
-                        counter += 1
 
                     break
                 except ResponseStreamingError:
                     self.logger.warning(
-                        f"response stream timeout for file {x}, resume read from line: {counter}."
+                        f"response stream timeout for file {x}, resume read from bytes: {from_bytes}."
                     )
-            self.logger.info(f"read {counter} line(s) from file {x}.")
+            self.logger.info(f"read {from_bytes} bytes from file {x}.")
 
     def get_record_count(self) -> int:
         lines = 0
