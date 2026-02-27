@@ -30,7 +30,8 @@ class APIVLMServing_openai(LLMServingABC):
         model_name: str = "o4-mini",
         max_workers: int = 10,
         timeout: int = 1800,
-        temperature = 0.0
+        temperature = 0.0,
+        max_completion_tokens: int = None,
     ):
         """
         Initialize the OpenAI client and settings.
@@ -47,6 +48,7 @@ class APIVLMServing_openai(LLMServingABC):
         self.logger = get_logger()
         self.timeout = timeout
         self.temperature = temperature
+        self.max_completion_tokens = max_completion_tokens
         api_key = os.environ.get(key_name_of_api_key, "")
         # if not api_key:
         #     self.logger.error(f"API key not found in environment variable '{key_name_of_api_key}'")
@@ -111,6 +113,8 @@ class APIVLMServing_openai(LLMServingABC):
             "timeout": timeout,
             "temperature": self.temperature
         }
+        if self.max_completion_tokens:
+            request_params["max_completion_tokens"] = self.max_completion_tokens
         
         # 如果提供了 JSON schema，添加 response_format
         if json_schema is not None:

@@ -6,9 +6,10 @@ from dataflow import get_logger
 from dataflow.core import OperatorABC
 from dataflow.operators.core_vision import PromptedVQAGenerator
 from dataflow.pipeline.Pipeline import StreamBatchedPipelineABC
+from dataflow.pipeline.plugin import S3CacheStorage
 from dataflow.serving.api_vlm_serving_openai import APIVLMServing_openai
 from dataflow.utils.registry import OPERATOR_REGISTRY
-from dataflow.utils.s3_plugin import S3JsonlStorage, FileMediaStorage
+from dataflow.utils.s3_plugin import S3JsonlStorage, S3MediaStorage
 from dataflow.utils.storage import DataFlowStorage
 
 
@@ -90,20 +91,6 @@ class JsonParseFilter(OperatorABC):
     def get_desc(lang: str = "zh"):
         return "Json Parse Filter"
 
-    def _validate_dataframe(self, dataframe: pd.DataFrame):
-        required_keys = [self.input_key]
-        forbidden_keys = []
-
-        missing = [k for k in required_keys if k not in dataframe.columns]
-        conflict = [k for k in forbidden_keys if k in dataframe.columns]
-
-        if missing:
-            raise ValueError(f"Missing required column(s): {missing}")
-        if conflict:
-            raise ValueError(
-                f"The following column(s) already exist and would be overwritten: {conflict}"
-            )
-
     def run(
         self,
         storage: DataFlowStorage,
@@ -135,28 +122,139 @@ class JsonParseFilter(OperatorABC):
         return output_key
 
 
+@OPERATOR_REGISTRY.register()
+class SealRecMatchFilter(OperatorABC):
+    def __init__(self):
+        self.logger = get_logger()
+        self.logger.info(f"Initializing {self.__class__.__name__}")
+
+    @staticmethod
+    def get_desc(lang: str = "zh"):
+        return "Seal Rec Match Filter"
+
+    @staticmethod
+    def clean_text(text: str) -> str:
+        # 全角字符转为半角字符
+        def full_to_half(text):
+            res = ""
+            for char in text:
+                code = ord(char)
+                if code == 0x3000:
+                    code = 0x0020
+                elif 0xFF01 <= code <= 0xFF5E:
+                    code -= 0xFEE0
+                res += chr(code)
+            return res.strip()
+
+        text = full_to_half(text).strip()
+        # text = re.sub(r'[ \t]*([0-9\p{P}])[ \t]*', r'\1', text)
+        text = text.replace(" ", "")
+        return text
+
+    @staticmethod
+    def match(a: list[str], b: list[str]) -> bool:
+        all = "".join(sorted(a))
+        used: list[int] = []
+        while all:
+            found = False
+            for idx, ll in enumerate(b):
+                if idx in used:
+                    continue
+                if all.startswith(ll):
+                    all = all[len(ll) :]
+                    used.append(idx)
+                    found = True
+                    break
+            if not found:
+                break
+        if all == "" and len(used) == len(b):
+            return True
+        return False
+
+    @staticmethod
+    def match_paddle_and_qwen235(paddle: list[str], qwen: list[str]) -> bool:
+        return SealRecMatchFilter.match(paddle, qwen) or SealRecMatchFilter.match(
+            qwen, paddle
+        )
+
+    def run(self, storage: DataFlowStorage) -> str:
+        df: pd.DataFrame = storage.read("dataframe")
+        rtn: list[dict] = []
+
+        for x in df.to_dict(orient="records"):
+            if "texts" not in x["parsed_json"]:
+                continue
+
+            qwen = [
+                SealRecMatchFilter.clean_text(text.strip())
+                for text in x["parsed_json"]["texts"]
+                if text.strip()
+            ]
+            paddle = [
+                SealRecMatchFilter.clean_text(text.strip())
+                for text in x["paddle_output"].split("\n")
+                if text.strip()
+            ]
+
+            if len(qwen) <= 0 or len(paddle) <= 0:
+                continue
+
+            if not SealRecMatchFilter.match_paddle_and_qwen235(paddle, qwen):
+                continue
+
+            x["paddle_output"] = paddle
+            x["parsed_json"]["texts"] = qwen
+            rtn.append(x)
+
+        filtered_df = pd.DataFrame(rtn)
+        self.logger.info(f"Filtering complete. Remaining rows: {len(filtered_df)}")
+        storage.write(filtered_df)
+        self.logger.info(
+            f"Filtering completed. Total records passing filter: {len(filtered_df)}."
+        )
+        return ""
+
+
 class SealPipeline(StreamBatchedPipelineABC):
     def __init__(self):
-        super().__init__()
+        self.cache_storage = S3CacheStorage(
+            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "81E020BE381B41CEBE7C1034F6AE451A",
+            "68440A553C9D4DB2AC751852B76E1E51",
+            "s3://pedia-doc-ai/wuziming/DFT-output-1/_PROGRESS",
+        )
+        super().__init__(self.cache_storage)
         self.storage = S3JsonlStorage(
             "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
             "81E020BE381B41CEBE7C1034F6AE451A",
             "68440A553C9D4DB2AC751852B76E1E51",
-            ["s3://pedia-doc-ai/wuziming/DFT/imgs-samples.jsonl"],
-            "s3://pedia-doc-ai/wuziming/DFT-output/",
+            [
+                "s3://pedia-doc-ai/wuziming/label-raw-0001-100w/imgs-s3.jsonl",
+                "s3://pedia-doc-ai/wuziming/label-raw-0002-100w/imgs-s3.jsonl",
+            ],
+            "s3://pedia-doc-ai/wuziming/seal-clean-flow/v1/",
         )
 
-        self.media_storage = FileMediaStorage()
+        self.media_storage = S3MediaStorage(
+            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "81E020BE381B41CEBE7C1034F6AE451A",
+            "68440A553C9D4DB2AC751852B76E1E51",
+        )
 
         self.serving1 = APIVLMServing_openai(
             api_url="http://app-cae22541ad874411aa1026c89bff7180.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
             model_name="/data/share/models/Qwen3-VL-235B-A22B-Instruct/",
             media_storage=self.media_storage,
+            max_completion_tokens=2048,
+            max_workers=14,
         )
-        # self.serving2 = APIVLMServing_openai(
-        #     api_url="http://app-cae22541ad874411aa1026c89bff7180.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
-        #     model_name="/data/share/models/Qwen3-VL-235B-A22B-Instruct/",
-        # )
+        self.serving2 = APIVLMServing_openai(
+            api_url="http://app-e19317c555294ebeb5d42a7fcf127764.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
+            model_name="/data/share/models/PaddleOCR-VL-1.5",
+            media_storage=self.media_storage,
+            max_completion_tokens=2048,
+            max_workers=16,
+        )
 
         self.op1 = PromptedVQAGenerator(
             self.serving1,
@@ -165,23 +263,24 @@ class SealPipeline(StreamBatchedPipelineABC):
 
         self.op2 = JsonParseFilter()
 
-        # self.op3 = PromptedVQAGenerator(
-        #     self.serving2,
-        #     prompt,
-        # )
+        self.op3 = PromptedVQAGenerator(
+            self.serving2,
+            "Seal Recognition:",
+        )
+        self.op4 = SealRecMatchFilter()
 
     def forward(self):
         self.op1.run(self.storage.step(), "image", "seal_desc_json")
         self.op2.run(self.storage.step(), "seal_desc_json", "parsed_json")
+        self.op3.run(self.storage.step(), "image", "paddle_output")
+        self.op4.run(self.storage.step())
 
 
 def main():
     pipeline = SealPipeline()
     pipeline.compile()
-    pipeline.forward(
-        resume_from_last=False,
-        batch_size=4,
-    )
+    pipeline.cache_storage.record_steps(3, 0, 1000)
+    pipeline.forward(batch_size=100_000)
 
 
 if __name__ == "__main__":
