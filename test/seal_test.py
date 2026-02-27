@@ -218,14 +218,14 @@ class SealRecMatchFilter(OperatorABC):
 class SealPipeline(StreamBatchedPipelineABC):
     def __init__(self):
         self.cache_storage = S3CacheStorage(
-            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/",
             "81E020BE381B41CEBE7C1034F6AE451A",
             "68440A553C9D4DB2AC751852B76E1E51",
-            "s3://pedia-doc-ai/wuziming/DFT-output-1/_PROGRESS",
+            "s3://pedia-doc-ai/wuziming/seal-clean-flow/v1/_PROGRESS",
         )
         super().__init__(self.cache_storage)
         self.storage = S3JsonlStorage(
-            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/",
             "81E020BE381B41CEBE7C1034F6AE451A",
             "68440A553C9D4DB2AC751852B76E1E51",
             [
@@ -236,7 +236,7 @@ class SealPipeline(StreamBatchedPipelineABC):
         )
 
         self.media_storage = S3MediaStorage(
-            "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn/",
+            "http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/",
             "81E020BE381B41CEBE7C1034F6AE451A",
             "68440A553C9D4DB2AC751852B76E1E51",
         )
@@ -246,14 +246,14 @@ class SealPipeline(StreamBatchedPipelineABC):
             model_name="/data/share/models/Qwen3-VL-235B-A22B-Instruct/",
             media_storage=self.media_storage,
             max_completion_tokens=2048,
-            max_workers=14,
+            max_workers=14 * 8,
         )
         self.serving2 = APIVLMServing_openai(
             api_url="http://app-e19317c555294ebeb5d42a7fcf127764.ns-devsft-3460edd0.svc.cluster.local:8000/v1",
             model_name="/data/share/models/PaddleOCR-VL-1.5",
             media_storage=self.media_storage,
             max_completion_tokens=2048,
-            max_workers=16,
+            max_workers=15 * 20,
         )
 
         self.op1 = PromptedVQAGenerator(
@@ -279,7 +279,6 @@ class SealPipeline(StreamBatchedPipelineABC):
 def main():
     pipeline = SealPipeline()
     pipeline.compile()
-    pipeline.cache_storage.record_steps(3, 0, 1000)
     pipeline.forward(batch_size=100_000)
 
 
