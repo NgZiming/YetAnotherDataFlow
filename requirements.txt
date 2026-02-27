@@ -86,3 +86,6 @@ gcsfs
 
 db-dtypes
 google-cloud-bigquery-storage
+
+# s3
+boto3
