@@ -172,7 +172,7 @@ class S3JsonlStorage(DataFlowStorage):
         )
         streaming_body = response["Body"]
         counter = skip_bytes
-        for line_bytes in streaming_body.iter_lines():
+        for line_bytes in streaming_body.iter_lines(keepends=True):
             counter += len(line_bytes)
             yield line_bytes.decode("utf-8"), counter
 
