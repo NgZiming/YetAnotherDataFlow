@@ -610,11 +610,15 @@ class BatchedPipelineABC(PipelineABC):
                     self.active_llm_serving.cleanup()
                     self.active_llm_serving = None
 
+
+from dataflow.pipeline.plugin import CacheStorage
+
+
 class StreamBatchedPipelineABC(BatchedPipelineABC):
-    def __init__(self):
+    def __init__(self, cache_storage: CacheStorage):
         super().__init__()
-        
-    def _compiled_forward(self, resume_step: int=0, batch_size: int|None=None, resume_from_last: bool=True):
+        self.cache_storage = cache_storage
+    def _compiled_forward(self, batch_size: int|None=None, resume_from_last: bool=True):
         """
             resume_step (int): resume inference from this step
             batch_size (int|None): if set, run the pipeline in batch mode with this batch size
@@ -622,24 +626,16 @@ class StreamBatchedPipelineABC(BatchedPipelineABC):
         """
         if not self.compiled:
             raise RuntimeError("Pipeline is not compiled yet. Please call `compile()` before running the pipeline.")
-        
-        if resume_step > 0 and resume_from_last:
-            raise ValueError("Cannot set both `resume_step` and `resume_from_last` to True.")
-        
-        resume_batch = 0
-        
+
         if resume_from_last:
-            cache_path = os.path.join(self.op_nodes_list[1].storage.cache_path, f"{self.op_nodes_list[1].storage.file_name_prefix}_last_success_step.txt")
-            if not os.path.exists(cache_path):
-                resume_step = 0
-                resume_batch = 0
-                self.logger.info(f"No last success step cache found at {cache_path}, starting from step 0.")
-            else:
-                with open(cache_path, "r") as f:
-                    line = f.readline().strip()
-                    resume_step, resume_batch = map(int, line.split(","))
-                self.logger.info(f"Resuming from last success step {resume_step}, batch step {resume_batch}.")
-                
+            resume_step, resume_batch, bs = self.cache_storage.get_steps()
+            assert (resume_step == 0 and resume_batch == 0) or (bs == batch_size)
+            if bs != 0:
+                batch_size = bs
+            self.logger.info(f"Resuming from last success step {resume_step}, batch step {resume_batch}, batch size {batch_size}.")
+        else:
+            resume_step, resume_batch = 0, 0
+
         # for loop for each op and its `storage` status       
         for idx, op_node in enumerate(self.op_nodes_list):
             # resume from a expected step
@@ -683,12 +679,10 @@ class StreamBatchedPipelineABC(BatchedPipelineABC):
                         op_node.storage.batch_step += 1
                     if resume_from_last:
                         resume_batch = op_node.storage.batch_step if batch_size is not None else 0
-                        with open(cache_path, "w") as f:
-                            f.write(f"{idx-1},{resume_batch}\n")
+                        self.cache_storage.record_steps(idx-1, resume_batch, batch_size or 0)
             if resume_from_last:
                 resume_batch = 0 # reset for next op_node
-                with open(cache_path, "w") as f:
-                    f.write(f"{idx},{resume_batch}\n")
+                self.cache_storage.record_steps(idx, resume_batch, batch_size or 0)
             if op_node.llm_serving != None:
                 self.llm_serving_counter[self.active_llm_serving] -= 1
                 if self.llm_serving_counter[self.active_llm_serving] == 0:

@@ -10,6 +10,7 @@ import boto3
 import pandas as pd
 
 from botocore.client import Config
+from botocore.exceptions import ClientError
 
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
@@ -75,6 +76,17 @@ def get_s3_client(endpoint: str, ak: str, sk: str):
             read_timeout=600,
         ),
     )
+
+
+def exists_s3_object(client, s3_path: str) -> bool:
+    try:
+        bucket, key = split_s3_path(s3_path)
+        client.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise e
 
 
 def read_s3_bytes(client, s3_path: str) -> bytes:
