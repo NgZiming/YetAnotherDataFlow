@@ -1,4 +1,4 @@
-from .Pipeline import PipelineABC, BatchedPipelineABC, StreamBatchedPipelineABC
+from .Pipeline import PipelineABC, StreamBatchedPipelineABC
 
 __all__ = [
     'PipelineABC',
