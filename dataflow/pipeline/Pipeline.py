@@ -15,8 +15,12 @@ from datetime import datetime
 from dataflow.logger import get_logger
 import colorsys
 from tqdm import tqdm
+
+from dataflow.pipeline.plugin import CacheStorage
+
+
 class PipelineABC(ABC):
-    def __init__(self):
+    def __init__(self, cache_storage: CacheStorage):
         # list of dict, contains `OPRuntime` class and parameters for `operator.run()`
         self.op_runtimes:list[OPRuntime] = [] 
         self.compiled = False
@@ -32,6 +36,7 @@ class PipelineABC(ABC):
         self.op_nodes_list : list[OperatorNode] = []
         self.llm_serving_list = [] # list of LLMServing objects
         self.llm_serving_counter = Counter() # count of LLMServing objects
+        self.cache_storage = cache_storage
     
     @abstractmethod
     def forward(self):
@@ -504,10 +509,17 @@ class PipelineABC(ABC):
     #                 self.serving_resources[op_runtime.op]["LLMServingABC"] = v
     #                 self.serving_reference_count[v] += 1
                     
-    def _compiled_forward(self, resume_step: int=0):
+    def _compiled_forward(self, resume_from_last: bool=True):
         """
-            resume_step (int): resume inference from this step
+            resume_from_last (bool): if True, resume from the last successful step and batch
         """
+        if resume_from_last:
+            resume_step, resume_batch, bs = self.cache_storage.get_steps()
+
+            assert resume_batch == 0 and bs == 0
+        else:
+            resume_step = 0
+
         # for loop for each op and its `storage` status
         for idx, op_node in enumerate(self.op_nodes_list):
             # resume from a expected step
@@ -526,6 +538,10 @@ class PipelineABC(ABC):
                     storage=op_node.storage,
                     **op_node.kwargs
                 )
+
+            if resume_from_last:
+                self.cache_storage.record_steps(idx, 0, 0)
+
             if op_node.llm_serving != None:
                 self.llm_serving_counter[self.active_llm_serving] -= 1
                 if self.llm_serving_counter[self.active_llm_serving] == 0:
@@ -609,9 +625,6 @@ class BatchedPipelineABC(PipelineABC):
                     self.logger.debug(f"Detected LLM Serving {self.active_llm_serving} ref reduced to 0, cleaning up...")
                     self.active_llm_serving.cleanup()
                     self.active_llm_serving = None
-
-
-from dataflow.pipeline.plugin import CacheStorage
 
 
 class StreamBatchedPipelineABC(BatchedPipelineABC):
