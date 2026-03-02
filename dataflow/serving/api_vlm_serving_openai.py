@@ -155,7 +155,15 @@ class APIVLMServing_openai(LLMServingABC):
             {"type": "image_url", "image_url": {"url": f"data:image/{fmt};base64,{b64}"}}
         ]
         messages = self._create_messages(content)
-        return self._send_chat_request(model, messages, timeout, json_schema)
+        retries = 0
+        while True:
+            try:
+                return self._send_chat_request(model, messages, timeout, json_schema)
+            except:
+                retries += 1
+                if retries == 3:
+                    self.logger.error(f"max tries {retries} reach, url: {{self.api_url}}, messages: {messages}")
+                    raise
 
     def chat_with_one_image_with_id(
         self,
