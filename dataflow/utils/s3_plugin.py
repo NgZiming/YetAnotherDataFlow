@@ -109,10 +109,12 @@ class S3MediaStorage(MediaStorage):
         ak: str,
         sk: str,
     ) -> None:
-        self.client = get_s3_client(endpoint, ak, sk)
+        self.endpoint = endpoint
+        self.ak = ak
+        self.sk = sk
 
     def read_media_bytes(self, media_path: str) -> bytes:
-        return read_s3_bytes(self.client, media_path)
+        return read_s3_bytes(get_s3_client(self.endpoint, self.ak, self.sk), media_path)
 
 
 class FileMediaStorage(MediaStorage):
