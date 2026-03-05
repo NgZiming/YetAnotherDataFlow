@@ -8,7 +8,7 @@ tqdm
 # transformers
 math_verify
 word2number
-accelerate
+# accelerate
 rapidfuzz
 colorlog
 appdirs
