@@ -1,14 +1,14 @@
 numpy<2.0.0
 datasets
 scipy
-# torch
-# torchvision
-# torchaudio
+torch
+torchvision
+torchaudio
 tqdm
-# transformers
+transformers
 math_verify
 word2number
-# accelerate
+accelerate
 rapidfuzz
 colorlog
 appdirs
