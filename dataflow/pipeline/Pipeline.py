@@ -564,7 +564,7 @@ class StreamBatchedPipelineABC(PipelineABC):
 
         if resume_from_last:
             resume_step, resume_batch, bs = self.cache_storage.get_steps()
-            assert (resume_step == 0 and resume_batch == 0) or (bs == batch_size)
+            assert (resume_step == 0 and resume_batch == 0) or (bs == batch_size) or (bs == 0 and batch_size is None)
             if bs != 0:
                 batch_size = bs
             self.logger.info(f"Resuming from last success step {resume_step}, batch step {resume_batch}, batch size {batch_size}.")
