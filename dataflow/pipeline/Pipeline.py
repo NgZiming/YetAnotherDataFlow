@@ -645,6 +645,8 @@ class PartitionedPipelineABC(PipelineABC):
         desired_part_size = (record_count + partitions - 1) // partitions
         if part != 0 or step != 0 or part_size != 0:
             assert desired_part_size == part_size
+        else:
+            part_size = desired_part_size
 
         self.logger.info(
             f"Resuming partitioned pipeline: part={part}, step={step}, "
