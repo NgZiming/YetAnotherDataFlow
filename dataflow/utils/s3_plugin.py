@@ -198,6 +198,15 @@ class S3JsonlStorage(DataFlowStorage):
                     )
             self.logger.info(f"read {from_bytes} bytes from file {x}.")
 
+    def load_partition(self) -> pd.DataFrame:
+        data_paths = self._get_s3_file_names()
+        assert data_paths[self.batch_step - 1].endswith(f"{self.batch_step:08}")
+        rtn: list[dict] = []
+        for line, _ in self._read_file_line(data_paths[self.batch_step - 1], 0):
+            d = json.loads(line)
+            rtn.append(d)
+        return pd.DataFrame(rtn)
+
     def get_record_count(self) -> int:
         lines = 0
         for _ in self._read_results():
