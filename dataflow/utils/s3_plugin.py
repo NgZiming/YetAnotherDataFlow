@@ -202,6 +202,10 @@ class S3JsonlStorage(DataFlowStorage):
         if self.operator_step == 0:
             if not hasattr(self, "chunks"):
                 self.chunks = self.iter_chunks()
+                for part in range(self.batch_step - 1):
+                    self.logger.info(f"skip partition: {part + 1}")
+                    next(self.chunks)
+            self.logger.info(f"read partition: {self.batch_step}")
             return next(self.chunks)
         else:
             data_paths = self._get_s3_file_names()
