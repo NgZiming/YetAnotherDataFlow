@@ -659,8 +659,8 @@ class PartitionedPipelineABC(PipelineABC):
                     continue
 
                 self.logger.info(
-                    f"Running {op_node.op_name} | partition={i}/{partitions-1}, "
-                    f"step={idx}/{len(self.op_nodes_list)-1}"
+                    f"Running {op_node.op_name} | partition={i+1}/{partitions}, "
+                    f"step={idx}/{len(self.op_nodes_list)-2}"
                 )
 
                 op_node.storage.batch_size = part_size

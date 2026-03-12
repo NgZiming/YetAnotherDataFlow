@@ -206,7 +206,9 @@ class S3JsonlStorage(DataFlowStorage):
         else:
             data_paths = self._get_s3_file_names()
             self.logger.info(f"read partition: {data_paths[self.batch_step - 1]}")
-            assert data_paths[self.batch_step - 1].endswith(f"{self.batch_step:08}")
+            assert data_paths[self.batch_step - 1].endswith(
+                f"{self.batch_step:08}.jsonl"
+            )
             rtn: list[dict] = []
             for line, _ in self._read_file_line(data_paths[self.batch_step - 1], 0):
                 d = json.loads(line)
