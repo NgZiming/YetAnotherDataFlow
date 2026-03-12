@@ -641,7 +641,7 @@ class PartitionedPipelineABC(PipelineABC):
 
         part, step, part_size = self.cache_storage.get_steps()
 
-        record_count: int = self.op_nodes_list[0].storage.get_record_count()
+        record_count: int = self.op_nodes_list[1].storage.get_record_count()
         desired_part_size = (record_count + partitions - 1) // partitions
         if part != 0 or step != 0 or part_size != 0:
             assert desired_part_size == part_size
