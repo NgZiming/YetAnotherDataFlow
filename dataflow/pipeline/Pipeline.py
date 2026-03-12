@@ -661,6 +661,7 @@ class PartitionedPipelineABC(PipelineABC):
                     f"step={idx}/{len(self.op_nodes_list)-1}"
                 )
 
+                op_node.storage.batch_size = part_size
                 op_node.storage.batch_step = i + 1
                 current_partition_df = op_node.storage.load_partition()
                 op_node.storage._current_streaming_chunk = current_partition_df
