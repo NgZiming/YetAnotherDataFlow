@@ -870,7 +870,7 @@ class PartitionedPipelineRecoveryABC(PipelineABC):
                 op_node.storage.current_streaming_chunk = current_partition_df
 
                 file_path = op_node.storage.write_file_path()
-                if op_node.file_exists(file_path):
+                if op_node.storage.file_exists(file_path):
                     self.logger.info(f"✅ 跳过已存在：{op_node.op_name} 分片 {i+1}/{partitions}")
                     continue
 
