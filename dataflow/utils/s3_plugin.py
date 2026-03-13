@@ -175,7 +175,6 @@ class S3JsonlStorage(DataFlowStorage):
         self._current_streaming_chunk = new_value
         return self._current_streaming_chunk
 
-    @abstractmethod
     def file_exists(self, file_path: str) -> bool:
         return exists_s3_object(self.client, file_path)
 
