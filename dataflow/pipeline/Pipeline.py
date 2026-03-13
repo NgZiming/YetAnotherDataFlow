@@ -618,7 +618,7 @@ class PartitionedPipelineABC(PipelineABC):
     def __init__(self, cache_storage: CacheStorage):
         super().__init__(cache_storage)
 
-    def _compiled_forward(self, partitions: int):
+    def _compiled_forward(self, partitions: int = 1):
         """
         分片模式的管道执行入口。
 
@@ -666,7 +666,7 @@ class PartitionedPipelineABC(PipelineABC):
                 op_node.storage.batch_size = part_size
                 op_node.storage.batch_step = i + 1
                 current_partition_df = op_node.storage.load_partition()
-                op_node.storage._current_streaming_chunk = current_partition_df
+                op_node.storage.current_streaming_chunk = current_partition_df
 
                 op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
 
@@ -765,13 +765,13 @@ class StreamBatchedPipelineABC(PipelineABC):
                     if batch_size is not None:
                         try:
                             current_batch_df = next(data_stream)
-                            op_node.storage._current_streaming_chunk = current_batch_df
+                            op_node.storage.current_streaming_chunk = current_batch_df
                         except StopIteration:
                             break
 
                     op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
                     if batch_size is not None:
-                        op_node.storage._current_streaming_chunk = None
+                        op_node.storage.current_streaming_chunk = None
                         op_node.storage.batch_step += 1
                     if resume_from_last:
                         resume_batch = (
@@ -791,3 +791,97 @@ class StreamBatchedPipelineABC(PipelineABC):
                     )
                     self.active_llm_serving.cleanup()
                     self.active_llm_serving = None
+
+
+class PartitionedPipelineRecoveryABC(PipelineABC):
+    """
+    带断点续传功能的分片管道基类。
+
+    核心特性：
+    1. **分片处理**：将数据集划分为多个分片，按顺序逐个处理
+    2. **断点续传**：通过 cache_storage 记录执行进度，中断后可从上次位置恢复
+    3. **跳过已完成**：检查输出文件是否存在，已完成的分片自动跳过
+
+    继承自 PipelineABC，重写 _compiled_forward 方法实现分片执行逻辑。
+
+    进度记录说明（通过 cache_storage）：
+        - part: 当前已完成的分片编号（从 0 开始）
+        - step: 当前分片内已完成的 operator 步骤索引
+        - part_size: 每个分片的大小（记录数）
+    """
+
+    def __init__(self, cache_storage: CacheStorage):
+        """初始化分片管道。
+
+        Args:
+            cache_storage: 用于持久化执行进度的存储对象
+        """
+        super().__init__(cache_storage)
+
+    def _compiled_forward(self, partitions: int = 1):
+        """执行分片管道，支持断点续传。
+
+        按分片顺序逐个执行管道，每个分片处理数据集的一部分。
+        每次运行前检查缓存进度，从上次中断的位置继续。
+        对于每个分片，会检查输出文件是否存在，已完成的自动跳过。
+
+        Args:
+            partitions: 分片总数，默认为 1（不分片）
+
+        Raises:
+            RuntimeError: 管道未编译时抛出
+        """
+        if not self.compiled:
+            raise RuntimeError(
+                "Pipeline is not compiled yet. Please call `compile()` before running the pipeline."
+            )
+
+        # 读取上次中断时的进度
+        _part, _step, part_size = self.cache_storage.get_steps()
+
+        # 计算分片大小
+        record_count: int = self.op_nodes_list[1].storage.get_record_count()
+        desired_part_size = (record_count + partitions - 1) // partitions
+        
+        # 验证分片大小一致性（如果是恢复运行）
+        if _part != 0 or _step != 0 or part_size != 0:
+            assert desired_part_size == part_size
+        else:
+            part_size = desired_part_size
+
+        self.logger.info(
+            f"🔄 启动分片管道 | 进度恢复：part={_part}, step={_step}, "
+            f"part_size={part_size}, partitions={partitions}, records={record_count}"
+        )
+
+        for i in range(0, partitions):
+            for idx, op_node in enumerate(self.op_nodes_list[1:], 1):
+                if op_node.op_obj is None:
+                    continue
+
+                self.logger.info(
+                    f"▶️ {op_node.op_name} | 分片 {i+1}/{partitions}, "
+                    f"步骤 {idx}/{len(self.op_nodes_list)-2}"
+                )
+
+                op_node.storage.batch_size = part_size
+                op_node.storage.batch_step = i + 1
+                current_partition_df = op_node.storage.load_partition()
+                op_node.storage.current_streaming_chunk = current_partition_df
+
+                file_path = op_node.storage.write_file_path()
+                if op_node.file_exists(file_path):
+                    self.logger.info(f"✅ 跳过已存在：{op_node.op_name} 分片 {i+1}/{partitions}")
+                    continue
+
+                op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
+                self.cache_storage.record_steps(i, idx, part_size)
+
+            self.cache_storage.record_steps(i + 1, 0, part_size)
+
+        self.logger.info(
+            "✨ 所有分片执行完毕，清理 LLM Serving 资源..."
+        )
+        for op_node in self.op_nodes_list:
+            if op_node.llm_serving is not None:
+                op_node.llm_serving.cleanup()

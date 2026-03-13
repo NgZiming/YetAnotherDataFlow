@@ -7,7 +7,7 @@ import weakref
 from dataflow import get_logger
 import pandas as pd
 import json
-from typing import Any, Dict, Literal, Generator
+from typing import Any, Dict, Literal, Generator, Optional
 import os
 import copy
 
@@ -16,6 +16,59 @@ class DataFlowStorage(ABC):
     """
     Abstract base class for data storage.
     """
+
+    @property
+    @abstractmethod
+    def batch_step(self) -> int:
+        raise NotImplementedError
+
+    @batch_step.setter
+    @abstractmethod
+    def batch_step(self, new_value: int) -> int:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def batch_size(self) -> Optional[int]:
+        raise NotImplementedError
+
+    @batch_size.setter
+    @abstractmethod
+    def batch_size(self, new_value: Optional[int]) -> Optional[int]:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def current_streaming_chunk(self) -> Optional[pd.DataFrame]:
+        raise NotImplementedError
+
+    @current_streaming_chunk.setter
+    @abstractmethod
+    def current_streaming_chunk(
+        self,
+        new_value: Optional[pd.DataFrame],
+    ) -> Optional[pd.DataFrame]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_record_count(self) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def load_partition(self) -> pd.DataFrame:
+        raise NotImplementedError
+
+    @abstractmethod
+    def iter_chunks(self) -> Generator[pd.DataFrame, None, None]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def write_file_path(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def file_exists(self, file_path: str) -> bool:
+        raise NotImplementedError
 
     @abstractmethod
     def get_keys_from_dataframe(self) -> list[str]:

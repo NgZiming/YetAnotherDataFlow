@@ -138,12 +138,46 @@ class S3JsonlStorage(DataFlowStorage):
         self.s3_paths = s3_paths
         self.output_s3_path = output_s3_path
 
-        self.batch_step = 0
-        self.batch_size = None
+        self._batch_step = 0
+        self._batch_size = None
         self.operator_step = -1
         self.logger = get_logger()
 
         self._current_streaming_chunk: Optional[pd.DataFrame] = None
+
+    @property
+    def batch_step(self) -> int:
+        return self.batch_step
+
+    @batch_step.setter
+    def batch_step(self, new_value: int) -> int:
+        self._batch_step = new_value
+        return self._batch_step
+
+    @property
+    def batch_size(self) -> Optional[int]:
+        return self.batch_size
+
+    @batch_size.setter
+    def batch_size(self, new_value: Optional[int]) -> Optional[int]:
+        self.batch_size = new_value
+        return self.batch_size
+
+    @property
+    def current_streaming_chunk(self) -> Optional[pd.DataFrame]:
+        return self._current_streaming_chunk
+
+    @current_streaming_chunk.setter
+    def current_streaming_chunk(
+        self,
+        new_value: Optional[pd.DataFrame],
+    ) -> Optional[pd.DataFrame]:
+        self._current_streaming_chunk = new_value
+        return self._current_streaming_chunk
+
+    @abstractmethod
+    def file_exists(self, file_path: str) -> bool:
+        return exists_s3_object(self.client, file_path)
 
     def _get_s3_file_names(self) -> list[str]:
         rtn: list[str] = []
@@ -263,6 +297,18 @@ class S3JsonlStorage(DataFlowStorage):
         self.operator_step = -1
         return self
 
+    def write_file_path(self) -> str:
+        file_path = Path(self.output_s3_path.removeprefix("s3://")).joinpath(
+            f"{self.operator_step + 1:08}"
+        )
+        if self.batch_size is None:
+            file_path = file_path.with_suffix(".jsonl")
+        else:
+            file_path = file_path.joinpath(f"{self.batch_step:08}").with_suffix(
+                ".jsonl"
+            )
+        return "s3://" + str(file_path)
+
     def write(self, data: pd.DataFrame) -> str:
         def clean_surrogates(obj):
             """递归清理数据中的无效Unicode代理对字符"""
@@ -286,27 +332,18 @@ class S3JsonlStorage(DataFlowStorage):
 
         dataframe = data.map(clean_surrogates)
 
-        file_path = Path(self.output_s3_path.removeprefix("s3://")).joinpath(
-            f"{self.operator_step + 1:08}"
-        )
-        if self.batch_size is None:
-            file_path = file_path.with_suffix(".jsonl")
-        else:
-            file_path = file_path.joinpath(f"{self.batch_step:08}").with_suffix(
-                ".jsonl"
-            )
-
         content = ""
         for x in dataframe.to_dict(orient="records"):
             content += json.dumps(x, ensure_ascii=False) + "\n"
 
-        bucket_name, object_key = split_s3_path("s3://" + str(file_path))
+        file_path = self.write_file_path()
+        bucket_name, object_key = split_s3_path(file_path)
         _ = self.client.put_object(
             Bucket=bucket_name,
             Key=object_key,
             Body=content,
         )
 
-        self.logger.success(f"Writing data to s3://{str(file_path)} with type jsonl")
+        self.logger.success(f"Writing data to {file_path} with type jsonl")
 
         return "s3://" + str(file_path)
