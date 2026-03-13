@@ -11,10 +11,12 @@ from typing import Any, Dict, Literal, Generator
 import os
 import copy
 
+
 class DataFlowStorage(ABC):
     """
     Abstract base class for data storage.
     """
+
     @abstractmethod
     def get_keys_from_dataframe(self) -> list[str]:
         """
@@ -22,6 +24,7 @@ class DataFlowStorage(ABC):
         This method should be implemented by subclasses to extract keys from the data.
         """
         pass
+
     @abstractmethod
     def read(self, output_type) -> Any:
         """
@@ -29,19 +32,19 @@ class DataFlowStorage(ABC):
         type: type that you want to read to, such as "datatrame", List[dict], etc.
         """
         pass
-    
+
     @abstractmethod
     def write(self, data: Any) -> Any:
         pass
 
-# --- 新增的 __repr__ 方法 ---
+    # --- 新增的 __repr__ 方法 ---
     def __repr__(self):
         """
         返回一个表示该对象所有成员变量及其键值对的字符串。
         """
         # 获取实例的所有属性（成员变量）
         attrs = self.__dict__
-        
+
         # 格式化键值对列表
         attr_strs = []
         for key, value in attrs.items():
@@ -51,22 +54,25 @@ class DataFlowStorage(ABC):
                 value_repr = f"<DataFrame shape={value.shape}>"
             elif isinstance(value, set):
                 # 简化集合的显示
-                 value_repr = f"<{type(value).__name__} size={len(value)}>"
+                value_repr = f"<{type(value).__name__} size={len(value)}>"
             elif isinstance(value, dict):
                 # 简化字典的显示
-                 value_repr = f"<{type(value).__name__} size={len(value)}>"
+                value_repr = f"<{type(value).__name__} size={len(value)}>"
             else:
                 # 使用标准的 repr() 获取值表示，并限制长度
                 value_repr = repr(value)
                 if len(value_repr) > 100:  # 限制长度以避免超长输出
                     value_repr = value_repr[:97] + "..."
-                    
+
             attr_strs.append(f"  {key} = {value_repr}")
-            
+
         # 构造最终的字符串
         body = "\n".join(attr_strs)
         return f"<{self.__class__.__name__} Object:\n{body}\n>"
+
     # ---------------------------
+
+
 class LazyFileStorage(DataFlowStorage):
     """
     LazyFileStorage
@@ -78,13 +84,13 @@ class LazyFileStorage(DataFlowStorage):
     """
 
     def __init__(
-        self, 
+        self,
         first_entry_file_name: str,
-        cache_path:str="./cache",
-        file_name_prefix:str="dataflow_cache_step",
-        cache_type:Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
-        save_on_exit: bool = True,        # 进程退出时自动 flush
-        flush_all_steps: bool = False      # True: 所有缓冲步落盘；False: 仅最新一步
+        cache_path: str = "./cache",
+        file_name_prefix: str = "dataflow_cache_step",
+        cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
+        save_on_exit: bool = True,  # 进程退出时自动 flush
+        flush_all_steps: bool = False,  # True: 所有缓冲步落盘；False: 仅最新一步
     ):
         """
         Initialize a LazyFileStorage.
@@ -167,7 +173,9 @@ class LazyFileStorage(DataFlowStorage):
     # ---------- 生命周期 & 信号 ----------
     def _register_exit_hooks(self):
         _self_ref = weakref.ref(self)
-        atexit.register(lambda: _self_ref() and _self_ref()._flush_if_dirty(reason="atexit"))
+        atexit.register(
+            lambda: _self_ref() and _self_ref()._flush_if_dirty(reason="atexit")
+        )
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 signal.signal(sig, self._make_signal_handler(sig))
@@ -189,6 +197,7 @@ class LazyFileStorage(DataFlowStorage):
                 except Exception:
                     # 某些解释器环境不允许再次发送信号，忽略
                     pass
+
         return handler
 
     def _flush_if_dirty(self, reason: str):
@@ -203,18 +212,24 @@ class LazyFileStorage(DataFlowStorage):
     # ---------- step & 路径 ----------
     def _get_cache_file_path(self, step) -> str:
         if step == -1:
-            self.logger.error("You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step.")  
-            raise ValueError("You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step.")
+            self.logger.error(
+                "You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step."
+            )
+            raise ValueError(
+                "You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step."
+            )
         if step == 0:
             # 首步来源可能是远端或本地
             return os.path.join(self.first_entry_file_name)
         else:
-            return os.path.join(self.cache_path, f"{self.file_name_prefix}_step{step}.{self.cache_type}")
+            return os.path.join(
+                self.cache_path, f"{self.file_name_prefix}_step{step}.{self.cache_type}"
+            )
 
     def step(self):
         self.operator_step += 1
         return copy.copy(self)  # 保持与原 FileStorage 兼容的使用方式
-    
+
     def reset(self):
         self.operator_step = -1
         return self
@@ -226,7 +241,9 @@ class LazyFileStorage(DataFlowStorage):
 
     def _load_local_file(self, file_path: str, file_type: str) -> pd.DataFrame:
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File {file_path} does not exist. Please check the path.")
+            raise FileNotFoundError(
+                f"File {file_path} does not exist. Please check the path."
+            )
         try:
             if file_type == "json":
                 return pd.read_json(file_path)
@@ -242,7 +259,7 @@ class LazyFileStorage(DataFlowStorage):
                 raise ValueError(f"Unsupported file type: {file_type}")
         except Exception as e:
             raise ValueError(f"Failed to load {file_type} file: {str(e)}")
-    
+
     def _convert_output(self, dataframe: pd.DataFrame, output_type: str) -> Any:
         if output_type == "dataframe":
             return dataframe
@@ -254,6 +271,7 @@ class LazyFileStorage(DataFlowStorage):
         source = self.first_entry_file_name
         if source.startswith("hf:"):
             from datasets import load_dataset
+
             _, dataset_name, *parts = source.split(":")
             if len(parts) == 1:
                 config, split = None, parts[0]
@@ -262,13 +280,14 @@ class LazyFileStorage(DataFlowStorage):
             else:
                 config, split = None, "train"
             dataset = (
-                load_dataset(dataset_name, config, split=split) 
-                if config 
+                load_dataset(dataset_name, config, split=split)
+                if config
                 else load_dataset(dataset_name, split=split)
             )
             return dataset.to_pandas()
         elif source.startswith("ms:"):
             from modelscope import MsDataset
+
             _, dataset_name, *split_parts = source.split(":")
             split = split_parts[0] if split_parts else "train"
             dataset = MsDataset.load(dataset_name, split=split)
@@ -279,9 +298,11 @@ class LazyFileStorage(DataFlowStorage):
             return self._load_local_file(source, local_cache)
 
     # ---------- 读 ----------
-    def read(self, output_type: Literal["dataframe", "dict"]="dataframe") -> Any:
+    def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
         if self.operator_step == 0 and self.first_entry_file_name == "":
-            self.logger.info("first_entry_file_name is empty, returning empty dataframe")
+            self.logger.info(
+                "first_entry_file_name is empty, returning empty dataframe"
+            )
             empty_dataframe = pd.DataFrame()
             return self._convert_output(empty_dataframe, output_type)
 
@@ -313,9 +334,10 @@ class LazyFileStorage(DataFlowStorage):
         将数据写入内存缓冲（目标 step = operator_step + 1），不触盘。
         返回该 step 对应未来落盘的文件路径，便于日志对齐。
         """
+
         def clean_surrogates(obj):
             if isinstance(obj, str):
-                return obj.encode('utf-8', 'replace').decode('utf-8')
+                return obj.encode("utf-8", "replace").decode("utf-8")
             elif isinstance(obj, dict):
                 return {k: clean_surrogates(v) for k, v in obj.items()}
             elif isinstance(obj, list):
@@ -333,7 +355,9 @@ class LazyFileStorage(DataFlowStorage):
                 cleaned_data = [clean_surrogates(item) for item in data]
                 dataframe = pd.DataFrame(cleaned_data)
             else:
-                raise ValueError(f"Unsupported data type: {type(data[0]) if data else 'empty list'}")
+                raise ValueError(
+                    f"Unsupported data type: {type(data[0]) if data else 'empty list'}"
+                )
         elif isinstance(data, pd.DataFrame):
             dataframe = data.applymap(clean_surrogates)
         else:
@@ -344,7 +368,9 @@ class LazyFileStorage(DataFlowStorage):
             self._buffers[target_step] = dataframe.reset_index(drop=True)
             self._dirty_steps.add(target_step)
 
-        self.logger.success(f"[buffer] Buffered data for step {target_step} (type={self.cache_type}); not persisted yet.")
+        self.logger.success(
+            f"[buffer] Buffered data for step {target_step} (type={self.cache_type}); not persisted yet."
+        )
         return self._get_cache_file_path(target_step)
 
     # ---------- 落盘 ----------
@@ -374,7 +400,9 @@ class LazyFileStorage(DataFlowStorage):
             elif self.cache_type == "pickle":
                 df.to_pickle(tmp_path)
             else:
-                raise ValueError(f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle")
+                raise ValueError(
+                    f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle"
+                )
 
             os.replace(tmp_path, file_path)
             with self._lock:
@@ -392,65 +420,80 @@ class LazyFileStorage(DataFlowStorage):
             if not self._buffers:
                 self.logger.info("No buffers to flush.")
                 return
-            steps = sorted(self._buffers.keys()) if self._flush_all_steps else [max(self._buffers.keys())]
+            steps = (
+                sorted(self._buffers.keys())
+                if self._flush_all_steps
+                else [max(self._buffers.keys())]
+            )
         for s in steps:
             self.flush_step(s)
+
 
 class DummyStorage(DataFlowStorage):
     def __init__(
         self,
-        cache_path:str=None,
-        file_name_prefix:str=None,  
-        cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle", None] = None
+        cache_path: str = None,
+        file_name_prefix: str = None,
+        cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle", None] = None,
     ):
         self._data = None
         self.cache_path = cache_path
         self.file_name_prefix = file_name_prefix
         self.cache_type = cache_type
-        
+
     def set_data(self, data: Any):
         """
         Set data to be written later.
         """
         self._data = data
-        
+
     def set_file_name_prefix(self, file_name_prefix: str):
         """
         Set the file name prefix for cache files.
         """
         self.file_name_prefix = file_name_prefix
-            
+
     def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
         return self._data
 
     def write(self, data):
         self._data = data
         if self.cache_type != None:
-            cache_file_path = os.path.join(self.cache_path, f"{self.file_name_prefix}.{self.cache_type}")
+            cache_file_path = os.path.join(
+                self.cache_path, f"{self.file_name_prefix}.{self.cache_type}"
+            )
             os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
             if self.cache_type == "json":
-                data.to_json(cache_file_path, orient="records", force_ascii=False, indent=2)
+                data.to_json(
+                    cache_file_path, orient="records", force_ascii=False, indent=2
+                )
             elif self.cache_type == "jsonl":
-                data.to_json(cache_file_path, orient="records", lines=True, force_ascii=False)  
+                data.to_json(
+                    cache_file_path, orient="records", lines=True, force_ascii=False
+                )
             elif self.cache_type == "csv":
                 data.to_csv(cache_file_path, index=False)
-            elif self.cache_type == "parquet":  
+            elif self.cache_type == "parquet":
                 data.to_parquet(cache_file_path)
             elif self.cache_type == "pickle":
                 data.to_pickle(cache_file_path)
             else:
-                raise ValueError(f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle")
+                raise ValueError(
+                    f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle"
+                )
+
 
 class FileStorage(DataFlowStorage):
     """
     Storage for file system.
     """
+
     def __init__(
-        self, 
+        self,
         first_entry_file_name: str,
-        cache_path:str="./cache",
-        file_name_prefix:str="dataflow_cache_step",
-        cache_type:Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl"
+        cache_path: str = "./cache",
+        file_name_prefix: str = "dataflow_cache_step",
+        cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
     ):
         """
         Initialize a FileStorage.
@@ -511,31 +554,41 @@ class FileStorage(DataFlowStorage):
 
     def _get_cache_file_path(self, step) -> str:
         if step == -1:
-            self.logger.error("You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step.")  
-            raise ValueError("You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step.")
+            self.logger.error(
+                "You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step."
+            )
+            raise ValueError(
+                "You must call storage.step() before reading or writing data. Please call storage.step() first for each operator step."
+            )
         if step == 0:
             # If it's the first step, use the first entry file name
             return os.path.join(self.first_entry_file_name)
         else:
-            return os.path.join(self.cache_path, f"{self.file_name_prefix}_step{step}.{self.cache_type}")
+            return os.path.join(
+                self.cache_path, f"{self.file_name_prefix}_step{step}.{self.cache_type}"
+            )
 
     def step(self):
         self.operator_step += 1
-        return copy.copy(self) # TODO if future maintain an object in memory, we need to apply a deepcopy (except the dataframe object during copy to avoid OOM)
-    
+        return copy.copy(
+            self
+        )  # TODO if future maintain an object in memory, we need to apply a deepcopy (except the dataframe object during copy to avoid OOM)
+
     def reset(self):
         self.operator_step = -1
         return self
-    
+
     def get_keys_from_dataframe(self) -> list[str]:
         dataframe = self.read(output_type="dataframe")
         return dataframe.columns.tolist() if isinstance(dataframe, pd.DataFrame) else []
-    
+
     def _load_local_file(self, file_path: str, file_type: str) -> pd.DataFrame:
         """Load data from local file based on file type."""
         # check if file exists
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File {file_path} does not exist. Please check the path.")
+            raise FileNotFoundError(
+                f"File {file_path} does not exist. Please check the path."
+            )
         # Load file based on type
         try:
             if file_type == "json":
@@ -554,7 +607,7 @@ class FileStorage(DataFlowStorage):
                 raise ValueError(f"Unsupported file type: {file_type}")
         except Exception as e:
             raise ValueError(f"Failed to load {file_type} file: {str(e)}")
-    
+
     def _convert_output(self, dataframe: pd.DataFrame, output_type: str) -> Any:
         """Convert dataframe to requested output type."""
         if output_type == "dataframe":
@@ -563,26 +616,28 @@ class FileStorage(DataFlowStorage):
             return dataframe.to_dict(orient="records")
         raise ValueError(f"Unsupported output type: {output_type}")
 
-    def read(self, output_type: Literal["dataframe", "dict"]="dataframe") -> Any:
+    def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
         """
         Read data from current file managed by storage.
-        
+
         Args:
             output_type: Type that you want to read to, either "dataframe" or "dict".
             Also supports remote datasets with prefix:
                 - "hf:{dataset_name}{:config}{:split}"  => HuggingFace dataset eg. "hf:openai/gsm8k:main:train"
                 - "ms:{dataset_name}{}:split}"          => ModelScope dataset eg. "ms:modelscope/gsm8k:train"
-        
+
         Returns:
             Depending on output_type:
             - "dataframe": pandas DataFrame
             - "dict": List of dictionaries
-        
+
         Raises:
             ValueError: For unsupported file types or output types
         """
         if self.operator_step == 0 and self.first_entry_file_name == "":
-            self.logger.info("first_entry_file_name is empty, returning empty dataframe")
+            self.logger.info(
+                "first_entry_file_name is empty, returning empty dataframe"
+            )
             empty_dataframe = pd.DataFrame()
             return self._convert_output(empty_dataframe, output_type)
 
@@ -591,9 +646,12 @@ class FileStorage(DataFlowStorage):
 
         if self.operator_step == 0:
             source = self.first_entry_file_name
-            self.logger.info(f"Reading remote dataset from {source} with type {output_type}")
+            self.logger.info(
+                f"Reading remote dataset from {source} with type {output_type}"
+            )
             if source.startswith("hf:"):
                 from datasets import load_dataset
+
                 _, dataset_name, *parts = source.split(":")
 
                 if len(parts) == 1:
@@ -604,22 +662,23 @@ class FileStorage(DataFlowStorage):
                     config, split = None, "train"
 
                 dataset = (
-                    load_dataset(dataset_name, config, split=split) 
-                    if config 
+                    load_dataset(dataset_name, config, split=split)
+                    if config
                     else load_dataset(dataset_name, split=split)
                 )
                 dataframe = dataset.to_pandas()
                 return self._convert_output(dataframe, output_type)
-        
+
             elif source.startswith("ms:"):
                 from modelscope import MsDataset
+
                 _, dataset_name, *split_parts = source.split(":")
                 split = split_parts[0] if split_parts else "train"
 
                 dataset = MsDataset.load(dataset_name, split=split)
                 dataframe = pd.DataFrame(dataset)
                 return self._convert_output(dataframe, output_type)
-                            
+
             else:
                 local_cache = file_path.split(".")[-1]
         else:
@@ -627,17 +686,18 @@ class FileStorage(DataFlowStorage):
 
         dataframe = self._load_local_file(file_path, local_cache)
         return self._convert_output(dataframe, output_type)
-        
+
     def write(self, data: Any) -> Any:
         """
         Write data to current file managed by storage.
         data: Any, the data to write, it should be a dataframe, List[dict], etc.
         """
+
         def clean_surrogates(obj):
             """递归清理数据中的无效Unicode代理对字符"""
             if isinstance(obj, str):
                 # 替换无效的Unicode代理对字符（如\udc00）
-                return obj.encode('utf-8', 'replace').decode('utf-8')
+                return obj.encode("utf-8", "replace").decode("utf-8")
             elif isinstance(obj, dict):
                 return {k: clean_surrogates(v) for k, v in obj.items()}
             elif isinstance(obj, list):
@@ -683,7 +743,9 @@ class FileStorage(DataFlowStorage):
         if self.cache_type == "json":
             dataframe.to_json(file_path, orient="records", force_ascii=False, indent=2)
         elif self.cache_type == "jsonl":
-            dataframe.to_json(file_path, orient="records", lines=True, force_ascii=False)
+            dataframe.to_json(
+                file_path, orient="records", lines=True, force_ascii=False
+            )
         elif self.cache_type == "csv":
             dataframe.to_csv(file_path, index=False)
         elif self.cache_type == "parquet":
@@ -693,10 +755,13 @@ class FileStorage(DataFlowStorage):
         elif self.cache_type == "xlsx":
             dataframe.to_excel(file_path, index=False)
         else:
-            raise ValueError(f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle or xlsx")
-        
-        return file_path    
-    
+            raise ValueError(
+                f"Unsupported file type: {self.cache_type}, output file should end with json, jsonl, csv, parquet, pickle or xlsx"
+            )
+
+        return file_path
+
+
 from threading import Lock, RLock
 import math
 from dataflow.utils.db_pool.myscale_pool import ClickHouseConnectionPool
@@ -704,56 +769,63 @@ from dataflow.utils.db_pool.myscale_pool import ClickHouseConnectionPool
 # 推荐在模块级别创建全局池
 myscale_pool = None
 
+
 def get_myscale_pool(db_config):
     global myscale_pool
     if myscale_pool is None:
         myscale_pool = ClickHouseConnectionPool(
-            host=db_config['host'],
-            port=db_config.get('port', 9000),
-            user=db_config.get('user', 'default'),
-            password=db_config.get('password', ''),
-            database=db_config.get('database', 'default'),
+            host=db_config["host"],
+            port=db_config.get("port", 9000),
+            user=db_config.get("user", "default"),
+            password=db_config.get("password", ""),
+            database=db_config.get("database", "default"),
             min_connections=5,
             max_connections=50,
         )
     return myscale_pool
 
+
 # 预定义字段前缀
-SYS_FIELD_PREFIX = 'sys:'
-USER_FIELD_PREFIX = 'user:'
+SYS_FIELD_PREFIX = "sys:"
+USER_FIELD_PREFIX = "user:"
 
 # 保留字段列表
-RESERVED_SYS_FIELD_LIST=["raw_data_id"]
-RESERVED_USER_FIELD_LIST=[]
+RESERVED_SYS_FIELD_LIST = ["raw_data_id"]
+RESERVED_USER_FIELD_LIST = []
+
 
 # 安全加载 json 数据
 def safe_json_loads(x):
-        if isinstance(x, dict):
-            return x
-        if isinstance(x, str):
-            try:
-                return json.loads(x)
-            except Exception:
-                return x  # 保留原始字符串
-        if pd.isna(x):
-            return None
-        return x  # 其它类型原样返回
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, str):
+        try:
+            return json.loads(x)
+        except Exception:
+            return x  # 保留原始字符串
+    if pd.isna(x):
+        return None
+    return x  # 其它类型原样返回
+
 
 # 安全合并列到 data 字段
 def safe_merge(row, col):
     val = row[col]
     if isinstance(val, float) and math.isnan(val):
-        return row['data']
-    return {**row['data'], col: val}
+        return row["data"]
+    return {**row["data"], col: val}
+
 
 # 预定义 min_hashes 计算方法，当前全部返回[0]
 def _default_min_hashes(data_dict):
     return [0]
 
+
 class MyScaleDBStorage(DataFlowStorage):
     """
     Storage for Myscale/ClickHouse database using clickhouse_driver.
     """
+
     def validate_required_params(self):
         """
         校验 MyScaleDBStorage 实例的关键参数有效性：
@@ -763,16 +835,18 @@ class MyScaleDBStorage(DataFlowStorage):
         """
         missing = []
         if not self.pipeline_id:
-            missing.append('pipeline_id')
+            missing.append("pipeline_id")
         if not self.input_task_id:
-            missing.append('input_task_id')
+            missing.append("input_task_id")
         if not self.output_task_id:
-            missing.append('output_task_id')
+            missing.append("output_task_id")
         if missing:
-            raise ValueError(f"Missing required storage parameters: {', '.join(missing)}")
-        if not hasattr(self, 'page_size') or self.page_size is None:
+            raise ValueError(
+                f"Missing required storage parameters: {', '.join(missing)}"
+            )
+        if not hasattr(self, "page_size") or self.page_size is None:
             self.page_size = 10000
-        if not hasattr(self, 'page_num') or self.page_num is None:
+        if not hasattr(self, "page_num") or self.page_num is None:
             self.page_num = 0
 
     def __init__(
@@ -783,7 +857,7 @@ class MyScaleDBStorage(DataFlowStorage):
         output_task_id: str = None,
         parent_pipeline_id: str = None,
         page_size: int = 10000,
-        page_num: int = 0
+        page_num: int = 0,
     ):
         """
         db_config: {
@@ -802,7 +876,7 @@ class MyScaleDBStorage(DataFlowStorage):
         page_num: int, 当前页码（默认 0）
         """
         self.db_config = db_config
-        self.table = db_config.get('table', 'dataflow_table')
+        self.table = db_config.get("table", "dataflow_table")
         self.logger = get_logger()
         self.pipeline_id: str = pipeline_id
         self.input_task_id: str = input_task_id
@@ -822,15 +896,19 @@ class MyScaleDBStorage(DataFlowStorage):
             params = {}
             if self.pipeline_id:
                 where_clauses.append("pipeline_id = %(pipeline_id)s")
-                params['pipeline_id'] = self.pipeline_id
+                params["pipeline_id"] = self.pipeline_id
             if self.input_task_id:
                 where_clauses.append("task_id = %(task_id)s")
-                params['task_id'] = self.input_task_id
-            if hasattr(self, 'parent_pipeline_id') and self.parent_pipeline_id:
+                params["task_id"] = self.input_task_id
+            if hasattr(self, "parent_pipeline_id") and self.parent_pipeline_id:
                 where_clauses.append("parent_pipeline_id = %(parent_pipeline_id)s")
-                params['parent_pipeline_id'] = self.parent_pipeline_id
+                params["parent_pipeline_id"] = self.parent_pipeline_id
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-            limit_offset = f"LIMIT {self.page_size} OFFSET {(self.page_num-1)*self.page_size}" if self.page_size else ""
+            limit_offset = (
+                f"LIMIT {self.page_size} OFFSET {(self.page_num-1)*self.page_size}"
+                if self.page_size
+                else ""
+            )
             sql = f"SELECT * FROM {self.table} {where_sql} {limit_offset}"
             self.logger.info(f"Reading from DB: {sql} with params {params}")
             result = client.execute(sql, params, with_column_types=True)
@@ -838,14 +916,14 @@ class MyScaleDBStorage(DataFlowStorage):
             columns = [col[0] for col in col_types]
             df = pd.DataFrame(rows, columns=columns)
             # 解析 data 字段为 dict
-            if 'data' not in df.columns:
+            if "data" not in df.columns:
                 raise ValueError("Result does not contain required 'data' field.")
 
             # 只保留 data 字段
-            data_series = df['data'].apply(safe_json_loads)
+            data_series = df["data"].apply(safe_json_loads)
             if output_type == "dataframe":
                 # 提取 data 一列并自动展开为多列（如果 data 是 dict）
-                result_df = pd.DataFrame({'data': data_series})
+                result_df = pd.DataFrame({"data": data_series})
                 if not data_series.empty and isinstance(data_series.iloc[0], dict):
                     expanded = data_series.apply(pd.Series)
                     # 合并展开列和原始 data 列
@@ -871,46 +949,103 @@ class MyScaleDBStorage(DataFlowStorage):
             else:
                 raise ValueError(f"Unsupported data type: {type(data)}")
             # data 字段本身就是每行的内容
-            if 'data' not in df.columns:
+            if "data" not in df.columns:
                 # 兼容直接传入 dict 列表的情况
-                df['data'] = df.apply(lambda row: row.to_dict(), axis=1)
+                df["data"] = df.apply(lambda row: row.to_dict(), axis=1)
             # 统一处理 data 列
-            df['data'] = df['data'].apply(lambda x: x if isinstance(x, dict) else (json.loads(x) if isinstance(x, str) else {}))
+            df["data"] = df["data"].apply(
+                lambda x: (
+                    x
+                    if isinstance(x, dict)
+                    else (json.loads(x) if isinstance(x, str) else {})
+                )
+            )
             # 合并所有非系统字段到 data 字段并删除原列
-            system_cols = {'pipeline_id', 'task_id', 'raw_data_id', 'min_hashes', 'file_id', 'filename', 'parent_pipeline_id', 'data'}
+            system_cols = {
+                "pipeline_id",
+                "task_id",
+                "raw_data_id",
+                "min_hashes",
+                "file_id",
+                "filename",
+                "parent_pipeline_id",
+                "data",
+            }
             for col in df.columns:
                 if col not in system_cols:
-                    df['data'] = df.apply(lambda row: safe_merge(row, col), axis=1)
+                    df["data"] = df.apply(lambda row: safe_merge(row, col), axis=1)
                     df = df.drop(columns=[col])
             # 自动填充 pipeline_id, task_id, raw_data_id, min_hashes, file_id, filename, parent_pipeline_id
-            df['pipeline_id'] = self.pipeline_id
-            df['task_id'] = self.output_task_id
-            df['raw_data_id'] = df['data'].apply(lambda d: d.get(SYS_FIELD_PREFIX + 'raw_data_id', 0) if isinstance(d, dict) else 0)
-            df['min_hashes'] = df['data'].apply(lambda d: _default_min_hashes(d) if isinstance(d, dict) else [0])
+            df["pipeline_id"] = self.pipeline_id
+            df["task_id"] = self.output_task_id
+            df["raw_data_id"] = df["data"].apply(
+                lambda d: (
+                    d.get(SYS_FIELD_PREFIX + "raw_data_id", 0)
+                    if isinstance(d, dict)
+                    else 0
+                )
+            )
+            df["min_hashes"] = df["data"].apply(
+                lambda d: _default_min_hashes(d) if isinstance(d, dict) else [0]
+            )
             # 从 data 中提取 file_id、filename、parent_pipeline_id 字段
-            df['file_id'] = df['data'].apply(lambda d: d.get(SYS_FIELD_PREFIX + 'file_id', '') if isinstance(d, dict) else '')
-            df['filename'] = df['data'].apply(lambda d: d.get(SYS_FIELD_PREFIX + 'filename', '') if isinstance(d, dict) else '')
-            df['parent_pipeline_id'] = df['data'].apply(lambda d: d.get(SYS_FIELD_PREFIX + 'parent_pipeline_id', '') if isinstance(d, dict) else '')
+            df["file_id"] = df["data"].apply(
+                lambda d: (
+                    d.get(SYS_FIELD_PREFIX + "file_id", "")
+                    if isinstance(d, dict)
+                    else ""
+                )
+            )
+            df["filename"] = df["data"].apply(
+                lambda d: (
+                    d.get(SYS_FIELD_PREFIX + "filename", "")
+                    if isinstance(d, dict)
+                    else ""
+                )
+            )
+            df["parent_pipeline_id"] = df["data"].apply(
+                lambda d: (
+                    d.get(SYS_FIELD_PREFIX + "parent_pipeline_id", "")
+                    if isinstance(d, dict)
+                    else ""
+                )
+            )
             # 若 data 中未提供 parent_pipeline_id，使用实例属性回填
-            if hasattr(self, 'parent_pipeline_id') and self.parent_pipeline_id:
-                df['parent_pipeline_id'] = df['parent_pipeline_id'].apply(lambda v: v if v else self.parent_pipeline_id)
+            if hasattr(self, "parent_pipeline_id") and self.parent_pipeline_id:
+                df["parent_pipeline_id"] = df["parent_pipeline_id"].apply(
+                    lambda v: v if v else self.parent_pipeline_id
+                )
             # data 字段转为 JSON 字符串
-            df['data'] = df['data'].apply(lambda x: json.dumps(x, ensure_ascii=False) if not isinstance(x, str) else x)
+            df["data"] = df["data"].apply(
+                lambda x: (
+                    json.dumps(x, ensure_ascii=False) if not isinstance(x, str) else x
+                )
+            )
             # 只保留必需字段
-            required_cols = ['pipeline_id', 'task_id', 'raw_data_id', 'min_hashes', 'file_id', 'filename', 'parent_pipeline_id', 'data']
+            required_cols = [
+                "pipeline_id",
+                "task_id",
+                "raw_data_id",
+                "min_hashes",
+                "file_id",
+                "filename",
+                "parent_pipeline_id",
+                "data",
+            ]
             df = df[required_cols]
             records = df.to_dict(orient="records")
             values = [
                 (
-                    rec['pipeline_id'],
-                    rec['task_id'],
-                    int(rec['raw_data_id']),
-                    rec['min_hashes'],
-                    rec['file_id'],
-                    rec['filename'],
-                    rec['parent_pipeline_id'],
-                    rec['data']
-                ) for rec in records
+                    rec["pipeline_id"],
+                    rec["task_id"],
+                    int(rec["raw_data_id"]),
+                    rec["min_hashes"],
+                    rec["file_id"],
+                    rec["filename"],
+                    rec["parent_pipeline_id"],
+                    rec["data"],
+                )
+                for rec in records
             ]
             insert_sql = f"""
             INSERT INTO {self.table} (pipeline_id, task_id, raw_data_id, min_hashes, file_id, filename, parent_pipeline_id, data)
@@ -927,46 +1062,53 @@ class MyScaleDBStorage(DataFlowStorage):
         """
         dataframe = self.read(output_type="dataframe")
         return dataframe.columns.tolist() if isinstance(dataframe, pd.DataFrame) else []
-    
-    
+
+
 class BatchedFileStorage(FileStorage):
     """
     批量文件存储，支持按批次读写数据。
     """
+
     def __init__(
-        self, 
+        self,
         first_entry_file_name: str,
-        cache_path:str="./cache",
-        file_name_prefix:str="dataflow_cache_step",
-        cache_type:Literal["jsonl", "csv"] = "jsonl",
+        cache_path: str = "./cache",
+        file_name_prefix: str = "dataflow_cache_step",
+        cache_type: Literal["jsonl", "csv"] = "jsonl",
     ):
-        super().__init__(first_entry_file_name, cache_path, file_name_prefix, cache_type)
+        super().__init__(
+            first_entry_file_name, cache_path, file_name_prefix, cache_type
+        )
         self.batch_size = None
         self.batch_step = 0
         self._dataframe_buffer = {}
         if cache_type not in ["jsonl", "csv"]:
-            raise ValueError(f"BatchedFileStorage only supports 'jsonl' and 'csv' cache types, got: {cache_type}")
-        
-    def read(self, output_type: Literal["dataframe", "dict"]="dataframe") -> Any:
+            raise ValueError(
+                f"BatchedFileStorage only supports 'jsonl' and 'csv' cache types, got: {cache_type}"
+            )
+
+    def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
         """
         Read data from current file managed by storage.
-        
+
         Args:
             output_type: Type that you want to read to, either "dataframe" or "dict".
             Also supports remote datasets with prefix:
                 - "hf:{dataset_name}{:config}{:split}"  => HuggingFace dataset eg. "hf:openai/gsm8k:main:train"
                 - "ms:{dataset_name}{}:split}"          => ModelScope dataset eg. "ms:modelscope/gsm8k:train"
-        
+
         Returns:
             Depending on output_type:
             - "dataframe": pandas DataFrame
             - "dict": List of dictionaries
-        
+
         Raises:
             ValueError: For unsupported file types or output types
         """
         if self.operator_step == 0 and self.first_entry_file_name == "":
-            self.logger.info("first_entry_file_name is empty, returning empty dataframe")
+            self.logger.info(
+                "first_entry_file_name is empty, returning empty dataframe"
+            )
             empty_dataframe = pd.DataFrame()
             return self._convert_output(empty_dataframe, output_type)
 
@@ -975,9 +1117,12 @@ class BatchedFileStorage(FileStorage):
 
         if self.operator_step == 0:
             source = self.first_entry_file_name
-            self.logger.info(f"Reading remote dataset from {source} with type {output_type}")
+            self.logger.info(
+                f"Reading remote dataset from {source} with type {output_type}"
+            )
             if source.startswith("hf:"):
                 from datasets import load_dataset
+
                 _, dataset_name, *parts = source.split(":")
 
                 if len(parts) == 1:
@@ -988,22 +1133,23 @@ class BatchedFileStorage(FileStorage):
                     config, split = None, "train"
 
                 dataset = (
-                    load_dataset(dataset_name, config, split=split) 
-                    if config 
+                    load_dataset(dataset_name, config, split=split)
+                    if config
                     else load_dataset(dataset_name, split=split)
                 )
                 dataframe = dataset.to_pandas()
                 return self._convert_output(dataframe, output_type)
-        
+
             elif source.startswith("ms:"):
                 from modelscope import MsDataset
+
                 _, dataset_name, *split_parts = source.split(":")
                 split = split_parts[0] if split_parts else "train"
 
                 dataset = MsDataset.load(dataset_name, split=split)
                 dataframe = pd.DataFrame(dataset)
                 return self._convert_output(dataframe, output_type)
-                            
+
             else:
                 local_cache = file_path.split(".")[-1]
         else:
@@ -1017,20 +1163,25 @@ class BatchedFileStorage(FileStorage):
         # 读出当前批次数据
         if self.batch_size:
             dataframe = dataframe.iloc[
-                self.batch_step * self.batch_size : (self.batch_step + 1) * self.batch_size
-            ].reset_index(drop=True) # reset_index, make the new index of every batch start from 0. Instead of its original index.
+                self.batch_step
+                * self.batch_size : (self.batch_step + 1)
+                * self.batch_size
+            ].reset_index(
+                drop=True
+            )  # reset_index, make the new index of every batch start from 0. Instead of its original index.
         return self._convert_output(dataframe, output_type)
-    
+
     def write(self, data: Any) -> Any:
         """
         Write data to current file managed by storage.
         data: Any, the data to write, it should be a dataframe, List[dict], etc.
         """
+
         def clean_surrogates(obj):
             """递归清理数据中的无效Unicode代理对字符"""
             if isinstance(obj, str):
                 # 替换无效的Unicode代理对字符（如\udc00）
-                return obj.encode('utf-8', 'replace').decode('utf-8')
+                return obj.encode("utf-8", "replace").decode("utf-8")
             elif isinstance(obj, dict):
                 return {k: clean_surrogates(v) for k, v in obj.items()}
             elif isinstance(obj, list):
@@ -1064,44 +1215,54 @@ class BatchedFileStorage(FileStorage):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         self.logger.success(f"Writing data to {file_path} with type {self.cache_type}")
         if self.cache_type == "jsonl":
-            open_mode = 'w' if self.batch_step == 0 else 'a'
-            with open(file_path, open_mode, encoding='utf-8') as f:
+            open_mode = "w" if self.batch_step == 0 else "a"
+            with open(file_path, open_mode, encoding="utf-8") as f:
                 dataframe.to_json(f, orient="records", lines=True, force_ascii=False)
         elif self.cache_type == "csv":
             if self.batch_step == 0:
                 dataframe.to_csv(file_path, index=False)
             else:
-                dataframe.to_csv(file_path, index=False, header=False, mode='a')
+                dataframe.to_csv(file_path, index=False, header=False, mode="a")
         else:
-            raise ValueError(f"Unsupported file type: {self.cache_type}, output file should end with jsonl, csv")
-        
+            raise ValueError(
+                f"Unsupported file type: {self.cache_type}, output file should end with jsonl, csv"
+            )
+
         return file_path
+
 
 class StreamBatchedFileStorage(BatchedFileStorage):
     """
     流式批量文件存储，支持按批次读写数据。
     """
+
     def __init__(
-        self, 
+        self,
         first_entry_file_name: str,
-        cache_path:str="./cache",
-        file_name_prefix:str="dataflow_cache_step",
-        cache_type:Literal["jsonl", "csv"] = "jsonl",
+        cache_path: str = "./cache",
+        file_name_prefix: str = "dataflow_cache_step",
+        cache_type: Literal["jsonl", "csv"] = "jsonl",
     ):
-        super().__init__(first_entry_file_name, cache_path, file_name_prefix, cache_type)
-    
+        super().__init__(
+            first_entry_file_name, cache_path, file_name_prefix, cache_type
+        )
+
     def get_keys_from_dataframe(self) -> list[str]:
         if self._dataframe_buffer.get(self.operator_step) is not None:
             return self._dataframe_buffer[self.operator_step].columns.tolist()
 
         file_path = self._get_cache_file_path(self.operator_step)
-        ext = self.cache_type if self.operator_step != 0 else file_path.split(".")[-1].lower()
+        ext = (
+            self.cache_type
+            if self.operator_step != 0
+            else file_path.split(".")[-1].lower()
+        )
         try:
             if ext == "csv":
                 return pd.read_csv(file_path, nrows=0).columns.tolist()
-            
+
             elif ext == "jsonl":
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     line = f.readline()
                     if line:
                         return list(json.loads(line).keys())
@@ -1110,17 +1271,24 @@ class StreamBatchedFileStorage(BatchedFileStorage):
             elif ext == "parquet":
                 # Parquet 格式在 Footer 存有 Schema，读取开销几乎为零
                 import pyarrow.parquet as pq
+
                 return pq.ParquetFile(file_path).schema.names
-                
+
         except Exception as e:
-            self.logger.warning(f"Failed to read header from {file_path} directly: {e}. Falling back to read().")
+            self.logger.warning(
+                f"Failed to read header from {file_path} directly: {e}. Falling back to read()."
+            )
         return []
 
-    def _load_local_file(self, file_path: str, file_type: str,batchsize: int=None) -> pd.DataFrame:
+    def _load_local_file(
+        self, file_path: str, file_type: str, batchsize: int = None
+    ) -> pd.DataFrame:
         """Load data from local file based on file type."""
         # check if file exists
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File {file_path} does not exist. Please check the path.")
+            raise FileNotFoundError(
+                f"File {file_path} does not exist. Please check the path."
+            )
 
         try:
             if file_type == "jsonl":
@@ -1137,16 +1305,21 @@ class StreamBatchedFileStorage(BatchedFileStorage):
             return self._cached_record_count
 
         file_path = self._get_cache_file_path(self.operator_step)
-        local_cache = self.cache_type if self.operator_step != 0 else file_path.split(".")[-1]
+        local_cache = (
+            self.cache_type if self.operator_step != 0 else file_path.split(".")[-1]
+        )
 
         if local_cache == "parquet":
             import pyarrow.parquet as pq
+
             count = pq.ParquetFile(file_path).metadata.num_rows
         elif local_cache in ["jsonl", "csv"]:
             count = 0
-            with open(file_path, 'rb') as f:
-                for _ in f: count += 1
-            if local_cache == "csv": count -= 1 # 扣除表头
+            with open(file_path, "rb") as f:
+                for _ in f:
+                    count += 1
+            if local_cache == "csv":
+                count -= 1  # 扣除表头
         else:
             df = self._load_local_file(file_path, local_cache)
             count = len(df)
@@ -1154,31 +1327,38 @@ class StreamBatchedFileStorage(BatchedFileStorage):
         self._cached_record_count = count
         return count
 
-    def read(self, output_type: Literal["dataframe", "dict"]="dataframe") -> Any:
+    def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
 
-        if hasattr(self, "_current_streaming_chunk") and self._current_streaming_chunk is not None:
+        if (
+            hasattr(self, "_current_streaming_chunk")
+            and self._current_streaming_chunk is not None
+        ):
             return self._convert_output(self._current_streaming_chunk, output_type)
-        
+
         if self.cache_type not in ["jsonl", "csv"]:
             self.logger.warning(
                 f"Current cache_type '{self.cache_type}' does not support optimized streaming. "
                 f"The storage will fall back to loading the full file into memory."
             )
         return super().read(output_type)
-    
+
     def iter_chunks(self) -> Generator[pd.DataFrame, None, None]:
         """
         专门供 Pipeline 调用：产生原始的 DataFrame 流。
         """
         file_path = self._get_cache_file_path(self.operator_step)
-        local_cache = self.cache_type if self.operator_step != 0 else file_path.split(".")[-1]
-        
+        local_cache = (
+            self.cache_type if self.operator_step != 0 else file_path.split(".")[-1]
+        )
+
         # 这里的 _load_local_file 必须确保在 batch_size 不为 None 时返回迭代器
         reader = self._load_local_file(file_path, local_cache, self.batch_size)
-        
+
         # 确保 reader 是可迭代的
-        if hasattr(reader, "__iter__") or isinstance(reader, pd.io.json._json.JsonReader):
+        if hasattr(reader, "__iter__") or isinstance(
+            reader, pd.io.json._json.JsonReader
+        ):
             for chunk in reader:
                 yield chunk
         else:
-            yield reader # 如果不支持流式，就产出整个 DF
+            yield reader  # 如果不支持流式，就产出整个 DF
