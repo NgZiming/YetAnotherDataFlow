@@ -842,7 +842,7 @@ class PartitionedPipelineRecoveryABC(PipelineABC):
         # 计算分片大小
         record_count: int = self.op_nodes_list[1].storage.get_record_count()
         desired_part_size = (record_count + partitions - 1) // partitions
-        
+
         # 验证分片大小一致性（如果是恢复运行）
         if _part != 0 or _step != 0 or part_size != 0:
             assert desired_part_size == part_size
@@ -866,22 +866,21 @@ class PartitionedPipelineRecoveryABC(PipelineABC):
 
                 op_node.storage.batch_size = part_size
                 op_node.storage.batch_step = i + 1
-                current_partition_df = op_node.storage.load_partition()
-                op_node.storage.current_streaming_chunk = current_partition_df
-
                 file_path = op_node.storage.write_file_path()
                 if op_node.storage.file_exists(file_path):
-                    self.logger.info(f"✅ 跳过已存在：{op_node.op_name} 分片 {i+1}/{partitions}")
+                    self.logger.info(
+                        f"✅ 跳过已存在：{op_node.op_name} 分片 {i+1}/{partitions}"
+                    )
                     continue
 
+                current_partition_df = op_node.storage.load_partition()
+                op_node.storage.current_streaming_chunk = current_partition_df
                 op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
                 self.cache_storage.record_steps(i, idx, part_size)
 
             self.cache_storage.record_steps(i + 1, 0, part_size)
 
-        self.logger.info(
-            "✨ 所有分片执行完毕，清理 LLM Serving 资源..."
-        )
+        self.logger.info("✨ 所有分片执行完毕，清理 LLM Serving 资源...")
         for op_node in self.op_nodes_list:
             if op_node.llm_serving is not None:
                 op_node.llm_serving.cleanup()
