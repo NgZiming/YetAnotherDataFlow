@@ -147,7 +147,7 @@ class S3JsonlStorage(DataFlowStorage):
 
     @property
     def batch_step(self) -> int:
-        return self.batch_step
+        return self._batch_step
 
     @batch_step.setter
     def batch_step(self, new_value: int) -> int:
@@ -156,12 +156,12 @@ class S3JsonlStorage(DataFlowStorage):
 
     @property
     def batch_size(self) -> Optional[int]:
-        return self.batch_size
+        return self._batch_size
 
     @batch_size.setter
     def batch_size(self, new_value: Optional[int]) -> Optional[int]:
-        self.batch_size = new_value
-        return self.batch_size
+        self._batch_size = new_value
+        return self._batch_size
 
     @property
     def current_streaming_chunk(self) -> Optional[pd.DataFrame]:
