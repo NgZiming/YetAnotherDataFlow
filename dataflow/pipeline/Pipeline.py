@@ -1,22 +1,44 @@
-import os
-import copy
-import socket
-import webbrowser
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
-from dataflow.core.operator import OperatorABC
-from dataflow.pipeline.nodes import OperatorNode, KeyNode
-from dataflow.wrapper.auto_op import AutoOP, OPRuntime
-from dataflow.utils.storage import DataFlowStorage
-from dataflow.core import OPERATOR_CLASSES, LLM_SERVING_CLASSES
+"""
+Pipeline 模块。
+
+提供数据流管道的核心基类和实现，支持：
+- 基础管道执行 (PipelineABC)
+- 分片处理与断点续传 (PartitionedPipelineRecoveryABC)
+- 流式分批处理 (StreamBatchedPipelineABC)
+- 管道可视化 (draw_graph)
+"""
+
+# ==================== 标准库 ====================
 import atexit
+import copy
+import os
+import socket
+from abc import ABC, abstractmethod
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from dataclasses import dataclass
 from datetime import datetime
-from dataflow.logger import get_logger
-import colorsys
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+# ==================== 第三方库 ====================
 from tqdm import tqdm
 
+# ==================== 项目本地 ====================
+import webbrowser
+
+from dataflow.core import LLM_SERVING_CLASSES
+from dataflow.core.operator import OperatorABC
+from dataflow.logger import get_logger
+from dataflow.pipeline.nodes import KeyNode, OperatorNode
 from dataflow.pipeline.plugin import CacheStorage
+from dataflow.utils.storage import DataFlowStorage
+from dataflow.wrapper.auto_op import AutoOP, OPRuntime
+
+
+@dataclass(frozen=True)
+class Workload:
+    partition: int
+    step: int
 
 
 class PipelineABC(ABC):
@@ -665,7 +687,7 @@ class PartitionedPipelineABC(PipelineABC):
 
                 op_node.storage.batch_size = part_size
                 op_node.storage.batch_step = i + 1
-                current_partition_df = op_node.storage.load_partition()
+                current_partition_df = op_node.storage.load_partition([idx - 1])
                 op_node.storage.current_streaming_chunk = current_partition_df
 
                 op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
@@ -873,7 +895,7 @@ class PartitionedPipelineRecoveryABC(PipelineABC):
                     )
                     continue
 
-                current_partition_df = op_node.storage.load_partition()
+                current_partition_df = op_node.storage.load_partition([idx - 1])
                 op_node.storage.current_streaming_chunk = current_partition_df
                 op_node.op_obj.run(storage=op_node.storage, **op_node.kwargs)
                 self.cache_storage.record_steps(i, idx, part_size)
@@ -884,3 +906,300 @@ class PartitionedPipelineRecoveryABC(PipelineABC):
         for op_node in self.op_nodes_list:
             if op_node.llm_serving is not None:
                 op_node.llm_serving.cleanup()
+
+
+class PartitionPipelineParallelRun(PipelineABC):
+    """
+    分片并行执行管道 - 支持多分片、多步骤的并发执行。
+
+    核心特性：
+    1. **分片并行**：将数据集划分为多个分片，不同分片可并行处理
+    2. **步骤依赖**：每个分片内部保持步骤顺序依赖（step N 依赖 step N-1）
+    3. **断点续传**：通过文件存在性检查自动跳过已完成的分片/步骤
+    4. **并发控制**：通过 max_parallelism 限制同时执行的 workload 数量
+
+    设计思路：
+    - 每个 (partition, step) 组合称为一个 Workload
+    - 同一 partition 内，step 之间存在依赖关系（前一步完成才能执行下一步）
+    - 不同 partition 之间完全独立，可并行执行
+    - 使用 ThreadPoolExecutor 实现并发，通过依赖检查确保执行顺序
+
+    进度记录（通过 cache_storage）：
+        - part: 当前已完成的分片编号（从 0 开始）
+        - step: 当前分片内已完成的 operator 步骤索引
+        - part_size: 每个分片的大小（记录数）
+
+    注意：
+        进度记录仅用于追踪"理论上应完成的进度"，实际执行通过文件检查判断。
+        首次运行时，进度记录会被初始化为"已完成"状态，实际执行时通过文件存在性跳过。
+    """
+
+    def __init__(self, cache_storage: CacheStorage):
+        """初始化并行分片管道。
+
+        Args:
+            cache_storage: 用于持久化执行进度的存储对象
+        """
+        super().__init__(cache_storage)
+
+    def _compiled_forward(self, partitions: int = 1, max_parallelism=4):
+        """
+        执行入口：初始化进度并启动并发执行。
+
+        Args:
+            partitions: 分片总数
+            max_parallelism: 最大并发数（同时执行的 workload 数量）
+
+        执行流程：
+        1. 计算分片大小
+        2. 读取上次进度（如有），初始化为本轮"已完成"状态
+        3. 调用 concurrent_execute_operators 启动并发执行
+        """
+        # 计算总记录数和分片大小
+        record_count: int = self.op_nodes_list[1].storage.get_record_count()
+        desired_part_size = (record_count + partitions - 1) // partitions
+
+        # 读取上次中断时的进度
+        _part, _step, _part_size = self.cache_storage.get_steps()
+
+        # 初始化：如果是全新运行（part=0, step=0），则设为"已完成"状态
+        # 这样外部查询进度时会显示 100%，实际执行通过文件检查跳过
+        if _part_size == 0:
+            _part_size = desired_part_size
+        if _step == 0:
+            _step = len(self.op_nodes_list) - 2  # 最后一个 operator 步骤
+        if _part == 0:
+            _part = partitions  # 标记为"所有分片已完成"
+
+        # 断言验证：确保进度记录与预期一致
+        assert (
+            _part_size == desired_part_size
+        ), f"分片大小不一致：{_part_size} != {desired_part_size}"
+        assert (
+            _step == len(self.op_nodes_list) - 2
+        ), f"步骤索引不一致：{_step} != {len(self.op_nodes_list) - 2}"
+        assert _part == partitions, f"分片数不一致：{_part} != {partitions}"
+
+        # 写入进度记录（标记为"已完成"）
+        self.cache_storage.record_steps(_part, _step, _part_size)
+        self._part_size = _part_size
+
+        self.logger.info(
+            f"▶️ 执行 PartitionPipelineParallelRun: part:{_part} step:{_step} part_size:{_part_size}"
+        )
+
+        # 启动并发执行
+        self.concurrent_execute_operators(partitions, max_parallelism)
+
+    def execute_workload(
+        self,
+        wl: Workload,
+        partitions: int,
+        node: OperatorNode,
+        dependencies: set[Workload],
+    ):
+        """
+        执行单个 Workload（分片 + 步骤组合）。
+
+        Args:
+            wl: Workload 对象，包含 partition 和 step 信息
+            partitions: 总分片数（用于日志显示）
+            node: 要执行的 OperatorNode
+            dependencies: 该 workload 的依赖集合（同一 partition 内的前驱步骤）
+
+        执行流程：
+        1. 记录执行日志
+        2. 分析依赖节点的 step 索引
+        3. 配置 storage 的 batch_size 和 batch_step
+        4. 检查输出文件是否存在（断点续传）
+        5. 加载前驱步骤的数据
+        6. 执行 operator.run()
+        """
+        self.logger.info(
+            f"▶️ 执行 [{wl.partition + 1}/{partitions}]:[{wl.step}:{node.op_name}]"
+        )
+
+        # 获取所有依赖节点的 step 索引，用于 load_partition
+        dep_parts = [dep.step for dep in dependencies]
+
+        self.logger.info(
+            f"✅ 依赖分析： 节点 [{wl.partition + 1}]:[{wl.step}:{node.op_name}] 依赖节点 [{wl.partition + 1}]:{dep_parts}"
+        )
+
+        # 配置 storage：设置分片大小和当前分片编号
+        storage = copy.copy(node.storage)
+        storage.batch_size = self._part_size
+        storage.batch_step = wl.partition + 1
+
+        # 断点续传检查：如果输出文件已存在，直接跳过
+        file_path = storage.write_file_path()
+        if storage.file_exists(file_path):
+            self.logger.info(
+                f"✅ 跳过已存在：{node.op_name} 分片 {wl.partition + 1}/{partitions}"
+            )
+            return
+
+        # 加载前驱步骤的数据（依赖节点的输出）
+        current_partition_df = storage.load_partition(dep_parts)
+        storage.current_streaming_chunk = current_partition_df
+
+        # 执行 operator 的核心逻辑
+        node.op_obj.run(storage=storage, **node.kwargs)
+        self.logger.info(
+            f"✅ 节点完成：{node.op_name} 分片 {wl.partition + 1}/{partitions}"
+        )
+
+    def concurrent_execute_operators(self, partitions: int, max_parallelism: int):
+        """
+        并发执行所有分片的 operators。
+
+        Args:
+            partitions: 分片总数
+            max_parallelism: 最大并发数（同时执行的线程数）
+
+        执行流程：
+        1. 构建 workload 依赖图：每个 (partition, step) 是一个 Workload
+        2. 识别依赖关系：同一 partition 内，step N 依赖 step N-1
+        3. 使用 ThreadPoolExecutor 并发执行
+        4. 循环：
+           a. 找出所有"依赖已满足且未执行"的 workload（ready_nodes）
+           b. 按 step 降序、partition 升序排序（优先执行后面的步骤）
+           c. 提交最多 max_parallelism 个 workload 到线程池
+           d. 等待至少一个完成
+           e. 更新依赖图，释放后续 workload 的依赖
+        """
+        self.logger.info(
+            f"🚀 启动并发执行 | partitions={partitions}, max_parallelism={max_parallelism}, "
+            f"total_workload={partitions * (len(self.op_nodes_list) - 2)}"
+        )
+
+        # 记录已完成的 workload
+        completed_workloads: set[Workload] = set()
+
+        # 构建完整的依赖图：Workload -> set[依赖的 Workload]
+        dependencies: dict[Workload, set[Workload]] = dict()
+
+        for partition in range(partitions):
+            for idx, node in enumerate(self.op_nodes_list):
+                wl = Workload(partition, idx)
+                dependencies[wl] = set()
+                # 遍历所有输入 key，找到它们的前驱节点
+                for _, key_node in node.input_key_nodes.items():
+                    # 添加依赖：当前 workload 依赖前驱节点的 workload
+                    dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
+
+        self.logger.debug(
+            f"📋 依赖图构建完成 | {len(dependencies)} 个 workload, "
+            f"{len(self.op_nodes_list)} 个 operator 节点"
+        )
+
+        # 用于追踪剩余依赖的副本（执行过程中会修改）
+        dependencies_checks = copy.deepcopy(dependencies)
+
+        # 总 workload 数：分片数 × (operator 节点数 - 2)
+        # 减 2 是因为排除了 DATASET-INPUT 和 DATASET-OUTPUT 节点
+        total_workload = partitions * (len(self.op_nodes_list) - 2)
+
+        # 使用线程池并发执行
+        with ThreadPoolExecutor(max_workers=max_parallelism) as executor:
+            futures: dict[Future, Workload] = {}
+            iteration = 0
+
+            # 循环直到所有 workload 完成
+            while len(completed_workloads) < total_workload:
+                iteration += 1
+
+                # 找到所有可以执行的节点（依赖已满足且未执行）
+                ready_nodes: list[Workload] = []
+                for partition in range(partitions):
+                    for idx, node in enumerate(self.op_nodes_list):
+                        wl = Workload(partition, idx)
+
+                        # 跳过没有 operator 的节点（如 DATASET-INPUT/OUTPUT）
+                        if node.op_obj is None:
+                            continue
+                        # 跳过已完成的
+                        if wl in completed_workloads:
+                            continue
+                        # 跳过已提交但未完成的
+                        if wl in futures.values():
+                            continue
+                        # 检查依赖：排除 DATASET-INPUT（step=0）后，依赖必须为空
+                        if (
+                            len(dependencies_checks[wl] - set([Workload(partition, 0)]))
+                            > 0
+                        ):
+                            continue
+                        ready_nodes.append(wl)
+
+                # 排序：优先执行 step 大的（后面的步骤），同 step 时按 partition 升序
+                ready_nodes = sorted(
+                    ready_nodes,
+                    key=lambda wl: (wl.partition, -wl.step),
+                )
+
+                # 提交可执行的节点（不超过剩余线程数）
+                submitted_count = 0
+                for wl in ready_nodes[: max_parallelism - len(futures)]:
+                    future = executor.submit(
+                        self.execute_workload,
+                        wl,
+                        partitions,
+                        self.op_nodes_list[wl.step],
+                        dependencies[wl],
+                    )
+                    futures[future] = wl
+                    submitted_count += 1
+
+                if submitted_count > 0:
+                    self.logger.info(
+                        f"📤 {iteration} 提交 {submitted_count} 个 workload | "
+                        f"运行中：{len(futures)}, 已完成：{len(completed_workloads)}/{total_workload}"
+                    )
+
+                # 等待至少一个完成，然后重新检查哪些节点可以执行
+                if futures:
+                    for future in as_completed(futures.keys()):
+                        break
+
+                # 收集所有已完成的 future
+                done_futures: list[Future] = []
+                for future in futures.keys():
+                    if future.done():
+                        done_futures.append(future)
+
+                # 处理完成的 workload
+                completed_count = 0
+                for future in done_futures:
+                    wl = futures.pop(future)
+                    try:
+                        _ = future.result()  # 获取结果（可能有异常）
+                        completed_workloads.add(wl)
+                        completed_count += 1
+                    except Exception as e:
+                        self.logger.error(
+                            f"❌ Workload 执行失败 [{wl.partition + 1}/{partitions}]:[{wl.step}] | {e}"
+                        )
+                        raise
+
+                    # 从其他节点的 dependencies 中移除已完成的节点
+                    for other_wl in dependencies_checks.keys():
+                        if wl in dependencies_checks[other_wl]:
+                            dependencies_checks[other_wl].remove(wl)
+
+                if completed_count > 0:
+                    self.logger.info(
+                        f"✅ 完成 {completed_count} 个 workload | "
+                        f"总计：{len(completed_workloads)}/{total_workload} "
+                        f"({100 * len(completed_workloads) // total_workload}%)"
+                    )
+
+                # 进度检查：每完成 25% 输出一次摘要
+                progress = 100 * len(completed_workloads) // total_workload
+                if progress > 0 and progress % 25 == 0 and progress < 100:
+                    self.logger.info(
+                        f"📊 进度更新 | {progress}% | "
+                        f"进行中：{len(futures)}, 剩余：{total_workload - len(completed_workloads)}"
+                    )
+
+        self.logger.info(f"✨ 并发执行完成 | 总计 {total_workload} 个 workload")
