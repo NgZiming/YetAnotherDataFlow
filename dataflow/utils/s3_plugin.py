@@ -16,6 +16,7 @@ S3 存储插件模块。
 import copy
 import json
 import re
+import time
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -503,14 +504,31 @@ class S3JsonlStorage(DataFlowStorage):
                     self.logger.info(f"📦 读取文件：{x}[{f}-{n}]")
                 self.logger.info(f"📦 读取分片：{self.batch_step}")
             else:
-                data_paths = self._get_s3_file_names(dep_op_step)
-                assert data_paths[self.batch_step - 1].endswith(
-                    f"{self.batch_step:08}.jsonl"
-                )
+                waits = 0
+                while True:
+                    if waits >= 3:
+                        raise Exception(
+                            f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step - 1} 超时"
+                        )
+                    data_paths = sorted(self._get_s3_file_names(dep_op_step))
+                    if len(data_paths) <= self.batch_step:
+                        self.logger.warning(
+                            f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step - 1} "
+                        )
+                        waits += 1
+                        time.sleep(10)
+                        continue
+                    dep_file = data_paths[self.batch_step - 1]
+                    if not dep_file.endswith(f"{self.batch_step:08}.jsonl"):
+                        self.logger.warning(
+                            f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step - 1} "
+                        )
+                        waits += 1
+                        time.sleep(10)
+                        continue
+                    break
                 ids: set[str] = set()
-                for line, now_bytes in self._read_file_line(
-                    data_paths[self.batch_step - 1], 0
-                ):
+                for line, now_bytes in self._read_file_line(dep_file, 0):
                     d = json.loads(line)
                     ids.add(d[self.id_key])
                     if d[self.id_key] not in rtn:
@@ -519,10 +537,8 @@ class S3JsonlStorage(DataFlowStorage):
                 removed_ids = set(rtn.keys()) - ids
                 for x in removed_ids:
                     rtn.pop(x)
-                self.logger.info(
-                    f"📦 读取文件：{data_paths[self.batch_step - 1]}[{0}-{now_bytes}]"
-                )
-                self.logger.info(f"📦 读取分片：{data_paths[self.batch_step - 1]}")
+                self.logger.info(f"📦 读取文件：{dep_file}[{0}-{now_bytes}]")
+                self.logger.info(f"📦 读取分片：{dep_file}")
 
         return pd.DataFrame(rtn.values())
 
