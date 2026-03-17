@@ -481,8 +481,11 @@ class S3JsonlStorage(DataFlowStorage):
             - step>0: 从前一个 operator 的输出文件中加载对应批次
         """
         rtn: dict[str, dict] = {}
+        key_sets: list[set[str]] = []
 
         for dep_op_step in dependent_op_indices:
+            key_sets.append(set())
+
             if dep_op_step == 0:
                 assert self._batch_size is not None
                 begin_line = self._batch_size * (self._batch_step - 1)
@@ -492,7 +495,10 @@ class S3JsonlStorage(DataFlowStorage):
                 for s3_file in self.s3_paths[file_idx:]:
                     for line, now_btyes in self._read_file_line(s3_file, from_bytes):
                         d = json.loads(line)
-                        rtn[d[self.id_key]] = d
+                        key_sets[-1].add(d[self.id_key])
+                        if d[self.id_key] not in rtn:
+                            rtn[d[self.id_key]] = {}
+                        rtn[d[self.id_key]].update(d)
                         read_count += 1
                         read_list[s3_file] = (from_bytes, now_btyes)
                         if read_count >= self._batch_size:
@@ -527,18 +533,21 @@ class S3JsonlStorage(DataFlowStorage):
                         time.sleep(10)
                         continue
                     break
-                ids: set[str] = set()
                 for line, now_bytes in self._read_file_line(dep_file, 0):
                     d = json.loads(line)
-                    ids.add(d[self.id_key])
+                    key_sets[-1].add(d[self.id_key])
                     if d[self.id_key] not in rtn:
                         rtn[d[self.id_key]] = {}
                     rtn[d[self.id_key]].update(d)
-                removed_ids = set(rtn.keys()) - ids
-                for x in removed_ids:
-                    rtn.pop(x)
                 self.logger.info(f"📦 读取文件：{dep_file}[{0}-{now_bytes}]")
                 self.logger.info(f"📦 读取分片：{dep_file}")
+
+        ids = key_sets[0]
+        for x in key_sets[1:]:
+            ids = ids.intersection(x)
+        removed_ids = set(rtn.keys()) - ids
+        for x in removed_ids:
+            rtn.pop(x)
 
         return pd.DataFrame(rtn.values())
 
