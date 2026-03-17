@@ -300,17 +300,45 @@ class S3JsonlStorage(DataFlowStorage):
         sk: str,
         s3_paths: list[str],
         output_s3_path: str,
+        id_key: str,
     ) -> None:
-        self.client = get_s3_client(endpoint, ak, sk)
-        self.s3_paths = s3_paths
+        self.logger = get_logger()
+
+        self.endpoint = endpoint
+        self.ak = ak
+        self.sk = sk
+
+        self.logger.info(f"文件夹展开中")
+        self.s3_paths: list = []
+        for x in s3_paths:
+            if x.endswith("/"):
+                for y, _ in list_s3_objects_detailed(
+                    get_s3_client(self.endpoint, self.ak, self.sk), x, True
+                ):
+                    if y.endswith(".jsonl"):
+                        self.s3_paths.append(y)
+            else:
+                self.s3_paths.append(x)
+        self.s3_paths = sorted(list(set(self.s3_paths)))
+        self.logger.info(f"文件夹展开完成，文件列表：{self.s3_paths}")
+
         self.output_s3_path = output_s3_path
 
         self._batch_step = 0
         self._batch_size = None
         self.operator_step = -1
-        self.logger = get_logger()
-
         self._current_streaming_chunk: Optional[pd.DataFrame] = None
+
+        self.id_key = id_key
+        self.lines_cache: list[tuple[int, int]] = []
+
+        self.logger.info("正在生成索引")
+        for idx, x in enumerate(self.s3_paths):
+            last_done = 0
+            for _, done in self._read_file_line(x, 0):
+                self.lines_cache.append((idx, last_done))
+                last_done = done
+        self.logger.info("生成索引结束")
 
     @property
     def batch_step(self) -> int:
@@ -354,9 +382,11 @@ class S3JsonlStorage(DataFlowStorage):
         Returns:
             bool: 文件存在返回 True，否则返回 False
         """
-        return exists_s3_object(self.client, file_path)
+        return exists_s3_object(
+            get_s3_client(self.endpoint, self.ak, self.sk), file_path
+        )
 
-    def _get_s3_file_names(self) -> list[str]:
+    def _get_s3_file_names(self, op_step: int) -> list[str]:
         """获取当前 operator_step 对应的输出文件路径列表。
 
         Returns:
@@ -364,14 +394,16 @@ class S3JsonlStorage(DataFlowStorage):
         """
         rtn: list[str] = []
         file_path = Path(self.output_s3_path.removeprefix("s3://")).joinpath(
-            f"{self.operator_step:08}"
+            f"{op_step:08}"
         )
         if self.batch_size is None:
             file_path = file_path.with_suffix(".jsonl")
             rtn.append("s3://" + str(file_path))
         else:
             for x, _ in list_s3_objects_detailed(
-                self.client, "s3://" + str(file_path) + "/", True
+                get_s3_client(self.endpoint, self.ak, self.sk),
+                "s3://" + str(file_path) + "/",
+                True,
             ):
                 if x.endswith(".jsonl"):
                     rtn.append(x)
@@ -392,7 +424,7 @@ class S3JsonlStorage(DataFlowStorage):
             tuple[str, int]: (解码后的行内容，下一个起始字节位置)
         """
         bucket_name, object_key = split_s3_path(s3_path)
-        response = self.client.get_object(
+        response = get_s3_client(self.endpoint, self.ak, self.sk).get_object(
             Bucket=bucket_name,
             Key=object_key,
             Range=f"bytes={skip_bytes}-",
@@ -419,7 +451,7 @@ class S3JsonlStorage(DataFlowStorage):
         if self.operator_step == 0:
             data_paths = self.s3_paths
         else:
-            data_paths = self._get_s3_file_names()
+            data_paths = self._get_s3_file_names(self.operator_step)
         for x in data_paths:
             from_bytes = 0
             while True:
@@ -435,7 +467,7 @@ class S3JsonlStorage(DataFlowStorage):
                     )
             self.logger.info(f"📖 读取完成：{x} ({from_bytes} 字节)")
 
-    def load_partition(self) -> pd.DataFrame:
+    def load_partition(self, dependent_op_indices: list[int]) -> pd.DataFrame:
         """加载当前分片的数据。
 
         根据 operator_step 和 batch_step 加载对应的数据分片。
@@ -447,25 +479,52 @@ class S3JsonlStorage(DataFlowStorage):
             - step=0: 从输入数据中按 batch_step 加载分片
             - step>0: 从前一个 operator 的输出文件中加载对应批次
         """
-        if self.operator_step == 0:
-            if not hasattr(self, "chunks"):
-                self.chunks = self.iter_chunks()
-                for part in range(self.batch_step - 1):
-                    self.logger.info(f"⏭️ 跳过分片：{part + 1}")
-                    next(self.chunks)
-            self.logger.info(f"📦 读取分片：{self.batch_step}")
-            return next(self.chunks)
-        else:
-            data_paths = self._get_s3_file_names()
-            self.logger.info(f"📦 读取分片：{data_paths[self.batch_step - 1]}")
-            assert data_paths[self.batch_step - 1].endswith(
-                f"{self.batch_step:08}.jsonl"
-            )
-            rtn: list[dict] = []
-            for line, _ in self._read_file_line(data_paths[self.batch_step - 1], 0):
-                d = json.loads(line)
-                rtn.append(d)
-            return pd.DataFrame(rtn)
+        rtn: dict[str, dict] = {}
+
+        for dep_op_step in dependent_op_indices:
+            if dep_op_step == 0:
+                assert self._batch_size is not None
+                begin_line = self._batch_size * (self._batch_step - 1)
+                file_idx, from_bytes = self.lines_cache[begin_line]
+                read_count = 0
+                read_list: dict[str, tuple[int, int]] = {}
+                for s3_file in self.s3_paths[file_idx:]:
+                    for line, now_btyes in self._read_file_line(s3_file, from_bytes):
+                        d = json.loads(line)
+                        rtn[d[self.id_key]] = d
+                        read_count += 1
+                        read_list[s3_file] = (from_bytes, now_btyes)
+                        if read_count >= self._batch_size:
+                            break
+                    if read_count >= self._batch_size:
+                        break
+                    from_bytes = 0
+                for x, (f, n) in read_list.items():
+                    self.logger.info(f"📦 读取文件：{x}[{f}-{n}]")
+                self.logger.info(f"📦 读取分片：{self.batch_step}")
+            else:
+                data_paths = self._get_s3_file_names(dep_op_step)
+                assert data_paths[self.batch_step - 1].endswith(
+                    f"{self.batch_step:08}.jsonl"
+                )
+                ids: set[str] = set()
+                for line, now_bytes in self._read_file_line(
+                    data_paths[self.batch_step - 1], 0
+                ):
+                    d = json.loads(line)
+                    ids.add(d[self.id_key])
+                    if d[self.id_key] not in rtn:
+                        rtn[d[self.id_key]] = {}
+                    rtn[d[self.id_key]].update(d)
+                removed_ids = set(rtn.keys()) - ids
+                for x in removed_ids:
+                    rtn.pop(x)
+                self.logger.info(
+                    f"📦 读取文件：{data_paths[self.batch_step - 1]}[{0}-{now_bytes}]"
+                )
+                self.logger.info(f"📦 读取分片：{data_paths[self.batch_step - 1]}")
+
+        return pd.DataFrame(rtn.values())
 
     def get_record_count(self) -> int:
         """获取总记录数。
@@ -476,10 +535,7 @@ class S3JsonlStorage(DataFlowStorage):
         Note:
             需要遍历所有数据，大数据集可能较慢。
         """
-        lines = 0
-        for _ in self._read_results():
-            lines += 1
-        return lines
+        return len(self.lines_cache)
 
     def get_keys_from_dataframe(self) -> list[str]:
         """获取数据中的字段名列表。
@@ -591,6 +647,7 @@ class S3JsonlStorage(DataFlowStorage):
             - 自动清理无效 Unicode 字符
             - 使用 ensure_ascii=False 保留中文字符
         """
+
         def clean_surrogates(obj):
             """递归清理数据中的无效 Unicode 代理对字符"""
             if isinstance(obj, str):
@@ -619,7 +676,7 @@ class S3JsonlStorage(DataFlowStorage):
 
         file_path = self.write_file_path()
         bucket_name, object_key = split_s3_path(file_path)
-        _ = self.client.put_object(
+        _ = get_s3_client(self.endpoint, self.ak, self.sk).put_object(
             Bucket=bucket_name,
             Key=object_key,
             Body=content,
