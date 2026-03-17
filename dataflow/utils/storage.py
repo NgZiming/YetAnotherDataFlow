@@ -55,7 +55,7 @@ class DataFlowStorage(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load_partition(self) -> pd.DataFrame:
+    def load_partition(self, dependent_op_indices: list[int]) -> pd.DataFrame:
         raise NotImplementedError
 
     @abstractmethod

@@ -50,9 +50,9 @@ class OperatorNode(object):
         
         # Initialize input and output keys
         self.input_keys = []
-        self.input_key_nodes: dict[KeyNode] = {}
+        self.input_key_nodes: dict[str, KeyNode] = {}
         self.output_keys = []
-        self.output_keys_nodes: dict[KeyNode] = {}
+        self.output_keys_nodes: dict[str, KeyNode] = {}
         
         self._get_keys_from_kwargs()  # Extract keys from kwargs
         
