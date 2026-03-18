@@ -32,6 +32,8 @@ from tqdm import tqdm
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 # S3 路径匹配正则表达式，支持 s3:// 和 s3a:// 协议
 __re_s3_path = re.compile("^s3a?://([^/]+)(?:/(.*))?$")
 
@@ -335,13 +337,24 @@ class S3JsonlStorage(DataFlowStorage):
         self.lines_cache: list[tuple[int, int]] = []
 
         self.logger.info("正在生成索引")
-        for idx, x in enumerate(self.s3_paths):
-            last_done = 0
-            for _, done in tqdm(self._read_file_line(x, 0)):
-                self.lines_cache.append((idx, last_done))
-                last_done = done
-            self.logger.info(f"读取文件 {x} 结束")
-        self.logger.info("生成索引结束")
+        # 并发生成索引，大幅提升多文件场景下的初始化速度
+        with ThreadPoolExecutor(max_workers=32) as executor:
+            future_to_idx = {
+                executor.submit(self._read_file_line, x, 0): idx 
+                for idx, x in enumerate(self.s3_paths)
+            }
+            futures = list(future_to_idx.items())
+            for future, idx in tqdm(futures, desc="生成索引", total=len(futures)):
+                last_done = 0
+                try:
+                    for _, done in future.result():
+                        self.lines_cache.append((idx, last_done))
+                        last_done = done
+                except Exception as e:
+                    self.logger.error(f"📁 文件 {self.s3_paths[idx]} 索引生成失败：{e}")
+                    raise
+        self.lines_cache.sort(key=lambda x: x[0])  # 保持文件顺序
+        self.logger.info(f"生成索引结束，共 {len(self.lines_cache)} 个文件片段")
 
     @property
     def batch_step(self) -> int:
@@ -438,7 +451,24 @@ class S3JsonlStorage(DataFlowStorage):
             counter += len(line_bytes)
             yield line_bytes.decode("utf-8"), counter
 
-    def _read_results(self) -> Generator[dict, None, None]:
+ 
+    def _index_file(self, s3_path: str) -> list[tuple[int, int]]:
+        """并发辅助方法：生成单个文件的索引。
+        
+        Args:
+            s3_path: S3 文件路径
+            
+        Returns:
+            list[tuple[int, int]]: [(文件索引，累计行数), ...]
+        """
+        results = []
+        last_done = 0
+        for _, done in self._read_file_line(s3_path, 0):
+            results.append((last_done,))  # 只记录字节位置
+            last_done = done
+        return results, last_done
+
+   def _read_results(self) -> Generator[dict, None, None]:
         """流式读取所有结果数据。
 
         根据 operator_step 决定读取输入数据还是中间结果：
