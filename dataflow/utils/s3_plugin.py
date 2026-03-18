@@ -339,6 +339,7 @@ class S3JsonlStorage(DataFlowStorage):
             for _, done in self._read_file_line(x, 0):
                 self.lines_cache.append((idx, last_done))
                 last_done = done
+            self.logger.info(f"读取文件 {x} 结束")
         self.logger.info("生成索引结束")
 
     @property
