@@ -353,7 +353,7 @@ class S3JsonlStorage(DataFlowStorage):
                 except Exception as e:
                     self.logger.error(f"📁 文件 {self.s3_paths[idx]} 索引生成失败：{e}")
                     raise
-        self.lines_cache.sort(key=lambda x: x[0])  # 保持文件顺序
+        # 已按文件顺序处理，无需排序
         self.logger.info(f"生成索引结束，共 {len(self.lines_cache)} 个文件片段")
 
     @property
