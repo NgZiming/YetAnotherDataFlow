@@ -565,6 +565,7 @@ class S3JsonlStorage(DataFlowStorage):
                         time.sleep(10)
                         continue
                     break
+                now_bytes = 0
                 for line, now_bytes in self._read_file_line(dep_file, 0):
                     d = json.loads(line)
                     key_sets[-1].add(d[self.id_key])
