@@ -32,7 +32,7 @@ from tqdm import tqdm
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 # S3 路径匹配正则表达式，支持 s3:// 和 s3a:// 协议
 __re_s3_path = re.compile("^s3a?://([^/]+)(?:/(.*))?$")
