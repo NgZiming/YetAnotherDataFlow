@@ -32,7 +32,7 @@ from tqdm import tqdm
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # S3 路径匹配正则表达式，支持 s3:// 和 s3a:// 协议
 __re_s3_path = re.compile("^s3a?://([^/]+)(?:/(.*))?$")
@@ -351,14 +351,17 @@ class S3JsonlStorage(DataFlowStorage):
 
         self.logger.info("正在生成索引")
         # 并发生成索引，使用 as_completed 让任务完成后立即处理
-        from concurrent.futures import as_completed
         with ThreadPoolExecutor(max_workers=32) as executor:
             future_to_idx = {
                 executor.submit(self._read_file_line, x, 0): idx
                 for idx, x in enumerate(self.s3_paths)
             }
             # 使用 as_completed 实现真正的并发处理
-            for future in tqdm(as_completed(future_to_idx), desc="生成索引", total=len(future_to_idx)):
+            for future in tqdm(
+                as_completed(future_to_idx),
+                desc="生成索引",
+                total=len(future_to_idx),
+            ):
                 idx = future_to_idx[future]
                 last_done = 0
                 try:
@@ -369,7 +372,7 @@ class S3JsonlStorage(DataFlowStorage):
                     self.logger.error(f"📁 文件 {self.s3_paths[idx]} 索引生成失败：{e}")
                     raise
         # 按文件索引排序，确保后续读取顺序正确
-        self.lines_cache.sort(key=lambda x: x[0])
+        self.lines_cache.sort(key=lambda x: (x[0], x[1]))
         self.logger.info(f"生成索引结束，共 {len(self.lines_cache)} 个文件片段")
 
     @property
