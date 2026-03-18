@@ -27,6 +27,7 @@ import pandas as pd
 
 from botocore.client import Config
 from botocore.exceptions import ClientError, ResponseStreamingError
+from tqdm import tqdm
 
 from dataflow import get_logger
 from dataflow.utils.storage import DataFlowStorage
@@ -336,7 +337,7 @@ class S3JsonlStorage(DataFlowStorage):
         self.logger.info("正在生成索引")
         for idx, x in enumerate(self.s3_paths):
             last_done = 0
-            for _, done in self._read_file_line(x, 0):
+            for _, done in tqdm(self._read_file_line(x, 0)):
                 self.lines_cache.append((idx, last_done))
                 last_done = done
             self.logger.info(f"读取文件 {x} 结束")
