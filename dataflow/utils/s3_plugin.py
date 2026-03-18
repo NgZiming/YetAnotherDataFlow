@@ -168,6 +168,19 @@ def exists_s3_object(client, s3_path: str) -> bool:
         raise e
 
 
+def is_s3_object_empty(client, path: str):
+    try:
+        bucket_name, object_key = split_s3_path(path)
+        # head_object 比 get_object 更高效，不下载文件内容
+        response = client.head_object(Bucket=bucket_name, Key=object_key)
+        size = response["ContentLength"]
+        return size == 0
+    except ClientError as e:
+        # 处理文件不存在等情况
+        print(f"Error checking file: {e}")
+        return None
+
+
 def read_s3_bytes(client, s3_path: str) -> bytes:
     """读取 S3 对象的完整内容。
 
@@ -439,8 +452,12 @@ class S3JsonlStorage(DataFlowStorage):
         Yields:
             tuple[str, int]: (解码后的行内容，下一个起始字节位置)
         """
+        client = get_s3_client(self.endpoint, self.ak, self.sk)
+        if is_s3_object_empty(client, s3_path):
+            return
+
         bucket_name, object_key = split_s3_path(s3_path)
-        response = get_s3_client(self.endpoint, self.ak, self.sk).get_object(
+        response = client.get_object(
             Bucket=bucket_name,
             Key=object_key,
             Range=f"bytes={skip_bytes}-",
