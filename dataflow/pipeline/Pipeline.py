@@ -942,6 +942,74 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         super().__init__(cache_storage)
 
+    def _is_dependent_on(
+        self,
+        wl1: Workload,
+        wl2: Workload,
+        dependencies: dict[Workload, set[Workload]],
+        visited: set[Workload],
+    ) -> bool:
+        """
+        检查 wl1 是否依赖 wl2（直接或间接）。
+
+        Args:
+            wl1: 要检查的 workload
+            wl2: 目标 workload
+            dependencies: 依赖图
+            visited: 已访问的 workload 集合（防止循环）
+
+        Returns:
+            如果 wl1 依赖 wl2 返回 True
+        """
+        if wl1 in visited:
+            return False
+        visited.add(wl1)
+
+        for dep in dependencies.get(wl1, set()):
+            if dep == wl2:
+                return True
+            if self._is_dependent_on(dep, wl2, dependencies, visited):
+                return True
+
+        return False
+
+    def _simplify_dependencies(
+        self, dependencies: dict[Workload, set[Workload]]
+    ) -> dict[Workload, set[Workload]]:
+        """
+        简化依赖关系，消除传递依赖。
+
+        例如：
+        - A 依赖 B 和 C
+        - B 依赖 C
+        简化后：A 只依赖 B（因为通过 B 已经间接依赖 C 了）
+
+        Args:
+            dependencies: 原始依赖图，Workload -> set[依赖的 Workload]
+
+        Returns:
+            简化后的依赖图
+        """
+        simplified = {}
+
+        for wl, deps in dependencies.items():
+            # 对于每个依赖，检查它是否依赖其他依赖
+            redundant = set()
+            for dep1 in deps:
+                for dep2 in deps:
+                    if dep1 != dep2:
+                        # 检查 dep1 是否依赖 dep2（直接或间接）
+                        # 如果 dep1 依赖 dep2，那么 dep2 是冗余的
+                        # 因为执行 dep1 时会自动确保 dep2 先完成
+                        if self._is_dependent_on(dep1, dep2, dependencies, set()):
+                            redundant.add(dep2)
+
+            # 移除冗余依赖
+            simplified[wl] = deps - redundant
+
+        return simplified
+
+
     def _compiled_forward(self, partitions: int = 1, max_parallelism=4):
         """
         执行入口：初始化进度并启动并发执行。
@@ -1093,8 +1161,32 @@ class PartitionPipelineParallelRun(PipelineABC):
             f"{len(self.op_nodes_list)} 个 operator 节点"
         )
 
+        # 简化依赖关系，消除传递依赖
+        simplified_dependencies = self._simplify_dependencies(dependencies)
+        original_dep_count = sum(len(d) for d in dependencies.values())
+        simplified_dep_count = sum(len(d) for d in simplified_dependencies.values())
+        if simplified_dep_count < original_dep_count:
+            self.logger.info(
+                f"📉 依赖简化完成 | 原始依赖数：{original_dep_count}, "
+                f"简化后依赖数：{simplified_dep_count}, 移除：{original_dep_count - simplified_dep_count}"
+            )
+
+        # 打印 partition=1 的依赖图（用于调试）
+        self.logger.info("📋 依赖图 (partition=1):")
+        partition_1_deps = [
+            (wl, deps) for wl, deps in simplified_dependencies.items()
+            if wl.partition == 1 and len(deps) > 0
+        ]
+        for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
+            op_name = self.op_nodes_list[wl.step].op_name
+            dep_strs = [
+                f"{self.op_nodes_list[d.step].op_name}"
+                for d in deps
+            ]
+            self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
+
         # 用于追踪剩余依赖的副本（执行过程中会修改）
-        dependencies_checks = copy.deepcopy(dependencies)
+        dependencies_checks = copy.deepcopy(simplified_dependencies)
 
         # 总 workload 数：分片数 × (operator 节点数 - 2)
         # 减 2 是因为排除了 DATASET-INPUT 和 DATASET-OUTPUT 节点
@@ -1146,7 +1238,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                         wl,
                         partitions,
                         self.op_nodes_list[wl.step],
-                        dependencies[wl],
+                        simplified_dependencies[wl],
                     )
                     futures[future] = wl
                     submitted_count += 1
