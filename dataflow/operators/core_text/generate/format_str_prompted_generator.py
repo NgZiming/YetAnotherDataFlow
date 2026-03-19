@@ -10,18 +10,20 @@ from dataflow.core.prompt import prompt_restrict, PromptABC, DIYPromptABC
 from typing import Union, Any, Set
 
 from dataflow.prompts.core_text import FormatStrPrompt
+
+
 @prompt_restrict(
     FormatStrPrompt,
 )
 @OPERATOR_REGISTRY.register()
 class FormatStrPromptedGenerator(OperatorABC):
     def __init__(
-            self,
-            llm_serving: LLMServingABC, 
-            system_prompt: str =  "You are a helpful agent.",
-            prompt_template: Union[FormatStrPrompt, DIYPromptABC] = FormatStrPrompt,
-            json_schema: dict = None,
-        ):
+        self,
+        llm_serving: LLMServingABC,
+        system_prompt: str = "You are a helpful agent.",
+        prompt_template: Union[FormatStrPrompt, DIYPromptABC] = FormatStrPrompt,
+        json_schema: dict = None,
+    ):
         self.logger = get_logger()
         self.llm_serving = llm_serving
         self.system_prompt = system_prompt
@@ -31,18 +33,18 @@ class FormatStrPromptedGenerator(OperatorABC):
             raise ValueError("prompt_template cannot be None")
 
     def run(
-            self, 
-            storage: DataFlowStorage,
-            output_key: str = "generated_content",
-            **input_keys: Any
-        ):
+        self,
+        storage: DataFlowStorage,
+        output_key: str = "generated_content",
+        **input_keys: Any,
+    ):
         self.storage: DataFlowStorage = storage
         self.output_key = output_key
         self.logger.info("Running PromptTemplatedGenerator...")
         self.input_keys = input_keys
         need_fields = set(input_keys.keys())
-    # Load the raw dataframe from the input file
-        dataframe = storage.read('dataframe')
+        # Load the raw dataframe from the input file
+        dataframe = storage.read("dataframe")
         self.logger.info(f"Loading, number of rows: {len(dataframe)}")
         llm_inputs = []
 
@@ -55,13 +57,19 @@ class FormatStrPromptedGenerator(OperatorABC):
         self.logger.info(f"Prepared {len(llm_inputs)} prompts for LLM generation.")
         # Create a list to hold all generated contents
         # Generate content using the LLM serving
-        generated_outputs = self.llm_serving.generate_from_input(user_inputs = llm_inputs, system_prompt = self.system_prompt, json_schema = self.json_schema)
+        generated_outputs = self.llm_serving.generate_from_input(
+            user_inputs=llm_inputs,
+            system_prompt=self.system_prompt,
+            json_schema=self.json_schema,
+        )
 
         dataframe[self.output_key] = generated_outputs
+        dataframe[f".prompt.system.{self.output_key}"] = self.system_prompt
+        dataframe[f".prompt.user.{self.output_key}"] = llm_inputs
 
         output_file = self.storage.write(dataframe)
         return output_key
-    
+
     @staticmethod
     def get_desc(lang: str = "zh"):
         if lang == "zh":
@@ -97,6 +105,4 @@ class FormatStrPromptedGenerator(OperatorABC):
                 "Ideal for tasks requiring templated prompt-driven generation, such as title generation, text summarization, or Q&A filling."
             )
         else:
-            return (
-                "PromptTemplatedGenerator generates text based on a user-defined prompt template."
-            )
+            return "PromptTemplatedGenerator generates text based on a user-defined prompt template."
