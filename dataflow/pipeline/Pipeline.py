@@ -1009,6 +1009,124 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         return simplified
 
+    def _check_completed_workloads(
+        self,
+        partitions: int,
+        completed_workloads: set[Workload],
+        dependencies: dict[Workload, set[Workload]],
+    ):
+        """
+        检查并标记已完成的 workload，提升调度效率。
+
+        通过检查输出文件是否存在，将已完成的任务预先标记，
+        避免在并发调度时重复检查，并清理相关依赖。
+
+        Args:
+            partitions: 分片总数
+            completed_workloads: 用于记录已完成 workload 的集合（会被修改）
+            dependencies: 依赖图（会被修改，移除已完成任务的依赖）
+        """
+        self.logger.info("🔍 检查已完成的任务...")
+        initial_completed = 0
+
+        for partition in range(partitions):
+            for idx, node in enumerate(self.op_nodes_list):
+                # 跳过没有 operator 的节点（如 DATASET-INPUT/OUTPUT）
+                if node.op_obj is None:
+                    continue
+
+                wl = Workload(partition, idx)
+                storage = copy.copy(node.storage)
+                storage.batch_size = self._part_size
+                storage.batch_step = partition + 1
+
+                # 检查输出文件是否存在
+                file_path = storage.write_file_path()
+                if storage.file_exists(file_path):
+                    completed_workloads.add(wl)
+                    initial_completed += 1
+                    self.logger.debug(
+                        f"✅ 已存在：{node.op_name} 分片 {partition + 1}/{partitions}"
+                    )
+
+        # 从所有 workload 的依赖中移除已完成的任务
+        for other_wl in dependencies.keys():
+            dependencies[other_wl] = dependencies[other_wl] - completed_workloads
+
+        total_workload = partitions * (len(self.op_nodes_list) - 2)
+        self.logger.info(
+            f"🎯 进度检查完成 | 已完成 {initial_completed}/{total_workload} 个任务 "
+            f"({100 * initial_completed // total_workload}%)"
+        )
+
+    def _build_and_prepare_dependencies(
+        self,
+        partitions: int,
+        completed_workloads: set[Workload],
+    ) -> tuple[dict[Workload, set[Workload]], dict[Workload, set[Workload]]]:
+        """
+        构建依赖图并进行预处理。
+
+        执行步骤：
+        1. 构建完整的依赖图
+        2. 简化依赖关系（消除传递依赖）
+        3. 打印依赖图（用于调试）
+        4. 检查已完成的任务
+        5. 返回简化后的依赖图和用于执行检查的副本
+
+        Args:
+            partitions: 分片总数
+            completed_workloads: 用于记录已完成 workload 的集合（会被修改）
+
+        Returns:
+            (simplified_dependencies, dependencies_checks):
+                - simplified_dependencies: 简化并清理后的依赖图
+                - dependencies_checks: 用于运行时依赖检查的副本
+        """
+        # 构建完整的依赖图
+        dependencies: dict[Workload, set[Workload]] = dict()
+        for partition in range(partitions):
+            for idx, node in enumerate(self.op_nodes_list):
+                wl = Workload(partition, idx)
+                dependencies[wl] = set()
+                for _, key_node in node.input_key_nodes.items():
+                    dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
+
+        self.logger.debug(
+            f"📋 依赖图构建完成 | {len(dependencies)} 个 workload, "
+            f"{len(self.op_nodes_list)} 个 operator 节点"
+        )
+
+        # 简化依赖关系，消除传递依赖
+        simplified_dependencies = self._simplify_dependencies(dependencies)
+        original_dep_count = sum(len(d) for d in dependencies.values())
+        simplified_dep_count = sum(len(d) for d in simplified_dependencies.values())
+        if simplified_dep_count < original_dep_count:
+            self.logger.info(
+                f"📉 依赖简化完成 | 原始依赖数：{original_dep_count}, "
+                f"简化后依赖数：{simplified_dep_count}, 移除：{original_dep_count - simplified_dep_count}"
+            )
+
+        # 打印 partition=1 的完整依赖图（用于调试）
+        self.logger.info("📋 依赖图 (partition=1):")
+        partition_1_deps = [
+            (wl, deps)
+            for wl, deps in simplified_dependencies.items()
+            if wl.partition == 1 and len(deps) > 0
+        ]
+        for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
+            op_name = self.op_nodes_list[wl.step].op_name
+            dep_strs = [f"{self.op_nodes_list[d.step].op_name}" for d in deps]
+            self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
+
+        # 检查已完成的任务，提升调度效率
+        self._check_completed_workloads(
+            partitions, completed_workloads, simplified_dependencies
+        )
+
+        # 返回简化后的依赖图和用于运行时检查的副本
+        return simplified_dependencies, copy.deepcopy(simplified_dependencies)
+
     def _compiled_forward(self, partitions: int = 1, max_parallelism=4):
         """
         执行入口：初始化进度并启动并发执行。
@@ -1143,47 +1261,10 @@ class PartitionPipelineParallelRun(PipelineABC):
         # 记录已完成的 workload
         completed_workloads: set[Workload] = set()
 
-        # 构建完整的依赖图：Workload -> set[依赖的 Workload]
-        dependencies: dict[Workload, set[Workload]] = dict()
-
-        for partition in range(partitions):
-            for idx, node in enumerate(self.op_nodes_list):
-                wl = Workload(partition, idx)
-                dependencies[wl] = set()
-                # 遍历所有输入 key，找到它们的前驱节点
-                for _, key_node in node.input_key_nodes.items():
-                    # 添加依赖：当前 workload 依赖前驱节点的 workload
-                    dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
-
-        self.logger.debug(
-            f"📋 依赖图构建完成 | {len(dependencies)} 个 workload, "
-            f"{len(self.op_nodes_list)} 个 operator 节点"
+        # 构建并准备依赖图
+        simplified_dependencies, dependencies_checks = (
+            self._build_and_prepare_dependencies(partitions, completed_workloads)
         )
-
-        # 简化依赖关系，消除传递依赖
-        simplified_dependencies = self._simplify_dependencies(dependencies)
-        original_dep_count = sum(len(d) for d in dependencies.values())
-        simplified_dep_count = sum(len(d) for d in simplified_dependencies.values())
-        if simplified_dep_count < original_dep_count:
-            self.logger.info(
-                f"📉 依赖简化完成 | 原始依赖数：{original_dep_count}, "
-                f"简化后依赖数：{simplified_dep_count}, 移除：{original_dep_count - simplified_dep_count}"
-            )
-
-        # 打印 partition=1 的依赖图（用于调试）
-        self.logger.info("📋 依赖图 (partition=1):")
-        partition_1_deps = [
-            (wl, deps)
-            for wl, deps in simplified_dependencies.items()
-            if wl.partition == 1 and len(deps) > 0
-        ]
-        for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
-            op_name = self.op_nodes_list[wl.step].op_name
-            dep_strs = [f"{self.op_nodes_list[d.step].op_name}" for d in deps]
-            self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
-
-        # 用于追踪剩余依赖的副本（执行过程中会修改）
-        dependencies_checks = copy.deepcopy(simplified_dependencies)
 
         # 总 workload 数：分片数 × (operator 节点数 - 2)
         # 减 2 是因为排除了 DATASET-INPUT 和 DATASET-OUTPUT 节点
@@ -1208,26 +1289,25 @@ class PartitionPipelineParallelRun(PipelineABC):
                     for idx, node in enumerate(self.op_nodes_list):
                         wl = Workload(partition, idx)
 
-                        # 跳过没有 operator 的节点（如 DATASET-INPUT/OUTPUT）
-                        if node.op_obj is None:
-                            continue
-                        # 跳过已完成的
-                        if wl in completed_workloads:
-                            continue
-                        # 跳过已提交但未完成的
-                        if wl in futures.values():
-                            continue
-                        # 检查依赖：排除 DATASET-INPUT（step=0）后，依赖必须为空
+                        # 快速跳过：无 operator / 已完成 / 已提交
                         if (
-                            len(dependencies_checks[wl] - set([Workload(partition, 0)]))
-                            > 0
+                            node.op_obj is None
+                            or wl in completed_workloads
+                            or wl in futures.values()
                         ):
                             continue
-                        # 【新增】检查 LLM Serving 是否正在被占用
-                        if node.llm_serving is not None:
-                            if id(node.llm_serving) in active_llm_serving_ids:
-                                # 该 LLM 正在被其他 workload 使用，跳过
-                                continue
+                        # 检查依赖：排除 DATASET-INPUT（step=0）后，依赖必须为空
+                        remaining_deps = dependencies_checks[wl] - set(
+                            [Workload(partition, 0)]
+                        )
+                        if len(remaining_deps) > 0:
+                            continue
+                        # 检查 LLM Serving 是否正在被占用
+                        if (
+                            node.llm_serving is not None
+                            and id(node.llm_serving) in active_llm_serving_ids
+                        ):
+                            continue
                         ready_nodes.append(wl)
 
                 # 排序：优先执行 step 大的（后面的步骤），同 step 时按 partition 升序
@@ -1279,24 +1359,24 @@ class PartitionPipelineParallelRun(PipelineABC):
                 completed_count = 0
                 for future in done_futures:
                     wl = futures.pop(future)
+                    node = self.op_nodes_list[wl.step]
                     try:
                         _ = future.result()  # 获取结果（可能有异常）
                         completed_workloads.add(wl)
                         completed_count += 1
-                        # 【新增】释放该 LLM Serving
-                        node = self.op_nodes_list[wl.step]
-                        if node.llm_serving is not None:
-                            active_llm_serving_ids.remove(id(node.llm_serving))
                     except Exception as e:
                         self.logger.error(
                             f"❌ Workload 执行失败 [{wl.partition + 1}/{partitions}]:[{wl.step}] | {e}"
                         )
                         raise
+                    finally:
+                        # 【修复】无论成功还是失败，都要释放 LLM Serving
+                        if node.llm_serving is not None:
+                            active_llm_serving_ids.discard(id(node.llm_serving))
 
                     # 从其他节点的 dependencies 中移除已完成的节点
                     for other_wl in dependencies_checks.keys():
-                        if wl in dependencies_checks[other_wl]:
-                            dependencies_checks[other_wl].remove(wl)
+                        dependencies_checks[other_wl].discard(wl)
 
                 if completed_count > 0:
                     self.logger.info(
