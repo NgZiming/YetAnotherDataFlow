@@ -1220,11 +1220,14 @@ class PartitionPipelineParallelRun(PipelineABC):
         storage.batch_step = wl.partition + 1
 
         # 断点续传检查：如果输出文件已存在，直接跳过
+        # 注意：由于 _check_completed_workloads 已标记已完成任务，
+        # 此检查主要用于防御性编程，理论上不会触发
         file_path = storage.write_file_path()
         if storage.file_exists(file_path):
             self.logger.info(
                 f"✅ 跳过已存在：{node.op_name} 分片 {wl.partition + 1}/{partitions}"
             )
+            # 注意：LLM Serving 由调用方（concurrent_execute_operators）的 finally 块释放
             return
 
         # 加载前驱步骤的数据（依赖节点的输出）
