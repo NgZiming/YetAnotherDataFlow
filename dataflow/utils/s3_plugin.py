@@ -565,8 +565,13 @@ class S3JsonlStorage(DataFlowStorage):
                         waits += 1
                         time.sleep(10)
                         continue
-                    dep_file = data_paths[self.batch_step - 1]
-                    if not dep_file.endswith(f"{self.batch_step:08}.jsonl"):
+
+                    dep_file = None
+                    for data_path in data_paths:
+                        if data_path.endswith(f"{self.batch_step:08}.jsonl"):
+                            dep_file = data_path
+
+                    if dep_file is None:
                         self.logger.warning(
                             f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step} {data_paths} {self.batch_step:08}.jsonl"
                         )
