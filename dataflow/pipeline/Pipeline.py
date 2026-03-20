@@ -1051,7 +1051,7 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         # 从所有 workload 的依赖中移除已完成的任务
         for other_wl in dependencies.keys():
-            simplified_dependencies[other_wl] = simplified_dependencies[other_wl] - completed_workloads
+            dependencies[other_wl] = dependencies[other_wl] - completed_workloads
 
         total_workload = partitions * (len(self.op_nodes_list) - 2)
         self.logger.info(
@@ -1119,13 +1119,16 @@ class PartitionPipelineParallelRun(PipelineABC):
             dep_strs = [f"{self.op_nodes_list[d.step].op_name}" for d in deps]
             self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
 
-        # 检查已完成的任务，提升调度效率
+        # 创建用于运行时检查的副本
+        dependencies_checks = copy.deepcopy(simplified_dependencies)
+
+        # 检查已完成的任务，提升调度效率（修改 dependencies_checks）
         self._check_completed_workloads(
-            partitions, completed_workloads, simplified_dependencies
+            partitions, completed_workloads, dependencies_checks
         )
 
-        # 返回简化后的依赖图和用于运行时检查的副本
-        return simplified_dependencies, copy.deepcopy(simplified_dependencies)
+        # 返回简化后的依赖图（保持完整）和已清理的运行时检查副本
+        return simplified_dependencies, dependencies_checks
 
     def _compiled_forward(self, partitions: int = 1, max_parallelism=4):
         """
