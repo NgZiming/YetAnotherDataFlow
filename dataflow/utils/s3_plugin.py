@@ -557,15 +557,8 @@ class S3JsonlStorage(DataFlowStorage):
                         raise Exception(
                             f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step} {self.batch_step:08}.jsonl 超时"
                         )
-                    data_paths = sorted(self._get_s3_file_names(dep_op_step))
-                    if len(data_paths) < self.batch_step:
-                        self.logger.warning(
-                            f"等待依赖的结果写入完成: op: {dep_op_step} partition: {self.batch_step} {data_paths} {self.batch_step:08}.jsonl"
-                        )
-                        waits += 1
-                        time.sleep(10)
-                        continue
 
+                    data_paths = sorted(self._get_s3_file_names(dep_op_step))
                     dep_file = None
                     for data_path in data_paths:
                         if data_path.endswith(f"{self.batch_step:08}.jsonl"):
