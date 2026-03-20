@@ -1051,7 +1051,7 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         # 从所有 workload 的依赖中移除已完成的任务
         for other_wl in dependencies.keys():
-            dependencies[other_wl] = dependencies[other_wl] - completed_workloads
+            simplified_dependencies[other_wl] = simplified_dependencies[other_wl] - completed_workloads
 
         total_workload = partitions * (len(self.op_nodes_list) - 2)
         self.logger.info(
