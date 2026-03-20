@@ -1009,7 +1009,6 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         return simplified
 
-
     def _compiled_forward(self, partitions: int = 1, max_parallelism=4):
         """
         执行入口：初始化进度并启动并发执行。
@@ -1174,15 +1173,13 @@ class PartitionPipelineParallelRun(PipelineABC):
         # 打印 partition=1 的依赖图（用于调试）
         self.logger.info("📋 依赖图 (partition=1):")
         partition_1_deps = [
-            (wl, deps) for wl, deps in simplified_dependencies.items()
+            (wl, deps)
+            for wl, deps in simplified_dependencies.items()
             if wl.partition == 1 and len(deps) > 0
         ]
         for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
             op_name = self.op_nodes_list[wl.step].op_name
-            dep_strs = [
-                f"{self.op_nodes_list[d.step].op_name}"
-                for d in deps
-            ]
+            dep_strs = [f"{self.op_nodes_list[d.step].op_name}" for d in deps]
             self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
 
         # 用于追踪剩余依赖的副本（执行过程中会修改）
@@ -1191,6 +1188,10 @@ class PartitionPipelineParallelRun(PipelineABC):
         # 总 workload 数：分片数 × (operator 节点数 - 2)
         # 减 2 是因为排除了 DATASET-INPUT 和 DATASET-OUTPUT 节点
         total_workload = partitions * (len(self.op_nodes_list) - 2)
+
+        # 【新增】追踪正在被占用的 LLM Serving，确保互斥
+        # 使用 id(llm_serving) 作为标识，因为 llm_serving 可能不可 hash
+        active_llm_serving_ids: set = set()  # set[id(llm_serving)]
 
         # 使用线程池并发执行
         with ThreadPoolExecutor(max_workers=max_parallelism) as executor:
@@ -1222,6 +1223,11 @@ class PartitionPipelineParallelRun(PipelineABC):
                             > 0
                         ):
                             continue
+                        # 【新增】检查 LLM Serving 是否正在被占用
+                        if node.llm_serving is not None:
+                            if id(node.llm_serving) in active_llm_serving_ids:
+                                # 该 LLM 正在被其他 workload 使用，跳过
+                                continue
                         ready_nodes.append(wl)
 
                 # 排序：优先执行 step 大的（后面的步骤），同 step 时按 partition 升序
@@ -1233,11 +1239,20 @@ class PartitionPipelineParallelRun(PipelineABC):
                 # 提交可执行的节点（不超过剩余线程数）
                 submitted_count = 0
                 for wl in ready_nodes[: max_parallelism - len(futures)]:
+                    node = self.op_nodes_list[wl.step]
+                    # 【新增】在提交前再次检查 LLM Serving 是否被占用
+                    # （因为前面的任务可能已经占用了该 LLM）
+                    if node.llm_serving is not None:
+                        if id(node.llm_serving) in active_llm_serving_ids:
+                            # 该 LLM 已被前面提交的任务占用，跳过
+                            continue
+                        # 【新增】记录该 LLM Serving 正在被使用
+                        active_llm_serving_ids.add(id(node.llm_serving))
                     future = executor.submit(
                         self.execute_workload,
                         wl,
                         partitions,
-                        self.op_nodes_list[wl.step],
+                        node,
                         simplified_dependencies[wl],
                     )
                     futures[future] = wl
@@ -1268,6 +1283,10 @@ class PartitionPipelineParallelRun(PipelineABC):
                         _ = future.result()  # 获取结果（可能有异常）
                         completed_workloads.add(wl)
                         completed_count += 1
+                        # 【新增】释放该 LLM Serving
+                        node = self.op_nodes_list[wl.step]
+                        if node.llm_serving is not None:
+                            active_llm_serving_ids.remove(id(node.llm_serving))
                     except Exception as e:
                         self.logger.error(
                             f"❌ Workload 执行失败 [{wl.partition + 1}/{partitions}]:[{wl.step}] | {e}"
