@@ -952,14 +952,22 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         检查 wl1 是否依赖 wl2（直接或间接）。
 
+        使用 DFS 递归检查依赖链，防止循环依赖。
+
         Args:
             wl1: 要检查的 workload
             wl2: 目标 workload
-            dependencies: 依赖图
-            visited: 已访问的 workload 集合（防止循环）
+            dependencies: 依赖图，Workload -> set[依赖的 Workload]
+            visited: 已访问的 workload 集合（防止循环依赖）
 
         Returns:
-            如果 wl1 依赖 wl2 返回 True
+            如果 wl1 依赖 wl2（直接或间接）返回 True
+
+        Example:
+            如果 A 依赖 B，B 依赖 C，则：
+            - _is_dependent_on(A, B) = True
+            - _is_dependent_on(A, C) = True（间接依赖）
+            - _is_dependent_on(B, A) = False
         """
         if wl1 in visited:
             return False
@@ -979,10 +987,18 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         简化依赖关系，消除传递依赖。
 
-        例如：
+        **目的**：减少依赖检查的复杂度，提高调度效率。
+
+        **示例**：
+        ```
+        原始依赖：
         - A 依赖 B 和 C
         - B 依赖 C
-        简化后：A 只依赖 B（因为通过 B 已经间接依赖 C 了）
+
+        简化后：
+        - A 只依赖 B（因为执行 B 时会自动确保 C 先完成）
+        - B 依赖 C
+        ```
 
         Args:
             dependencies: 原始依赖图，Workload -> set[依赖的 Workload]
@@ -1018,8 +1034,16 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         检查并标记已完成的 workload，提升调度效率。
 
-        通过检查输出文件是否存在，将已完成的任务预先标记，
-        避免在并发调度时重复检查，并清理相关依赖。
+        **执行步骤**：
+        1. 遍历所有 (partition, step) 组合
+        2. 检查每个 workload 的输出文件是否存在
+        3. 将已完成的 workload 加入 `completed_workloads` 集合
+        4. 从 `dependencies` 中移除已完成任务的依赖
+
+        **目的**：
+        - 恢复运行时，已完成的任务直接跳过，不参与调度循环
+        - 减少每次迭代中的文件检查次数
+        - 依赖图更干净，后续任务更快进入 ready 状态
 
         Args:
             partitions: 分片总数
@@ -1067,12 +1091,16 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         构建依赖图并进行预处理。
 
-        执行步骤：
-        1. 构建完整的依赖图
-        2. 简化依赖关系（消除传递依赖）
-        3. 打印依赖图（用于调试）
-        4. 检查已完成的任务
-        5. 返回简化后的依赖图和用于执行检查的副本
+        **执行步骤**：
+        1. **构建依赖图**：为每个 (partition, step) 创建依赖关系
+        2. **简化依赖**：消除传递依赖，减少依赖检查复杂度
+        3. **打印依赖图**：输出 partition=1 的依赖关系（调试用）
+        4. **检查已完成**：扫描已完成任务，清理依赖图
+        5. **返回结果**：完整依赖图 + 已清理的运行时副本
+
+        **返回值说明**：
+        - `simplified_dependencies`: 完整的简化依赖图（保持不变），用于提交 workload 时获取依赖
+        - `dependencies_checks`: 运行时依赖检查副本（会被修改），用于判断任务是否可执行
 
         Args:
             partitions: 分片总数
@@ -1080,16 +1108,18 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         Returns:
             (simplified_dependencies, dependencies_checks):
-                - simplified_dependencies: 简化并清理后的依赖图
-                - dependencies_checks: 用于运行时依赖检查的副本
+                - simplified_dependencies: 简化后的依赖图（保持完整）
+                - dependencies_checks: 用于运行时依赖检查的副本（已完成任务已移除）
         """
-        # 构建完整的依赖图
+        # 构建完整的依赖图：Workload -> set[依赖的 Workload]
+        # 每个 (partition, step) 是一个 Workload，依赖来自 input_key_nodes 的前驱节点
         dependencies: dict[Workload, set[Workload]] = dict()
         for partition in range(partitions):
             for idx, node in enumerate(self.op_nodes_list):
                 wl = Workload(partition, idx)
                 dependencies[wl] = set()
                 for _, key_node in node.input_key_nodes.items():
+                    # 添加依赖：当前 workload 依赖前驱节点的 workload
                     dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
 
         self.logger.debug(
@@ -1189,6 +1219,9 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         执行单个 Workload（分片 + 步骤组合）。
 
+        **注意**：此方法在线程池中运行，由 `concurrent_execute_operators` 调用。
+        LLM Serving 的占用和释放由调用方统一管理。
+
         Args:
             wl: Workload 对象，包含 partition 和 step 信息
             partitions: 总分片数（用于日志显示）
@@ -1199,7 +1232,7 @@ class PartitionPipelineParallelRun(PipelineABC):
         1. 记录执行日志
         2. 分析依赖节点的 step 索引
         3. 配置 storage 的 batch_size 和 batch_step
-        4. 检查输出文件是否存在（断点续传）
+        4. 检查输出文件是否存在（防御性断点续传检查）
         5. 加载前驱步骤的数据
         6. 执行 operator.run()
         """
@@ -1244,20 +1277,20 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         并发执行所有分片的 operators。
 
+        **调度算法**：
+        1. **构建依赖图**：为每个 (partition, step) 创建依赖关系
+        2. **扫描已完成**：检查已完成任务，减少无效调度
+        3. **调度循环**：
+           - 选择依赖满足且未执行的 workload（ready_nodes）
+           - 按 (partition, -step) 排序，优先执行后面的步骤
+           - 提交最多 max_parallelism 个 workload
+           - 等待至少一个完成
+           - 更新依赖图，释放后续 workload 的依赖
+        4. **LLM 互斥**：使用相同 LLM Serving 的 workload 不会同时执行
+
         Args:
             partitions: 分片总数
             max_parallelism: 最大并发数（同时执行的线程数）
-
-        执行流程：
-        1. 构建 workload 依赖图：每个 (partition, step) 是一个 Workload
-        2. 识别依赖关系：同一 partition 内，step N 依赖 step N-1
-        3. 使用 ThreadPoolExecutor 并发执行
-        4. 循环：
-           a. 找出所有"依赖已满足且未执行"的 workload（ready_nodes）
-           b. 按 step 降序、partition 升序排序（优先执行后面的步骤）
-           c. 提交最多 max_parallelism 个 workload 到线程池
-           d. 等待至少一个完成
-           e. 更新依赖图，释放后续 workload 的依赖
         """
         self.logger.info(
             f"🚀 启动并发执行 | partitions={partitions}, max_parallelism={max_parallelism}, "
@@ -1289,7 +1322,8 @@ class PartitionPipelineParallelRun(PipelineABC):
             while len(completed_workloads) < total_workload:
                 iteration += 1
 
-                # 找到所有可以执行的节点（依赖已满足且未执行）
+                # ===== 选择可执行的 workload =====
+                # 条件：有 operator + 未完成 + 未提交 + 依赖满足 + LLM 可用
                 ready_nodes: list[Workload] = []
                 for partition in range(partitions):
                     for idx, node in enumerate(self.op_nodes_list):
@@ -1308,7 +1342,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                         )
                         if len(remaining_deps) > 0:
                             continue
-                        # 检查 LLM Serving 是否正在被占用
+                        # 检查 LLM Serving 是否正在被占用（互斥）
                         if (
                             node.llm_serving is not None
                             and id(node.llm_serving) in active_llm_serving_ids
@@ -1316,24 +1350,25 @@ class PartitionPipelineParallelRun(PipelineABC):
                             continue
                         ready_nodes.append(wl)
 
-                # 排序：优先执行 step 大的（后面的步骤），同 step 时按 partition 升序
+                # 排序策略：优先执行 step 大的（后面的步骤），同 step 时按 partition 升序
+                # 原因：后面的步骤依赖前面的步骤，优先执行后面的可以更快释放依赖
                 ready_nodes = sorted(
                     ready_nodes,
                     key=lambda wl: (wl.partition, -wl.step),
                 )
 
-                # 提交可执行的节点（不超过剩余线程数）
+                # ===== 提交 workload 到线程池 =====
                 submitted_count = 0
-                for wl in ready_nodes[: max_parallelism - len(futures)]:
+                max_concurrent = max_parallelism - len(futures)
+                for wl in ready_nodes[:max_concurrent]:
                     node = self.op_nodes_list[wl.step]
-                    # 【新增】在提交前再次检查 LLM Serving 是否被占用
-                    # （因为前面的任务可能已经占用了该 LLM）
+                    # 提交前再次检查 LLM Serving（防止并发竞争）
+                    if node.llm_serving is not None and id(node.llm_serving) in active_llm_serving_ids:
+                        continue
+                    # 占用 LLM Serving
                     if node.llm_serving is not None:
-                        if id(node.llm_serving) in active_llm_serving_ids:
-                            # 该 LLM 已被前面提交的任务占用，跳过
-                            continue
-                        # 【新增】记录该 LLM Serving 正在被使用
                         active_llm_serving_ids.add(id(node.llm_serving))
+                    # 提交任务
                     future = executor.submit(
                         self.execute_workload,
                         wl,
@@ -1350,6 +1385,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                         f"运行中：{len(futures)}, 已完成：{len(completed_workloads)}/{total_workload}"
                     )
 
+                # ===== 等待任务完成 =====
                 # 等待至少一个完成，然后重新检查哪些节点可以执行
                 if futures:
                     for future in as_completed(futures.keys()):
@@ -1361,7 +1397,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                     if future.done():
                         done_futures.append(future)
 
-                # 处理完成的 workload
+                # ===== 处理完成的 workload =====
                 completed_count = 0
                 for future in done_futures:
                     wl = futures.pop(future)
@@ -1376,7 +1412,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                         )
                         raise
                     finally:
-                        # 【修复】无论成功还是失败，都要释放 LLM Serving
+                        # 释放 LLM Serving（无论成功还是失败）
                         if node.llm_serving is not None:
                             active_llm_serving_ids.discard(id(node.llm_serving))
 
