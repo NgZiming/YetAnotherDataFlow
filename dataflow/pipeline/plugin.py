@@ -127,7 +127,7 @@ class FileCacheStorage(CacheStorage):
         utc_now = datetime.now(timezone.utc)
         iso_string_utc = utc_now.isoformat()
         progress["last_update"] = iso_string_utc
-        if "start_time" not in progress:
+        if progress["start_time"] is None:
             progress["start_time"] = iso_string_utc
         with open(self.cache_file, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
@@ -187,7 +187,7 @@ class S3CacheStorage(CacheStorage):
         utc_now = datetime.now(timezone.utc)
         iso_string_utc = utc_now.isoformat()
         progress["last_update"] = iso_string_utc
-        if "start_time" not in progress:
+        if progress["start_time"] is None:
             progress["start_time"] = iso_string_utc
         json_body = json.dumps(progress, ensure_ascii=False, indent=2)
         _ = self.client.put_object(
