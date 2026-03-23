@@ -712,6 +712,7 @@ class S3JsonlStorage(DataFlowStorage):
             - 自动清理无效 Unicode 字符
             - 使用 ensure_ascii=False 保留中文字符
         """
+        self.number_of_write = len(data)
 
         def clean_surrogates(obj):
             """递归清理数据中的无效 Unicode 代理对字符"""

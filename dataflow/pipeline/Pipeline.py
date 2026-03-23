@@ -21,6 +21,7 @@ from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 # ==================== 第三方库 ====================
+import pandas as pd
 from tqdm import tqdm
 
 # ==================== 项目本地 ====================
@@ -30,7 +31,11 @@ from dataflow.core import LLM_SERVING_CLASSES
 from dataflow.core.operator import OperatorABC
 from dataflow.logger import get_logger
 from dataflow.pipeline.nodes import KeyNode, OperatorNode
-from dataflow.pipeline.plugin import CacheStorage
+from dataflow.pipeline.plugin import (
+    CacheStorage,
+    ProgressInfo,
+    PartitionOrBatchProgress,
+)
 from dataflow.utils.storage import DataFlowStorage
 from dataflow.wrapper.auto_op import AutoOP, OPRuntime
 
@@ -1178,36 +1183,35 @@ class PartitionPipelineParallelRun(PipelineABC):
         desired_part_size = (record_count + partitions - 1) // partitions
 
         # 读取上次中断时的进度
-        _part, _step, _part_size = self.cache_storage.get_steps()
+        progress: ProgressInfo = self.cache_storage.get_progress()
 
-        # 初始化：如果是全新运行（part=0, step=0），则设为"已完成"状态
-        # 这样外部查询进度时会显示 100%，实际执行通过文件检查跳过
-        if _part_size == 0:
-            _part_size = desired_part_size
-        if _step == 0:
-            _step = len(self.op_nodes_list) - 2  # 最后一个 operator 步骤
-        if _part == 0:
-            _part = partitions  # 标记为"所有分片已完成"
+        # 初始化：如果是全新运行，则创建新的进度信息
+        if not progress or progress.get("total_shards", 0) == 0:
+            progress = ProgressInfo(
+                shard_type="partition",
+                total_shards=partitions,
+                partitions=[
+                    PartitionOrBatchProgress(
+                        id=i,
+                        completed_steps=[],
+                        current_steps=[],
+                        steps_rows_nums={},
+                    )
+                    for i in range(partitions)
+                ],
+                overall_status="running",
+            )
+        for partition in progress["partitions"]:
+            partition["current_steps"] = []
 
-        # 断言验证：确保进度记录与预期一致
-        assert (
-            _part_size == desired_part_size
-        ), f"分片大小不一致：{_part_size} != {desired_part_size}"
-        assert (
-            _step == len(self.op_nodes_list) - 2
-        ), f"步骤索引不一致：{_step} != {len(self.op_nodes_list) - 2}"
-        assert _part == partitions, f"分片数不一致：{_part} != {partitions}"
-
-        # 写入进度记录（标记为"已完成"）
-        self.cache_storage.record_steps(_part, _step, _part_size)
-        self._part_size = _part_size
+        self._part_size = desired_part_size
 
         self.logger.info(
-            f"▶️ 执行 PartitionPipelineParallelRun: part:{_part} step:{_step} part_size:{_part_size}"
+            f"▶️ 执行 PartitionPipelineParallelRun | partitions={partitions}, part_size={self._part_size}"
         )
 
-        # 启动并发执行
-        self.concurrent_execute_operators(partitions, max_parallelism)
+        # 启动并发执行，传入进度对象
+        self.concurrent_execute_operators(partitions, max_parallelism, progress)
 
     def execute_workload(
         self,
@@ -1215,7 +1219,7 @@ class PartitionPipelineParallelRun(PipelineABC):
         partitions: int,
         node: OperatorNode,
         dependencies: set[Workload],
-    ):
+    ) -> int:
         """
         执行单个 Workload（分片 + 步骤组合）。
 
@@ -1264,7 +1268,7 @@ class PartitionPipelineParallelRun(PipelineABC):
             return
 
         # 加载前驱步骤的数据（依赖节点的输出）
-        current_partition_df = storage.load_partition(dep_parts)
+        current_partition_df: pd.DataFrame = storage.load_partition(dep_parts)
         storage.current_streaming_chunk = current_partition_df
 
         # 执行 operator 的核心逻辑
@@ -1272,8 +1276,14 @@ class PartitionPipelineParallelRun(PipelineABC):
         self.logger.info(
             f"✅ 节点完成：{node.op_name} 分片 {wl.partition + 1}/{partitions}"
         )
+        return storage.number_of_write
 
-    def concurrent_execute_operators(self, partitions: int, max_parallelism: int):
+    def concurrent_execute_operators(
+        self,
+        partitions: int,
+        max_parallelism: int,
+        progress: ProgressInfo,
+    ):
         """
         并发执行所有分片的 operators。
 
@@ -1363,11 +1373,23 @@ class PartitionPipelineParallelRun(PipelineABC):
                 for wl in ready_nodes[:max_concurrent]:
                     node = self.op_nodes_list[wl.step]
                     # 提交前再次检查 LLM Serving（防止并发竞争）
-                    if node.llm_serving is not None and id(node.llm_serving) in active_llm_serving_ids:
+                    if (
+                        node.llm_serving is not None
+                        and id(node.llm_serving) in active_llm_serving_ids
+                    ):
                         continue
                     # 占用 LLM Serving
                     if node.llm_serving is not None:
                         active_llm_serving_ids.add(id(node.llm_serving))
+                    # 提交任务前，设置 current_steps（表示正在执行）
+                    for p in progress.get("partitions", []):
+                        if p.get("id") == wl.partition:
+                            p["current_steps"].append(wl.step)
+                            break
+
+                    # 保存进度
+                    self.cache_storage.record_progress(progress)
+
                     # 提交任务
                     future = executor.submit(
                         self.execute_workload,
@@ -1403,9 +1425,25 @@ class PartitionPipelineParallelRun(PipelineABC):
                     wl = futures.pop(future)
                     node = self.op_nodes_list[wl.step]
                     try:
-                        _ = future.result()  # 获取结果（可能有异常）
+                        rows_write = future.result()  # 获取结果（可能有异常）
                         completed_workloads.add(wl)
                         completed_count += 1
+
+                        # 更新进度：标记该 partition 的该步骤已完成，清空 current_steps
+                        for p in progress.get("partitions", []):
+                            if p.get("id") == wl.partition:
+                                if "completed_steps" not in p:
+                                    p["completed_steps"] = []
+                                if wl.step not in p["completed_steps"]:
+                                    p["completed_steps"].append(wl.step)
+                                    p["completed_steps"].sort()
+                                # 清空 current_steps（任务已完成）
+                                p["current_steps"].remove(wl.step)
+                                p["steps_rows_nums"][wl.step] = rows_write
+                                break
+
+                        # 保存进度
+                        self.cache_storage.record_progress(progress)
                     except Exception as e:
                         self.logger.error(
                             f"❌ Workload 执行失败 [{wl.partition + 1}/{partitions}]:[{wl.step}] | {e}"
@@ -1428,11 +1466,17 @@ class PartitionPipelineParallelRun(PipelineABC):
                     )
 
                 # 进度检查：每完成 25% 输出一次摘要
-                progress = 100 * len(completed_workloads) // total_workload
-                if progress > 0 and progress % 25 == 0 and progress < 100:
+                progress_percent = 100 * len(completed_workloads) // total_workload
+                if (
+                    progress_percent > 0
+                    and progress_percent % 25 == 0
+                    and progress_percent < 100
+                ):
                     self.logger.info(
-                        f"📊 进度更新 | {progress}% | "
+                        f"📊 进度更新 | {progress_percent}% | "
                         f"进行中：{len(futures)}, 剩余：{total_workload - len(completed_workloads)}"
                     )
 
+        progress["overall_status"] = "completed"
+        self.cache_storage.record_progress(progress)
         self.logger.info(f"✨ 并发执行完成 | 总计 {total_workload} 个 workload")
