@@ -1189,6 +1189,7 @@ class PartitionPipelineParallelRun(PipelineABC):
         if not progress or progress.get("total_shards", 0) == 0:
             progress = ProgressInfo(
                 shard_type="partition",
+                total_steps=len(self.op_nodes_list) - 2,
                 total_shards=partitions,
                 partitions=[
                     PartitionOrBatchProgress(
@@ -1205,6 +1206,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                 error_message=None,
                 extra={},
             )
+        progress["total_steps"] = len(self.op_nodes_list) - 2
         for partition in progress["partitions"]:
             partition["current_steps"] = []
 
@@ -1318,6 +1320,14 @@ class PartitionPipelineParallelRun(PipelineABC):
         simplified_dependencies, dependencies_checks = (
             self._build_and_prepare_dependencies(partitions, completed_workloads)
         )
+
+        for wl in completed_workloads:
+            for p in progress["partitions"]:
+                if p["id"] == wl.partition:
+                    p["completed_steps"] = sorted(
+                        list(set(p["completed_steps"] + [wl.step]))
+                    )
+                    break
 
         # 总 workload 数：分片数 × (operator 节点数 - 2)
         # 减 2 是因为排除了 DATASET-INPUT 和 DATASET-OUTPUT 节点
