@@ -1200,6 +1200,10 @@ class PartitionPipelineParallelRun(PipelineABC):
                     for i in range(partitions)
                 ],
                 overall_status="running",
+                start_time=None,
+                last_update=None,
+                error_message=None,
+                extra={},
             )
         for partition in progress["partitions"]:
             partition["current_steps"] = []
@@ -1265,7 +1269,7 @@ class PartitionPipelineParallelRun(PipelineABC):
                 f"✅ 跳过已存在：{node.op_name} 分片 {wl.partition + 1}/{partitions}"
             )
             # 注意：LLM Serving 由调用方（concurrent_execute_operators）的 finally 块释放
-            return
+            return 0
 
         # 加载前驱步骤的数据（依赖节点的输出）
         current_partition_df: pd.DataFrame = storage.load_partition(dep_parts)
