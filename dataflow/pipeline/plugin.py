@@ -13,7 +13,7 @@ from dataflow.utils.s3_plugin import (
 )
 
 
-class PartitionOrBatchProgress(TypedDict, total=False):
+class PartitionOrBatchProgress(TypedDict):
     """单个 partition 或 batch 的进度信息
 
     每个 partition/batch 独立跟踪进度，可以在不同的 operator 阶段。
@@ -36,7 +36,7 @@ class PartitionOrBatchProgress(TypedDict, total=False):
     steps_rows_nums: dict[int, int]  # 每个步骤处理的数据行数（与 completed_steps 对应）
 
 
-class ProgressInfo(TypedDict, total=False):
+class ProgressInfo(TypedDict):
     """整体处理进度的类型定义
 
     用于跟踪整个 pipeline 的处理进度，包含所有 partition/batch 的独立进度。
@@ -142,7 +142,10 @@ class FileCacheStorage(CacheStorage):
             return {}
 
         with open(self.cache_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except:
+                return {}
 
 
 class S3CacheStorage(CacheStorage):
@@ -203,4 +206,7 @@ class S3CacheStorage(CacheStorage):
             return {}
 
         json_body = read_s3_bytes(self.client, self.cache_file).decode("utf-8")
-        return json.loads(json_body)
+        try:
+            return json.loads(json_body)
+        except:
+            return {}
