@@ -61,6 +61,7 @@ class ProgressInfo(TypedDict):
     shard_type: str  # 分片类型：'partition' | 'batch'
     partitions: List[PartitionOrBatchProgress]  # 所有 partition/batch 的进度列表
     total_shards: int  # 总的 partition 数或 batch 数
+    total_steps: int  # step 数
     start_time: Optional[str]  # 开始时间 (ISO 8601 格式)
     last_update: Optional[str]  # 最后更新时间 (ISO 8601 格式)
     overall_status: Optional[
