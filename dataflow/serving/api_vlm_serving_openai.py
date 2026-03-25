@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from ..logger import get_logger
 
-from dataflow.utils.s3_plugin import MediaStorage
+from dataflow.utils.storage import MediaStorage
 
 class APIVLMServing_openai(LLMServingABC):
     """
@@ -31,7 +31,7 @@ class APIVLMServing_openai(LLMServingABC):
         max_workers: int = 10,
         timeout: int = 1800,
         temperature = 0.0,
-        max_completion_tokens: int = None,
+        max_completion_tokens: int = 8192,
     ):
         """
         Initialize the OpenAI client and settings.
