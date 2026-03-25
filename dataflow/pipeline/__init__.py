@@ -1,7 +1,6 @@
-from .Pipeline import PipelineABC, StreamBatchedPipelineABC
+from .Pipeline import PipelineABC, PartitionPipelineParallelRun
 
 __all__ = [
-    'PipelineABC',
-    'BatchedPipelineABC',
-    'StreamBatchedPipelineABC'
+    "PipelineABC",
+    "PartitionPipelineParallelRun",
 ]
