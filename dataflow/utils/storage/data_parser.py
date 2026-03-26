@@ -1,7 +1,7 @@
 """
 数据解析器模块 - 负责文件格式与 DataFrame 之间的转换。
 
-职责：file-like <-> DataFrame 的序列化/反序列化
+职责：file-like (BytesIO/StreamingBody) <-> DataFrame 的序列化/反序列化
 Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 """
 
@@ -14,6 +14,7 @@ import tempfile
 
 import pandas as pd
 
+from botocore.response import StreamingBody
 from dataflow.logger import get_logger
 
 logger = get_logger()
