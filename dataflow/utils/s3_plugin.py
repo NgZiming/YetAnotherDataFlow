@@ -24,6 +24,7 @@ import re
 
 import boto3
 
+from botocore.response import StreamingBody
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
@@ -189,7 +190,7 @@ def is_s3_object_empty(client, path: str) -> bool | None:
         return None
 
 
-def read_s3_bytes(client, s3_path: str) -> bytes:
+def read_s3_bytes(client, s3_path: str) -> StreamingBody:
     """读取 S3 对象的完整内容。
 
     Args:
@@ -205,7 +206,7 @@ def read_s3_bytes(client, s3_path: str) -> bytes:
     bucket_name, object_key = split_s3_path(s3_path)
     response = client.get_object(Bucket=bucket_name, Key=object_key)
     streaming_body = response["Body"]
-    return streaming_body.read()
+    return streaming_body
 
 
 def put_s3_object(client, s3_path: str, bytes_data: bytes):

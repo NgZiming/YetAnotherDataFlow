@@ -107,8 +107,7 @@ class FileStorage(PartitionableStorage):
             file_path = self._get_cache_file_path(self.operator_step)
             self.logger.debug(f"📖 读取文件：{file_path}")
             with open(file_path, "rb") as f:
-                data = f.read()
-            df = self._parser.parse_to_dataframe(data)
+                df = self._parser.parse_to_dataframe(f)
 
         return df if output_type == "dataframe" else df.to_dict(orient="records")
 
@@ -133,9 +132,8 @@ class FileStorage(PartitionableStorage):
         else:
             raise ValueError(f"Unsupported data type: {type(data)}")
 
-        bytes_data = self._parser.serialize_from_dataframe(df)
-        with open(file_path, "wb") as f:
-            f.write(bytes_data)
+        # 直接写文件，无内存缓冲
+        self._parser.serialize_to_file(df, file_path)
 
         self.logger.info(f"💾 写入 {len(df)} 行数据：{file_path}")
         return file_path
@@ -217,9 +215,8 @@ class FileStorage(PartitionableStorage):
                 continue
 
             os.makedirs(os.path.dirname(partition_path) or ".", exist_ok=True)
-            bytes_data = self._parser.serialize_from_dataframe(pd.DataFrame(part))
-            with open(partition_path, "wb") as f:
-                f.write(bytes_data)
+            # 直接写文件，无内存缓冲
+            self._parser.serialize_to_file(pd.DataFrame(part), partition_path)
             self.logger.debug(f"✅ 创建分片 {i+1}: {partition_path}")
 
         self.files = partition_paths
@@ -250,8 +247,9 @@ class FileStorage(PartitionableStorage):
         for operator_step in dependent_steps:
             kept_keys.append(set())
             # 读取指定步骤的文件
-            bs = open(self._get_cache_file_path(operator_step), "rb").read()
-            for d in self._parser.parse_to_dataframe(bs).to_dict("records"):
+            with open(self._get_cache_file_path(operator_step), "rb") as f:
+                df_temp = self._parser.parse_to_dataframe(f)
+            for d in df_temp.to_dict("records"):
                 if d[self.id_key] not in ds:
                     ds[d[self.id_key]] = {}
                 ds[d[self.id_key]].update(d)  # 合并记录
@@ -310,8 +308,7 @@ class FileStorage(PartitionableStorage):
         """读取所有输入文件的数据。"""
         for file_path in tqdm(self.files, desc="reading files..."):
             with open(file_path, "rb") as f:
-                content = f.read()
-            df = self._parser.parse_to_dataframe(content)
+                df = self._parser.parse_to_dataframe(f)
             for row in df.to_dict("records"):
                 yield row
 
