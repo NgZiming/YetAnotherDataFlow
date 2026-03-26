@@ -16,6 +16,8 @@ S3Storage 实现 - S3 对象存储。
 
 import copy
 import json
+import os
+import tempfile
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,7 @@ from typing import Any, Optional, Literal, Generator
 
 import pandas as pd
 
+from botocore.response import StreamingBody
 from tqdm import tqdm
 
 from .iface import PartitionableStorage, MediaStorage, CacheStorage, ProgressInfo
