@@ -159,11 +159,21 @@ class S3Storage(PartitionableStorage):
         else:
             raise ValueError(f"Unsupported data type: {type(data)}")
 
-        bytes_data = self._parser.serialize_from_dataframe(df)
-        client = get_s3_client(self.endpoint, self.ak, self.sk)
-        put_s3_object(client, file_path, bytes_data)
+        # 先写临时文件，再上传 S3，避免内存缓冲
+        with tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=f".{self.cache_type}"
+        ) as tmp:
+            self._parser.serialize_to_file(df, tmp)
+            tmp_path = tmp.name
 
-        self.logger.info(f"Wrote {len(df)} rows to S3: {file_path}")
+        try:
+            # 流式上传到 S3
+            client = get_s3_client(self.endpoint, self.ak, self.sk)
+            with open(tmp_path, "rb") as f:
+                put_s3_object(client, file_path, f)
+            self.logger.info(f"Wrote {len(df)} rows to S3: {file_path}")
+        finally:
+            os.unlink(tmp_path)
         return file_path
 
     def get_keys(self) -> list[str]:
@@ -244,10 +254,20 @@ class S3Storage(PartitionableStorage):
                 )
                 continue
 
-            bytes_data = self._parser.serialize_from_dataframe(pd.DataFrame(part))
-            client = get_s3_client(self.endpoint, self.ak, self.sk)
-            put_s3_object(client, partition_path, bytes_data)
-            self.logger.info(f"Created partition {i+1}: {partition_path}")
+            # 先写临时文件，再上传 S3
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=f".{self.cache_type}"
+            ) as tmp:
+                self._parser.serialize_to_file(pd.DataFrame(part), tmp)
+                tmp_path = tmp.name
+
+            try:
+                client = get_s3_client(self.endpoint, self.ak, self.sk)
+                with open(tmp_path, "rb") as f:
+                    put_s3_object(client, partition_path, f)
+                self.logger.info(f"Created partition {i+1}: {partition_path}")
+            finally:
+                os.unlink(tmp_path)
 
         self.files = partition_paths
         self._is_partitioned = True
@@ -342,14 +362,14 @@ class S3Storage(PartitionableStorage):
             for row in df.to_dict("records"):
                 yield row
 
-    def _read_file_bytes(self, s3_path: str) -> bytes:
+    def _read_file_bytes(self, s3_path: str) -> StreamingBody:
         """从 S3 读取文件内容。
 
         Args:
             s3_path: S3 路径
 
         Returns:
-            文件的字节内容
+            StreamingBody: 文件的字节流对象
         """
         self.logger.info(f"Reading S3 file: {s3_path}")
         client = get_s3_client(self.endpoint, self.ak, self.sk)
