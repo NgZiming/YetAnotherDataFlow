@@ -13,6 +13,7 @@ from .light_rag_serving import LightRAGServing
 from .api_google_vertexai_serving import APIGoogleVertexAIServing
 
 from .local_model_vlm_serving import LocalVLMServing_vllm
+from .cli_openclaw_serving import CLIOpenClawServing, create_openclaw_serving
 
 
 __all__ = [
@@ -26,4 +27,6 @@ __all__ = [
     "LocalModelLALMServing_vllm",
     "LocalHostLLMAPIServing_vllm",
     "LocalVLMServing_vllm",
+    "CLIOpenClawServing",
+    "create_openclaw_serving",
 ]
