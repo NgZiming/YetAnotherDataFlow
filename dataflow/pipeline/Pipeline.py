@@ -817,6 +817,19 @@ class PartitionPipelineParallelRun(PipelineABC):
         # 构建完整的依赖图：Workload -> set[依赖的 Workload]
         # 每个 (partition, step) 是一个 Workload，依赖来自 input_key_nodes 的前驱节点
         dependencies: dict[Workload, set[Workload]] = dict()
+
+        # 第一步：识别所有 filter 算子的 step 索引
+        filter_steps = set()
+        for idx, node in enumerate(self.op_nodes_list):
+            if node.op_obj is not None:
+                class_name = node.op_obj.__class__.__name__
+                if "Filter" in class_name:
+                    filter_steps.add(idx)
+                    self.logger.info(
+                        f"🔍 识别到 Filter 算子：{class_name} (step={idx})"
+                    )
+
+        # 第二步：构建基础依赖图
         for partition in range(self._partitions):
             for idx, node in enumerate(self.op_nodes_list):
                 wl = Workload(partition, idx)
@@ -824,6 +837,23 @@ class PartitionPipelineParallelRun(PipelineABC):
                 for _, key_node in node.input_key_nodes.items():
                     # 添加依赖：当前 workload 依赖前驱节点的 workload
                     dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
+
+        # 第三步：为 filter 后续步骤添加依赖
+        # 如果某个 step 是 filter，那么它之后的所有 step 都应该依赖这个 filter
+        for partition in range(self._partitions):
+            for idx, node in enumerate(self.op_nodes_list):
+                # 跳过 DATASET-INPUT (step=0) 和 DATASET-OUTPUT (最后一个)
+                if node.op_obj is None:
+                    continue
+                # 如果当前 step 前面有 filter，添加依赖
+                for filter_step in filter_steps:
+                    if filter_step < idx:
+                        filter_wl = Workload(partition, filter_step)
+                        if filter_wl not in dependencies[Workload(partition, idx)]:
+                            dependencies[Workload(partition, idx)].add(filter_wl)
+                            self.logger.debug(
+                                f"🔗 添加 Filter 依赖：step={idx} ({node.op_name}) 依赖 filter_step={filter_step}"
+                            )
 
         self.logger.debug(
             f"📋 依赖图构建完成 | {len(dependencies)} 个 workload, "
