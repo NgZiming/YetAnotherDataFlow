@@ -377,7 +377,7 @@ class S3Storage(PartitionableStorage):
         self.logger.info(f"Reading S3 file: {s3_path}")
         client = get_s3_client(self.endpoint, self.ak, self.sk)
         content = read_s3_bytes(client, s3_path)
-        self.logger.info(f"Read {len(content)} bytes from: {s3_path}")
+        #self.logger.info(f"Read {len(content)} bytes from: {s3_path}")
         return content
 
 
