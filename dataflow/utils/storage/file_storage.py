@@ -26,7 +26,13 @@ from tqdm import tqdm
 
 from dataflow.logger import get_logger
 
-from .iface import PartitionableStorage, MediaStorage, CacheStorage, ProgressInfo
+from .iface import (
+    CacheStorage,
+    DataSource,
+    MediaStorage,
+    PartitionableStorage,
+    ProgressInfo,
+)
 from .data_parser import get_parser, DataParser
 
 
@@ -48,7 +54,7 @@ class FileStorage(PartitionableStorage):
 
     def __init__(
         self,
-        first_entry_file_name: str,
+        data_source: DataSource,
         id_key: str = "id",
         cache_path: str = "./cache",
         cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
@@ -56,20 +62,34 @@ class FileStorage(PartitionableStorage):
         """
         初始化 FileStorage。
 
+        核心设计：
+        - files: 输入文件列表，files[batch_step] 是当前分片的输入文件
+        - operator_step: 算子步骤索引，决定输出到第几步
+        - batch_step: 批次/分片索引，决定处理哪个分片
+        - id_key: 用于合并多步骤数据的唯一键
+        - _current_chunk: load_partition() 返回的合并数据块
+
+        使用流程：
+        1. split_input() - 分片输入数据（必须，即使只分一片）
+        2. 处理步骤 0: batch_step=0, read() 直接读 files[0]
+        3. 处理步骤 >0: load_partition(), read() 返回 _current_chunk
+
         Args:
-            first_entry_file_name: 第一个输入文件路径
+            data_source: 数据源实例（必选）
             id_key: 用于合并多步骤数据的唯一键字段名
             cache_path: 缓存目录
             cache_type: 文件格式
         """
         self.logger = get_logger()
-        self.files = [first_entry_file_name]  # 输入文件列表
         self.cache_path = cache_path
         self.cache_type = cache_type
         self.id_key = id_key
 
         # 获取对应的解析器
         self._parser: DataParser = get_parser(cache_type)
+
+        # 数据源（必选）
+        self.data_source = data_source
 
         self.operator_step = -1  # 当前算子步骤（-1 表示未开始）
 
@@ -86,30 +106,31 @@ class FileStorage(PartitionableStorage):
     def read(self, output_type: Literal["dataframe", "dict"] = "dataframe") -> Any:
         """数据面：Operator 调用，读取当前上下文数据。
 
-        读取优先级：
-        1. _current_chunk (预加载的数据块)
-        2. operator_step == 0 且未分片：读取所有 files 并合并
-        3. operator_step == 0 且已分片：读取 files[batch_step]
-        4. operator_step > 0：读取对应步骤的分片文件
+        核心逻辑：
+        - 只返回 _current_chunk（load_partition() 返回的合并数据）
+        - 必须先调用 split_input() 进行分片
+        - 必须先调用 load_partition() 才能读取
 
         Args:
             output_type: 输出类型，"dataframe" 或 "dict"
 
         Returns:
             读取的数据（DataFrame 或 List[dict]）
-        """
-        if self._current_chunk is not None:
-            df = self._current_chunk
-        elif self.operator_step == 0 and not self._is_partitioned:
-            self.logger.info(f"📂 读取所有输入文件 (未分片): {len(self.files)} 个")
-            df = pd.DataFrame(list(self._read_all()))
-        else:
-            file_path = self._get_cache_file_path(self.operator_step)
-            self.logger.debug(f"📖 读取文件：{file_path}")
-            with open(file_path, "rb") as f:
-                df = pd.DataFrame(list(self._parser.parse_to_dataframe(f)))
 
-        return df if output_type == "dataframe" else df.to_dict(orient="records")
+        Raises:
+            RuntimeError: 未调用 split_input() 或 load_partition() 时抛出
+        """
+        if not self._is_partitioned:
+            raise RuntimeError("Must call split_input() before read()")
+
+        if self._current_chunk is None:
+            raise RuntimeError("Must call load_partition() before read()")
+
+        return (
+            self._current_chunk
+            if output_type == "dataframe"
+            else self._current_chunk.to_dict(orient="records")
+        )
 
     def write(self, data: Any) -> str:
         """数据面：Operator 调用，写入当前上下文数据。
@@ -139,9 +160,13 @@ class FileStorage(PartitionableStorage):
         return file_path
 
     def get_keys(self) -> list[str]:
-        """数据面：Operator 调用，获取字段名。"""
-        df = self.read(output_type="dataframe")
-        return df.columns.tolist() if isinstance(df, pd.DataFrame) else []
+        """数据面：Operator 调用，获取字段名。
+
+        优先从 DataSource 获取 schema，如果未提供则读取文件。
+        """
+        for row in self.data_source.read():
+            return sorted(row.keys())
+        return []
 
     # ---------- 控制面实现 ----------
 
@@ -157,14 +182,6 @@ class FileStorage(PartitionableStorage):
     def batch_step(self, value: int) -> None:
         self._batch_step = value
 
-    @property
-    def current_chunk(self) -> Optional[pd.DataFrame]:
-        return self._current_chunk
-
-    @current_chunk.setter
-    def current_chunk(self, value: Optional[pd.DataFrame]) -> None:
-        self._current_chunk = value
-
     def step(self) -> "FileStorage":
         """控制面：推进到下一个 operator 步骤。
 
@@ -176,8 +193,13 @@ class FileStorage(PartitionableStorage):
     def split_input(self, num_partitions: int) -> list[str]:
         """控制面：将输入数据分割成多个分片并存储。
 
-        从 files[0] 读取数据，按 num_partitions 分割后存储到 cache/step_00000000/ 目录。
+        从 DataSource 读取数据，按 num_partitions 分割后存储到 cache/step_00000000/ 目录。
         分割后更新 self.files 为分片路径列表，供后续 batch_step 遍历使用。
+
+        使用示例：
+            storage = FileStorage(data_source=source)
+            storage.split_input(num_partitions=10)
+            # 此时 files = partition_paths，batch_step 可以遍历 0~9
 
         Args:
             num_partitions: 分片数量
@@ -186,44 +208,46 @@ class FileStorage(PartitionableStorage):
             分片文件的存储路径列表
 
         Note:
-            如果分片文件已存在，会跳过写入（断点续传支持）
+            - 即使只分一片，也必须调用此方法
+            - 如果分片文件已存在，会跳过写入（断点续传支持）
         """
         self.logger.info(f"📦 分割输入数据为 {num_partitions} 个分片...")
-        total = sum(1 for _ in self._read_all())
+
+        # 流式写入：遍历一次 DataSource，分发到各个 partition 文件
+        rows = self.data_source.read()
+        total = sum(1 for _ in rows)
+
+        if total < num_partitions:
+            raise RuntimeError("Rows count less than num of partitions.")
+
         self._batch_size = (total + num_partitions - 1) // num_partitions
         self.logger.info(f"📊 总行数：{total}, 每片大小：{self._batch_size}")
 
         partition_paths = []
-        rows = self._read_all()
-        for i in tqdm(
+        rows = self.data_source.read()
+        for idx in tqdm(
             range(num_partitions),
             total=num_partitions,
-            desc="Creating partitions",
+            desc="Partitioning",
         ):
             part: list[dict] = []
-            for row in rows:
+            for row in tqdm(rows, total=self._batch_size, desc="Reading Rows"):
                 part.append(row)
                 if len(part) >= self._batch_size:
                     break
-
-            partition_path = self._get_partition_file_path(i + 1)
+            # 写入当前分片
+            partition_path = self._get_partition_file_path(idx + 1)
             partition_paths.append(partition_path)
+
             if os.path.exists(partition_path):
-                self.logger.info(
-                    f"Partition {i+1} already exists, skipping: {partition_path}"
-                )
-                continue
+                self.logger.info(f"Partition {idx + 1} already exists, skipping")
+            else:
+                os.makedirs(os.path.dirname(partition_path) or ".", exist_ok=True)
+                self._parser.serialize_to_file(pd.DataFrame(part), partition_path)
+                self.logger.info(f"Partition {idx + 1} with {len(part)} rows created.")
 
-            os.makedirs(os.path.dirname(partition_path) or ".", exist_ok=True)
-            # 直接写文件，无内存缓冲
-            self._parser.serialize_to_file(pd.DataFrame(part), partition_path)
-            self.logger.debug(f"✅ 创建分片 {i+1}: {partition_path}")
-
-        self.files = partition_paths
+        self.logger.info(f"Split input complete. {num_partitions} partitions created.")
         self._is_partitioned = True
-        self.logger.info(
-            f"Split input complete. {len(partition_paths)} partitions created."
-        )
         return partition_paths
 
     def load_partition(self, dependent_steps: list[int]) -> pd.DataFrame:
@@ -233,13 +257,14 @@ class FileStorage(PartitionableStorage):
         1. 遍历 dependent_steps 中的每个步骤
         2. 从每个步骤加载数据，按 id_key 去重合并
         3. 取所有步骤的 id_key 交集
-        4. 返回交集数据
+        4. 返回交集数据，并设置 self._current_chunk 供 read() 使用
 
         Args:
             dependent_steps: 依赖的前驱步骤列表
 
         Returns:
             合并后的 DataFrame（只包含所有步骤的交集数据）
+            同时设置 self._current_chunk，供后续 read() 调用使用
         """
         ds: dict[str, dict] = {}  # id_key -> 合并后的记录
         kept_keys: list[set] = []  # 每个步骤的 id_key 集合
@@ -265,7 +290,9 @@ class FileStorage(PartitionableStorage):
         for key in removed_keys:
             ds.pop(key)
 
-        return pd.DataFrame(list(ds.values()))
+        result = pd.DataFrame(list(ds.values()))
+        self._current_chunk = result  # 直接设置内部变量，供 read() 使用
+        return result
 
     def write_file_path(self) -> str:
         """控制面：生成当前步骤的输出文件路径。"""
@@ -285,11 +312,8 @@ class FileStorage(PartitionableStorage):
         - operator_step == 0 且已分片：返回 files[batch_step]
         - operator_step > 0: 返回 cache/step_{N:08}/part_{M:08}.{ext}
 
-        注意：operator_step == 0 且未分片时，此方法不会被调用（read() 直接调用 _read_all）
+        注意：operator_step == 0 且未分片时，此方法不会被调用
         """
-        if operator_step == 0:
-            return self.files[self._batch_step]
-
         return os.path.join(
             self.cache_path,
             f"step_{operator_step:08}",
@@ -303,14 +327,6 @@ class FileStorage(PartitionableStorage):
             "step_00000000",
             f"part_{partition:08}.{self.cache_type}",
         )
-
-    def _read_all(self) -> Generator[dict, None, None]:
-        """读取所有输入文件的数据。"""
-        for file_path in tqdm(self.files, desc="reading files..."):
-            with open(file_path, "rb") as f:
-                df = self._parser.parse_to_dataframe(f)
-            for row in df:
-                yield row
 
 
 class FileMediaStorage(MediaStorage):
