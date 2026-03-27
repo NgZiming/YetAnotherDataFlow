@@ -92,6 +92,16 @@ class PipelineABC(ABC):
         3. 调用 forward() 触发包装回调，收集 OPRuntime
         4. 构建算子节点图，验证字段名完整性
         """
+
+        # 兼容旧代码：如果子类未设置 _partitions，默认为 1（不分片）
+        if not hasattr(self, "_partitions"):
+            self._partitions = 1
+
+        if hasattr(self, "storage") and isinstance(self.storage, DataFlowStorage):
+            self.logger.info(f"📦 分割输入数据为 {self._partitions} 个分片...")
+            # 分片操作移到父类 compile() 中统一处理，这样子类不需要重写 compile()
+            self.storage.split_input(self._partitions)
+
         self.compiled = True
         # 包装所有 Operator 为 AutoOP
         for k, v in vars(self).items():
@@ -639,18 +649,6 @@ class PartitionPipelineParallelRun(PipelineABC):
         super().__init__(cache_storage)
         self._partitions = partitions
 
-    def compile(self):
-        """编译管道并执行数据分片 🔧
-
-        1. 如果存在 storage，先执行 split_input 将数据分片
-        2. 调用父类 compile 构建算子图
-        """
-        if hasattr(self, "storage") and isinstance(self.storage, DataFlowStorage):
-            self.logger.info(f"📦 分割输入数据为 {self._partitions} 个分片...")
-            self.storage.split_input(self._partitions)
-
-        super().compile()
-
     def _is_dependent_on(
         self,
         wl1: Workload,
@@ -1006,7 +1004,10 @@ class PartitionPipelineParallelRun(PipelineABC):
 
         # 加载前驱步骤的数据（依赖节点的输出）
         current_partition_df: pd.DataFrame = storage.load_partition(dep_parts)
-        storage.current_chunk = current_partition_df
+        # load_partition() 内部已直接设置 self._current_chunk，不需要外部赋值
+        self.logger.info(
+            f"📥 加载依赖数据：{node.op_name} 分片 {wl.partition + 1}/{self._partitions} | {len(current_partition_df)} 行"
+        )
 
         # 执行 operator 的核心逻辑
         node.op_obj.run(storage=storage, **node.kwargs)
