@@ -236,7 +236,7 @@ class S3Storage(PartitionableStorage):
 
         client = get_s3_client(self.endpoint, self.ak, self.sk)
         partition_paths = []
-        rows = list(self._read_all())
+        rows = self._read_all()
 
         for i in tqdm(
             range(num_partitions),
