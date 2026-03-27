@@ -1,3 +1,185 @@
+Dataflow是一个非常不错的工具，但是项目上线太急，我实在等不及它实现我的需求。
+
+当我改好了之后，发现距离1.0.8已经太远，代码回不去了，所以自行建了个仓库。
+
+欢迎大家使用。
+
+# DataFlow 重构设计总结
+
+> AI生成内容
+
+> 本文档是对当前版本与官方 v1.0.10 的设计差异总结，适合作为 README.md 的补充阅读。
+
+---
+
+## 核心改进概览
+
+| 模块         | 官方 v1.0.10            | 当前版本                    | 核心优势                 |
+| ------------ | ----------------------- | --------------------------- | ------------------------ |
+| **Storage**  | 单文件 (1184 行)，无 S3 | 模块化 (~5000+ 行)，支持 S3 | 数据面/控制面分离        |
+| **Pipeline** | 697 行，无并行          | 1225 行，Spark 风格         | 原生支持并行分片         |
+| **Serving**  | 基础实现                | 增强版 + OpenClaw           | 支持重试/多模态/OpenClaw |
+| **数据规模** | 内存一次性加载          | 流式处理                    | 支持 TB 级别数据         |
+
+---
+
+## 1. Storage 模块
+
+[参考文档](dataflow/utils/storage/README.md)
+
+### 1.1 对比优势
+
+| 特性                      | 官方 v1.0.10     | 当前版本              |
+| ------------------------- | ---------------- | --------------------- |
+| 架构                      | 单文件，职责混合 | 模块化，职责分离      |
+| 数据面/控制面             | 未分离           | 明确分离              |
+| DataSource                | 无               | 支持 S3/HF/MS/本地    |
+| MediaStorage/CacheStorage | 无               | 针对复杂存储环境抽象  |
+| 分片处理                  | 无               | 原生支持              |
+| 多步骤合并                | 无               | load_partition 取交集 |
+
+### 1.2 为什么要这样改动？
+
+| 改动                           | 原因                                                           |
+| ------------------------------ | -------------------------------------------------------------- |
+| DataSource 流式读取            | 真实场景有千万行/TB 级别数据，避免内存爆炸                     |
+| DataSource 抽象                | 解决复杂环境的读写权限，企业里上下游数据保存位置和读写控制严格 |
+| MediaStorage/CacheStorage 抽象 | 企业内存储环境复杂，需要统一管理媒体文件和缓存                 |
+| 支持 S3                        | 官方还没有支持 S3，需要提前适配                                |
+| 数据面/控制面分离              | 个人工程品味，融合 dataflow 原有设计的改进                     |
+
+---
+
+## 2. Serving 模块
+
+### 2.1 对比优势
+
+| 特性              | 官方 v1.0.10 | 当前版本           |
+| ----------------- | ------------ | ------------------ |
+| MediaStorage 集成 | 无           | 支持               |
+| CLI 集成          | 无           | CLIOpenClawServing |
+| API Key 校验      | 强制         | 可选               |
+
+### 2.2 为什么要这样改动？
+
+| 改动                              | 原因                                   |
+| --------------------------------- | -------------------------------------- |
+| APIVLMServing_openai 增加重试机制 | 提高 API 调用的稳定性                  |
+| 集成 MediaStorage                 | 支持从 Storage 读取媒体文件，统一管理  |
+| 新增 CLIOpenClawServing           | 通过 OpenClaw CLI 调用 Agent，支持并发 |
+| API Key 校验改为可选              | 某些场景下不需要 API Key               |
+| 增加 max_completion_tokens        | 控制生成长度                           |
+
+---
+
+## 3. Pipeline 模块
+
+### 3.1 对比优势
+
+| 特性               | 官方 v1.0.10 | 当前版本                     |
+| ------------------ | ------------ | ---------------------------- |
+| Workload 类        | 无           | 新增                         |
+| 并行分片执行       | 手动处理     | PartitionPipelineParallelRun |
+| 依赖管理           | 无           | 完整管理                     |
+| execute_workload() | 无           | 单独方法                     |
+| 断点续传           | 简单         | 完整支持                     |
+
+### 3.2 为什么要这样改动？
+
+| 改动                            | 原因                                                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 引入 Workload 类                | 从 Spark 中吸取的经验，更清晰地表示工作负载状态                                                                       |
+| PartitionPipelineParallelRun 类 | 企业环境里同时部署了很多模型和购买了很多 api 服务，通过依赖分析识别不依赖彼此的请求，跨过原本约束尽快应对数据交付压力 |
+| 完整的依赖管理                  | 支持复杂的多步骤 Pipeline，自动处理依赖关系                                                                           |
+
+---
+
+## 4. 实际效果
+
+- **数据规模**：支持千万行级别、TB 级别数据
+- **内存占用**：流式处理，内存占用恒定，与数据量无关
+- **并行度**：分片级并发 + 算子级并发，最大化并行度
+- **断点续传**：完整支持，故障恢复更可靠
+- **API 稳定性**：重试机制提高成功率
+- **OpenClaw 集成**：通过 CLI 调用 Agent，支持并发
+- **S3 支持**：提前适配官方尚未支持的功能
+
+---
+
+## 5. 兼容性说明
+
+### Operator 不受影响
+
+**现有 Operator 代码无需修改！** Storage 模块的改动完全在控制面（Pipeline）和数据面（Storage）内部完成，Operator 的 `run()` 接口保持不变：
+
+```python
+# Operator 代码不受影响
+class MyOperator(OperatorABC):
+    def run(self, storage: StorageABC, **kwargs):
+        df = storage.read()      # 接口不变
+        # ... 处理逻辑 ...
+        storage.write(df)        # 接口不变
+```
+
+### 不兼容的变更（仅影响 Pipeline 作者）
+1. Storage 初始化需要传入 `data_source` 而非 `first_entry_file_name`
+2. API 变更：`get_keys_from_dataframe` → `get_keys`
+3. 分片流程：必须先调用 `split_input()` 才能 `read()`
+
+### 向后兼容
+1. `_partitions` 默认值为 1，保持向后兼容
+2. 基本读写接口 (`read`, `write`) 保持不变
+
+---
+
+## 6. 快速参考
+
+### Storage 使用示例
+
+```python
+# 1. 创建 DataSource
+source = S3DataSource(endpoint, ak, sk, s3_paths, format_type="jsonl")
+
+# 2. 创建 Storage
+storage = FileStorage(data_source=source, cache_path="./cache")
+
+# 3. 分片（必须首先调用）
+storage.split_input(num_partitions=10)
+
+# 4. 处理步骤 0
+storage.batch_step = 0
+storage.operator_step = 0
+df = storage.read()  # 直接读 files[0]
+
+# 5. 处理步骤 >0
+storage.operator_step = 1
+storage.load_partition(dependent_steps=[0])
+df = storage.read()  # 返回 load_partition 的结果
+```
+
+### Pipeline 使用示例
+
+```python
+# 并行分片执行
+pipeline = PartitionPipelineParallelRun(cache_storage, partitions=10)
+pipeline.compile()
+pipeline.forward(max_parallelism=4)  # 并发执行
+```
+
+### Serving 使用示例
+
+```python
+# OpenClaw CLI 集成
+from dataflow.serving import create_openclaw_serving
+
+serving = create_openclaw_serving(
+    agent_id="main",
+    model="custom/Qwen3.5-122B-A10B",
+    max_workers=4,
+)
+responses = serving.generate_from_input(["问题 1", "问题 2"])
+```
+
 # DataFlow
 
 <div align="center">
@@ -99,8 +281,8 @@ DataFlow adopts a modular operator design philosophy, building flexible data pro
 
 In the DataFlow framework, operators are divided into three core categories based on their functional characteristics:
 
-| Operator Type                       | Quantity | Main Function                                                                 |
-| ----------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| Operator Type                 | Quantity | Main Function                                                                 |
+| ----------------------------- | -------- | ----------------------------------------------------------------------------- |
 | **Generic Operators**         | 80+      | Covers general functions for text evaluation, processing, and synthesis       |
 | **Domain-Specific Operators** | 40+      | Specialized processing for specific domains (e.g., medical, financial, legal) |
 | **Evaluation Operators**      | 20+      | Comprehensively evaluates data quality from 6 dimensions                      |
@@ -274,12 +456,12 @@ For Detailed Experiments setting, please visit our [DataFlow Technical Report](h
 From the SlimPajama-627B corpus, we extract a 100B-token subset and apply multiple DataFlow text-pretraining filters. We train a Qwen2.5-0.5B
 model from scratch for 30B tokens using the Megatron-DeepSpeed framework, the results are as follows:
 
-| Methods                   | ARC-C | ARC-E | MMLU | HellaSwag | WinoGrande | Gaokao-MathQA |       Avg       |
-| ------------------------- | :---: | :---: | :---: | :-------: | :--------: | :-----------: | :-------------: |
-| **Random-30B**      | 25.26 | 43.94 | 27.03 |   37.02   |   50.99   |     27.35     |      35.26      |
-| **Qurating-30B**    | 25.00 | 43.14 | 27.50 |   37.03   |   50.67   |     26.78     |      35.02      |
-| **FineWeb-Edu-30B** | 26.45 | 45.41 | 27.41 |   38.06   |   50.43   |     25.64     |      35.57      |
-| **DataFlow-30B**    | 25.51 | 45.58 | 27.42 |   37.58   |   50.67   |     27.35     | **35.69** |
+| Methods             | ARC-C | ARC-E | MMLU  | HellaSwag | WinoGrande | Gaokao-MathQA |    Avg    |
+| ------------------- | :---: | :---: | :---: | :-------: | :--------: | :-----------: | :-------: |
+| **Random-30B**      | 25.26 | 43.94 | 27.03 |   37.02   |   50.99    |     27.35     |   35.26   |
+| **Qurating-30B**    | 25.00 | 43.14 | 27.50 |   37.03   |   50.67    |     26.78     |   35.02   |
+| **FineWeb-Edu-30B** | 26.45 | 45.41 | 27.41 |   38.06   |   50.43    |     25.64     |   35.57   |
+| **DataFlow-30B**    | 25.51 | 45.58 | 27.42 |   37.58   |   50.67    |     27.35     | **35.69** |
 
 #### 6.1.2 SFT data filter and synthesis pipeline
 
@@ -288,40 +470,40 @@ For each dataset, we compared a randomly sampled set of 5K instances against a s
 
 ### Math Benchmarks
 
-| Methods                               | math | gsm8k | aime24 | minerva | olympiad |      Avg      |
-| ------------------------------------- | :--: | :---: | :----: | :-----: | :------: | :------------: |
-| **Alpaca (random)**             | 54.9 | 77.2 |  13.3  |  14.0  |   27.0   |      37.3      |
-| **Alpaca (filtered)**           | 60.3 | 80.0 |  13.3  |  14.7  |   30.7   |      39.8      |
-| **WizardLM (random)**           | 61.1 | 84.2 |  6.7  |  18.0  |   29.3   |      39.9      |
-| **WizardLM (filtered)**         | 69.7 | 88.8 |  10.0  |  19.9  |   35.4   |      44.8      |
-| **DataFlow-SFT-15K (random)**   | 72.6 | 89.6 |  13.3  |  37.9  |   32.9   | **49.3** |
-| **DataFlow-SFT-15K (filtered)** | 73.3 | 90.2 |  13.3  |  36.0  |   35.9   | **49.7** |
+| Methods                         | math  | gsm8k | aime24 | minerva | olympiad |   Avg    |
+| ------------------------------- | :---: | :---: | :----: | :-----: | :------: | :------: |
+| **Alpaca (random)**             | 54.9  | 77.2  |  13.3  |  14.0   |   27.0   |   37.3   |
+| **Alpaca (filtered)**           | 60.3  | 80.0  |  13.3  |  14.7   |   30.7   |   39.8   |
+| **WizardLM (random)**           | 61.1  | 84.2  |  6.7   |  18.0   |   29.3   |   39.9   |
+| **WizardLM (filtered)**         | 69.7  | 88.8  |  10.0  |  19.9   |   35.4   |   44.8   |
+| **DataFlow-SFT-15K (random)**   | 72.6  | 89.6  |  13.3  |  37.9   |   32.9   | **49.3** |
+| **DataFlow-SFT-15K (filtered)** | 73.3  | 90.2  |  13.3  |  36.0   |   35.9   | **49.7** |
 
 ---
 
 ### Code Benchmarks
 
-| Methods                               | HumanEval | MBPP |      Avg      |
-| ------------------------------------- | :-------: | :--: | :------------: |
-| **Alpaca (random)**             |   71.3   | 75.9 |      73.6      |
-| **Alpaca (filtered)**           |   73.8   | 75.7 |      74.8      |
-| **WizardLM (random)**           |   75.6   | 82.0 | **78.8** |
-| **WizardLM (filtered)**         |   77.4   | 80.4 | **78.9** |
-| **DataFlow-SFT-15K (random)**   |   79.9   | 75.9 |      77.9      |
-| **DataFlow-SFT-15K (filtered)** |   82.9   | 74.9 | **78.9** |
+| Methods                         | HumanEval | MBPP  |   Avg    |
+| ------------------------------- | :-------: | :---: | :------: |
+| **Alpaca (random)**             |   71.3    | 75.9  |   73.6   |
+| **Alpaca (filtered)**           |   73.8    | 75.7  |   74.8   |
+| **WizardLM (random)**           |   75.6    | 82.0  | **78.8** |
+| **WizardLM (filtered)**         |   77.4    | 80.4  | **78.9** |
+| **DataFlow-SFT-15K (random)**   |   79.9    | 75.9  |   77.9   |
+| **DataFlow-SFT-15K (filtered)** |   82.9    | 74.9  | **78.9** |
 
 ---
 
 ### Knowledge Benchmarks
 
-| Methods                               | MMLU | C-EVAL |      Avg      |
-| ------------------------------------- | :--: | :----: | :------------: |
-| **Alpaca (random)**             | 71.8 |  80.0  |      75.9      |
-| **Alpaca (filtered)**           | 71.8 |  80.0  |      75.9      |
-| **WizardLM (random)**           | 71.8 |  79.2  |      75.5      |
-| **WizardLM (filtered)**         | 71.9 |  79.6  |      75.8      |
-| **DataFlow-SFT-15K (random)**   | 72.1 |  80.0  | **76.1** |
-| **DataFlow-SFT-15K (filtered)** | 72.2 |  80.4  | **76.3** |
+| Methods                         | MMLU  | C-EVAL |   Avg    |
+| ------------------------------- | :---: | :----: | :------: |
+| **Alpaca (random)**             | 71.8  |  80.0  |   75.9   |
+| **Alpaca (filtered)**           | 71.8  |  80.0  |   75.9   |
+| **WizardLM (random)**           | 71.8  |  79.2  |   75.5   |
+| **WizardLM (filtered)**         | 71.9  |  79.6  |   75.8   |
+| **DataFlow-SFT-15K (random)**   | 72.1  |  80.0  | **76.1** |
+| **DataFlow-SFT-15K (filtered)** | 72.2  |  80.4  | **76.3** |
 
 #### 6.1.3 Conversation Synthesis Pipeline
 
@@ -329,37 +511,37 @@ We synthesize DataFlow-Chat-15K using DataFlow's conversation-generation pipelin
 
 ### Conversation Benchmarks
 
-| Model                         |    TopDial    |     Light     |      Avg      |
-| ----------------------------- | :------------: | :------------: | :------------: |
-| **Qwen2.5-7B**          |      7.71      |      7.79      |      7.75      |
-| **+ ShareGPT-15K**      |      7.75      |      6.72      |      7.24      |
-| **+ UltraChat-15K**     |      7.72      |      6.83      |      7.28      |
+| Model                   | TopDial  |  Light   |   Avg    |
+| ----------------------- | :------: | :------: | :------: |
+| **Qwen2.5-7B**          |   7.71   |   7.79   |   7.75   |
+| **+ ShareGPT-15K**      |   7.75   |   6.72   |   7.24   |
+| **+ UltraChat-15K**     |   7.72   |   6.83   |   7.28   |
 | **+ DataFlow-Chat-15K** | **7.98** | **8.10** | **8.04** |
 
 ---
 
 ### General Benchmarks
 
-| Model                         | MMLU |   AlpacaEval   | Arena-Hard |       Avg       |
-| ----------------------------- | :---: | :-------------: | :--------: | :-------------: |
-| **Qwen2.5-7B**          | 71.45 |      7.05      |    0.60    |      26.36      |
-| **+ ShareGPT-15K**      | 73.09 |      3.70      |    1.30    |      26.03      |
-| **+ UltraChat-15K**     | 72.97 |      3.97      |    0.80    |      25.91      |
-| **+ DataFlow-Chat-15K** | 73.41 | **10.11** |    1.10    | **28.21** |
+| Model                   | MMLU  | AlpacaEval | Arena-Hard |    Avg    |
+| ----------------------- | :---: | :--------: | :--------: | :-------: |
+| **Qwen2.5-7B**          | 71.45 |    7.05    |    0.60    |   26.36   |
+| **+ ShareGPT-15K**      | 73.09 |    3.70    |    1.30    |   26.03   |
+| **+ UltraChat-15K**     | 72.97 |    3.97    |    0.80    |   25.91   |
+| **+ DataFlow-Chat-15K** | 73.41 | **10.11**  |    1.10    | **28.21** |
 
 ### 6.2 Reasoning Pipeline
 
 We adopt the NuminaMath dataset as a high-quality seed dataset. We compare three training sources: (1) a random 10K subset from Open-R1, (2) a random 10K subset from Synthetic-1, and (3) our 10K synthesized DataFlow-Reasoning-10K dataset constructed using DataFlow.
 
-| Setting  | Model                              | gsm8k | math | amc23 | olympiad | gaokao24_mix | minerva | AIME24@32 | AIME25@32 |      Avg      |
-| -------- | ---------------------------------- | :---: | :--: | :---: | :------: | :----------: | :-----: | :-------: | :-------: | :------------: |
-| Baseline | **Qwen2.5-32B-Instruct**     | 95.8 | 73.5 | 70.0 |   38.5   |     42.9     |  26.5  |   16.8   |   11.6   |     46.95     |
-| 1 Epoch  | **+ SYNTHETIC-1-10k**        | 92.9 | 71.8 | 52.5 |   38.4   |     23.1     |  24.3  |   35.6   |   34.0   |      46.6      |
-| 1 Epoch  | **+ Open-R1-10k**            | 91.5 | 72.3 | 65.0 |   38.4   |     20.9     |  24.6  |   43.0   |   33.5   |      48.7      |
-| 1 Epoch  | **+ DataFlow-Reasoning-10K** | 93.9 | 72.3 | 72.5 |   38.7   |     38.5     |  26.5  |   35.9   |   34.5   | **51.6** |
-| 2 Epochs | **+ SYNTHETIC-1-10k**        | 94.5 | 78.4 | 75.0 |   45.0   |     24.2     |  28.3  |   48.4   |   37.9   |      54.0      |
-| 2 Epochs | **+ Open-R1-10k**            | 93.9 | 77.2 | 80.0 |   44.1   |     20.9     |  25.4  |   51.0   |   40.7   |      54.2      |
-| 2 Epochs | **+ DataFlow-Reasoning-10K** | 94.4 | 76.6 | 75.0 |   45.2   |     42.9     |  25.7  |   45.4   |   40.0   | **55.7** |
+| Setting  | Model                        | gsm8k | math  | amc23 | olympiad | gaokao24_mix | minerva | AIME24@32 | AIME25@32 |   Avg    |
+| -------- | ---------------------------- | :---: | :---: | :---: | :------: | :----------: | :-----: | :-------: | :-------: | :------: |
+| Baseline | **Qwen2.5-32B-Instruct**     | 95.8  | 73.5  | 70.0  |   38.5   |     42.9     |  26.5   |   16.8    |   11.6    |  46.95   |
+| 1 Epoch  | **+ SYNTHETIC-1-10k**        | 92.9  | 71.8  | 52.5  |   38.4   |     23.1     |  24.3   |   35.6    |   34.0    |   46.6   |
+| 1 Epoch  | **+ Open-R1-10k**            | 91.5  | 72.3  | 65.0  |   38.4   |     20.9     |  24.6   |   43.0    |   33.5    |   48.7   |
+| 1 Epoch  | **+ DataFlow-Reasoning-10K** | 93.9  | 72.3  | 72.5  |   38.7   |     38.5     |  26.5   |   35.9    |   34.5    | **51.6** |
+| 2 Epochs | **+ SYNTHETIC-1-10k**        | 94.5  | 78.4  | 75.0  |   45.0   |     24.2     |  28.3   |   48.4    |   37.9    |   54.0   |
+| 2 Epochs | **+ Open-R1-10k**            | 93.9  | 77.2  | 80.0  |   44.1   |     20.9     |  25.4   |   51.0    |   40.7    |   54.2   |
+| 2 Epochs | **+ DataFlow-Reasoning-10K** | 94.4  | 76.6  | 75.0  |   45.2   |     42.9     |  25.7   |   45.4    |   40.0    | **55.7** |
 
 ### 6.3 Code PipeLine
 
@@ -369,35 +551,35 @@ We compare our synthesized datasets against Code-Alpaca-1k and Self-OSS-Instruct
 
 #### Trained on Qwen2.5-7B-Instruct
 
-| Training Data                 |  BigCodeBench  | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) |   HumanEval+   |      Avg      |
-| ----------------------------- | :------------: | :----------------: | :--------------: | :---------------: | :------------: | :------------: |
-| **Qwen2.5-7B-Instruct** |      35.3      |        23.4        |       44.8       |       43.9       |      72.6      |      44.0      |
-| **+ Code Alpaca-1K**    |      33.3      |        18.7        |       45.6       |       46.4       |      66.5      |      42.1      |
-| **+ Self-OSS**          |      31.9      |        21.4        |       46.9       |       45.9       |      70.1      |      43.2      |
-| **+ DataFlow-Code-1K**  |      35.5      |        25.7        |       48.0       |       45.1       |      72.6      |      45.4      |
-| **+ DataFlow-Code-5K**  |      36.2      |   **26.4**   |       48.6       |       45.0       |      73.2      |      45.9      |
-| **+ DataFlow-Code-10K** | **36.8** |        26.0        |  **48.8**  |  **45.4**  | **73.8** | **46.2** |
+| Training Data           | BigCodeBench | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) | HumanEval+ |   Avg    |
+| ----------------------- | :----------: | :----------------: | :--------------: | :---------------: | :--------: | :------: |
+| **Qwen2.5-7B-Instruct** |     35.3     |        23.4        |       44.8       |       43.9        |    72.6    |   44.0   |
+| **+ Code Alpaca-1K**    |     33.3     |        18.7        |       45.6       |       46.4        |    66.5    |   42.1   |
+| **+ Self-OSS**          |     31.9     |        21.4        |       46.9       |       45.9        |    70.1    |   43.2   |
+| **+ DataFlow-Code-1K**  |     35.5     |        25.7        |       48.0       |       45.1        |    72.6    |   45.4   |
+| **+ DataFlow-Code-5K**  |     36.2     |      **26.4**      |       48.6       |       45.0        |    73.2    |   45.9   |
+| **+ DataFlow-Code-10K** |   **36.8**   |        26.0        |     **48.8**     |     **45.4**      |  **73.8**  | **46.2** |
 
 ---
 
 #### Trained on Qwen2.5-14B-Instruct
 
-| Training Data                  |  BigCodeBench  | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) |   HumanEval+   |      Avg      |
-| ------------------------------ | :------------: | :----------------: | :--------------: | :---------------: | :------------: | :------------: |
-| **Qwen2.5-14B-Instruct** |      37.5      |        33.4        |       48.0       |       48.5       |      74.4      |      48.4      |
-| **+ Code Alpaca-1K**     |      37.0      |        28.2        |       50.2       |       49.6       |      71.3      |      47.3      |
-| **+ Self-OSS**           |      36.9      |        22.3        |       52.6       |       50.1       |      68.3      |      46.0      |
-| **+ DataFlow-Code-1K**   |      41.4      |   **33.7**   |       51.0       |       50.9       | **77.3** |      50.9      |
-| **+ DataFlow-Code-5K**   |      41.1      |        33.2        |       52.5       |       50.6       |      76.2      |      50.7      |
-| **+ DataFlow-Code-10K**  | **41.9** |        33.2        |  **52.9**  |  **51.0**  |      76.2      | **51.0** |
+| Training Data            | BigCodeBench | LiveCodeBench (v6) | CruxEval (Input) | CruxEval (Output) | HumanEval+ |   Avg    |
+| ------------------------ | :----------: | :----------------: | :--------------: | :---------------: | :--------: | :------: |
+| **Qwen2.5-14B-Instruct** |     37.5     |        33.4        |       48.0       |       48.5        |    74.4    |   48.4   |
+| **+ Code Alpaca-1K**     |     37.0     |        28.2        |       50.2       |       49.6        |    71.3    |   47.3   |
+| **+ Self-OSS**           |     36.9     |        22.3        |       52.6       |       50.1        |    68.3    |   46.0   |
+| **+ DataFlow-Code-1K**   |     41.4     |      **33.7**      |       51.0       |       50.9        |  **77.3**  |   50.9   |
+| **+ DataFlow-Code-5K**   |     41.1     |        33.2        |       52.5       |       50.6        |    76.2    |   50.7   |
+| **+ DataFlow-Code-10K**  |   **41.9**   |        33.2        |     **52.9**     |     **51.0**      |    76.2    | **51.0** |
 
 ## 📄 7. Publications
 
 Our team has published the following papers that form core components of the DataFlow system:
 
-| Paper Title                                                                                                             | DataFlow Component                                                                            | Venue | Year |
-| ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----- | ---- |
-| [Text2SQL-Flow: A Robust SQL-Aware Data Augmentation Framework for Text-to-SQL](https://arxiv.org/abs/2505.13903)  | Text2SQL Data Augmentation   | ICDE   | 2026 |
+| Paper Title                                                                                                                | DataFlow Component                                                                            | Venue | Year |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----- | ---- |
+| [Text2SQL-Flow: A Robust SQL-Aware Data Augmentation Framework for Text-to-SQL](https://arxiv.org/abs/2505.13903)          | Text2SQL Data Augmentation                                                                    | ICDE  | 2026 |
 | [Let&#39;s Verify Math Questions Step by Step](https://arxiv.org/abs/2505.13903)                                           | Math question quality evaluation                                                              | KDD   | 2026 |
 | [MM-Verify: Enhancing Multimodal Reasoning with Chain-of-Thought Verification](https://arxiv.org/pdf/2502.13383)           | Multimodal reasoning verification framework for data processing and evaluation                | ACL   | 2025 |
 | [Efficient Pretraining Data Selection for Language Models via Multi-Actor Collaboration](https://arxiv.org/pdf/2410.08102) | Multi-actor collaborative data selection mechanism for enhanced data filtering and processing | ACL   | 2025 |
@@ -414,8 +596,8 @@ Our team has published the following papers that form core components of the Dat
 
 We are honored to have received **first-place awards** in two major international AI competitions, recognizing the excellence and robustness of DataFlow and its reasoning capabilities:
 
-| Competition                                                               | Track                                                       | Award                          | Organizer                                                 | Date            |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------ | --------------------------------------------------------- | --------------- |
+| Competition                                                         | Track                                                     | Award                   | Organizer                                                 | Date            |
+| ------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------- | --------------------------------------------------------- | --------------- |
 | **ICML 2025 Challenges on Automated Math Reasoning and Extensions** | Track 2:*Physics Reasoning with Diagrams and Expressions* | 🥇**First Place Winner** | ICML AI for Math Workshop & AWS Codabench                 | July 18, 2025   |
 | **2025 Language and Intelligence Challenge (LIC)**                  | Track 2:*Beijing Academy of Artificial Intelligence*      | 🥇**First Prize**        | Beijing Academy of Artificial Intelligence (BAAI) & Baidu | August 10, 2025 |
 
