@@ -34,8 +34,6 @@ from .data_parser import (
     ParquetParser,
     PickleParser,
     get_parser,
-    parse_bytes_to_dataframe,
-    serialize_dataframe_to_bytes,
 )
 
 __all__ = [
@@ -62,6 +60,4 @@ __all__ = [
     "ParquetParser",
     "PickleParser",
     "get_parser",
-    "parse_bytes_to_dataframe",
-    "serialize_dataframe_to_bytes",
 ]
