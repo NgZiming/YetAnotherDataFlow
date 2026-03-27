@@ -11,6 +11,8 @@
 from pathlib import Path
 from typing import Generator, Optional
 
+from tqdm import tqdm
+
 from .iface import DataSource, DataSourceInfo
 from .data_parser import get_parser
 from ..s3_plugin import get_s3_client, list_s3_objects_detailed, read_s3_bytes
@@ -37,9 +39,15 @@ class FileDataSource(DataSource):
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         parser = get_parser(self.format_type)
-        for path in self.paths:
-            with open(path, "rb") as f:
-                yield from parser.parse_to_dataframe(f, chunk_size=chunk_size)
+        pbar = tqdm(total=len(self.paths), desc="Reading files", unit="file")
+        try:
+            for path in self.paths:
+                pbar.set_postfix(file=Path(path).name[:30])
+                with open(path, "rb") as f:
+                    yield from parser.parse_to_dataframe(f, chunk_size=chunk_size)
+                pbar.update(1)
+        finally:
+            pbar.close()
 
 
 class S3DataSource(DataSource):
@@ -90,9 +98,15 @@ class S3DataSource(DataSource):
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         parser = get_parser(self.format_type)
         client = get_s3_client(self.endpoint, self.ak, self.sk)
-        for path in self.s3_paths:
-            content = read_s3_bytes(client, path)
-            yield from parser.parse_to_dataframe(content, chunk_size)
+        pbar = tqdm(total=len(self.s3_paths), desc="Reading S3", unit="file")
+        try:
+            for path in self.s3_paths:
+                pbar.set_postfix(file=Path(path).name[:30])
+                content = read_s3_bytes(client, path)
+                yield from parser.parse_to_dataframe(content, chunk_size)
+                pbar.update(1)
+        finally:
+            pbar.close()
 
 
 class HuggingFaceDataSource(DataSource):
@@ -135,8 +149,14 @@ class HuggingFaceDataSource(DataSource):
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         self._ensure_dataset()
-        for row in self._dataset:
-            yield dict(row)
+        # 对于流式数据集，无法预知总数，使用动态进度条
+        pbar = tqdm(desc=f"Loading {self.dataset}", unit="row")
+        try:
+            for row in self._dataset:
+                yield dict(row)
+                pbar.update(1)
+        finally:
+            pbar.close()
 
 
 class ModelScopeDataSource(DataSource):
@@ -166,8 +186,14 @@ class ModelScopeDataSource(DataSource):
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         self._ensure_dataset()
-        for row in self._dataset:
-            yield dict(row)
+        # 对于流式数据集，无法预知总数，使用动态进度条
+        pbar = tqdm(desc=f"Loading {self.dataset}", unit="row")
+        try:
+            for row in self._dataset:
+                yield dict(row)
+                pbar.update(1)
+        finally:
+            pbar.close()
 
 
 # ==================== 工厂函数 ====================
