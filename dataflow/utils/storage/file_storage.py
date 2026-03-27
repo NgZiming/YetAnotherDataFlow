@@ -107,7 +107,7 @@ class FileStorage(PartitionableStorage):
             file_path = self._get_cache_file_path(self.operator_step)
             self.logger.debug(f"📖 读取文件：{file_path}")
             with open(file_path, "rb") as f:
-                df = self._parser.parse_to_dataframe(f)
+                df = pd.DataFrame(list(self._parser.parse_to_dataframe(f)))
 
         return df if output_type == "dataframe" else df.to_dict(orient="records")
 
@@ -249,7 +249,7 @@ class FileStorage(PartitionableStorage):
             # 读取指定步骤的文件
             with open(self._get_cache_file_path(operator_step), "rb") as f:
                 df_temp = self._parser.parse_to_dataframe(f)
-            for d in df_temp.to_dict("records"):
+            for d in df_temp:
                 if d[self.id_key] not in ds:
                     ds[d[self.id_key]] = {}
                 ds[d[self.id_key]].update(d)  # 合并记录
@@ -309,7 +309,7 @@ class FileStorage(PartitionableStorage):
         for file_path in tqdm(self.files, desc="reading files..."):
             with open(file_path, "rb") as f:
                 df = self._parser.parse_to_dataframe(f)
-            for row in df.to_dict("records"):
+            for row in df:
                 yield row
 
 
