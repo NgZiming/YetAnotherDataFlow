@@ -21,6 +21,7 @@ S3 存储插件模块。
 """
 
 import re
+import shutil
 
 import boto3
 
@@ -226,3 +227,23 @@ def put_s3_object(client, s3_path: str, bytes_data: bytes):
         Key=object_key,
         Body=bytes_data,
     )
+
+
+def upload_s3_object(client, s3_path: str, file_path: str):
+    """上传本地文件到 S3。
+
+    Args:
+        client: boto3 S3 client 对象
+        s3_path: S3 路径（s3://bucket/key）
+        file_path: 本地文件路径
+
+    Note:
+        - 使用流式上传，适合大文件
+        - 如果对象已存在会被覆盖
+    """
+    bucket_name, object_key = split_s3_path(s3_path)
+
+    with open(file_path, "rb") as f:
+        client.upload_fileobj(f, Bucket=bucket_name, Key=object_key)
+
+    logger.info(f"✅ 上传文件到 S3: {s3_path}")

@@ -37,6 +37,7 @@ from dataflow.utils.s3_plugin import (
     list_s3_objects_detailed,
     put_s3_object,
     read_s3_bytes,
+    upload_s3_object,
 )
 from dataflow.logger import get_logger
 
@@ -138,7 +139,7 @@ class S3Storage(PartitionableStorage):
             file_path = self._get_cache_file_path(self.operator_step)
             self.logger.info(f"Reading S3 file: {file_path}")
             file_bytes = self._read_file_bytes(file_path)
-            df = self._parser.parse_to_dataframe(file_bytes)
+            df = pd.DataFrame(list(self._parser.parse_to_dataframe(file_bytes)))
 
         return df if output_type == "dataframe" else df.to_dict(orient="records")
 
@@ -163,17 +164,16 @@ class S3Storage(PartitionableStorage):
             raise ValueError(f"Unsupported data type: {type(data)}")
 
         # 先写临时文件，再上传 S3，避免内存缓冲
-        with tempfile.NamedTemporaryFile(
+        tmp = tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=f".{self.cache_type}"
-        ) as tmp:
-            self._parser.serialize_to_file(df, tmp)
-            tmp_path = tmp.name
+        )
+        tmp_path = tmp.name
+        self._parser.serialize_to_file(df, tmp.name)
 
         try:
             # 流式上传到 S3
             client = get_s3_client(self.endpoint, self.ak, self.sk)
-            with open(tmp_path, "rb") as f:
-                put_s3_object(client, file_path, f)
+            upload_s3_object(client, file_path, tmp_path)
             self.logger.info(f"Wrote {len(df)} rows to S3: {file_path}")
         finally:
             os.unlink(tmp_path)
@@ -258,16 +258,15 @@ class S3Storage(PartitionableStorage):
                 continue
 
             # 先写临时文件，再上传 S3
-            with tempfile.NamedTemporaryFile(
+            tmp = tempfile.NamedTemporaryFile(
                 mode="w", delete=False, suffix=f".{self.cache_type}"
-            ) as tmp:
-                self._parser.serialize_to_file(pd.DataFrame(part), tmp)
-                tmp_path = tmp.name
+            )
+            tmp_path = tmp.name
+            self._parser.serialize_to_file(pd.DataFrame(part), tmp_path)
 
             try:
                 client = get_s3_client(self.endpoint, self.ak, self.sk)
-                with open(tmp_path, "rb") as f:
-                    put_s3_object(client, partition_path, f)
+                upload_s3_object(client, partition_path, tmp_path)
                 self.logger.info(f"Created partition {i+1}: {partition_path}")
             finally:
                 os.unlink(tmp_path)
@@ -301,7 +300,7 @@ class S3Storage(PartitionableStorage):
             # 读取指定步骤的文件
             file_path = self._get_cache_file_path(operator_step)
             content = self._read_file_bytes(file_path)
-            for d in self._parser.parse_to_dataframe(content).to_dict("records"):
+            for d in self._parser.parse_to_dataframe(content):
                 if d[self.id_key] not in ds:
                     ds[d[self.id_key]] = {}
                 ds[d[self.id_key]].update(d)  # 合并记录
@@ -362,7 +361,7 @@ class S3Storage(PartitionableStorage):
         for s3_path in tqdm(self.files, desc="reading file..."):
             content = self._read_file_bytes(s3_path)
             df = self._parser.parse_to_dataframe(content)
-            for row in df.to_dict("records"):
+            for row in df:
                 yield row
 
     def _read_file_bytes(self, s3_path: str) -> StreamingBody:
@@ -377,7 +376,7 @@ class S3Storage(PartitionableStorage):
         self.logger.info(f"Reading S3 file: {s3_path}")
         client = get_s3_client(self.endpoint, self.ak, self.sk)
         content = read_s3_bytes(client, s3_path)
-        #self.logger.info(f"Read {len(content)} bytes from: {s3_path}")
+        # self.logger.info(f"Read {len(content)} bytes from: {s3_path}")
         return content
 
 
@@ -415,7 +414,9 @@ class S3MediaStorage(MediaStorage):
         Returns:
             bytes: 媒体文件的字节内容
         """
-        return read_s3_bytes(get_s3_client(self.endpoint, self.ak, self.sk), media_path)
+        return read_s3_bytes(
+            get_s3_client(self.endpoint, self.ak, self.sk), media_path
+        ).read()
 
 
 class S3CacheStorage(CacheStorage):
@@ -470,7 +471,7 @@ class S3CacheStorage(CacheStorage):
         if not exists_s3_object(self.client, self.cache_file):
             return {}
 
-        json_body = read_s3_bytes(self.client, self.cache_file).decode("utf-8")
+        json_body = read_s3_bytes(self.client, self.cache_file).read()
         try:
             return json.loads(json_body)
         except:
