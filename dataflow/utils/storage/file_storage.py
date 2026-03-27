@@ -194,7 +194,7 @@ class FileStorage(PartitionableStorage):
         self.logger.info(f"📊 总行数：{total}, 每片大小：{self._batch_size}")
 
         partition_paths = []
-        rows = list(self._read_all())
+        rows = self._read_all()
         for i in tqdm(
             range(num_partitions),
             total=num_partitions,
