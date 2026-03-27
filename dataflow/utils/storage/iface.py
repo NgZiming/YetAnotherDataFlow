@@ -4,6 +4,7 @@ Storage 接口定义模块。
 采用数据面/控制面分离设计：
 - 数据面 (StorageABC): 给 Operator 使用，只关心数据读写
 - 控制面 (PartitionableStorage): 给 Pipeline 控制层使用，管理分片/批次/并发
+- DataSource: 数据源抽象类，负责从各种数据源读取数据
 
 核心设计：
 - files: 输入文件列表，files[batch_step] 是当前分片的输入文件
@@ -13,9 +14,76 @@ Storage 接口定义模块。
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Literal, TypedDict, List
+from typing import Any, Optional, Literal, TypedDict, List, Generator
+from dataclasses import dataclass
 
 import pandas as pd
+
+
+# ==================== 数据源抽象类 ====================
+
+
+@dataclass
+class DataSourceInfo:
+    """数据源信息
+
+    Attributes:
+        source_type: 数据源类型（"s3", "file", "huggingface", "modelscope"）
+        path: 数据源路径
+        num_files: 文件数量
+        total_rows: 总行数（如果已知）
+        schema: 字段名列表
+    """
+
+    source_type: str
+    paths: list[str]
+
+
+class DataSource(ABC):
+    """数据源抽象基类
+
+    职责：从各种数据源读取数据（只读），不负责存储
+    支持：S3、本地文件、HuggingFace、ModelScope 等
+
+    使用示例:
+        # S3 数据源
+        s3_source = S3DataSource(
+            endpoint="https://s3.example.com",
+            ak="xxx", sk="xxx",
+            s3_path="s3://bucket/dataset/"
+        )
+
+        # HuggingFace 数据源
+        hf_source = HuggingFaceDataSource(
+            dataset="username/dataset_name",
+            split="train"
+        )
+
+        # 在 Pipeline 中使用
+        storage = FileStorage("output.jsonl")
+        storage.split_input(data_source=s3_source, num_partitions=10)
+    """
+
+    @abstractmethod
+    def get_info(self) -> DataSourceInfo:
+        """获取数据源信息
+
+        Returns:
+            数据源元数据（类型、路径、文件数、行数、schema 等）
+        """
+        pass
+
+    @abstractmethod
+    def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
+        """流式读取数据
+
+        Args:
+            chunk_size: 每批读取的行数
+
+        Yields:
+            逐行返回 dict 记录
+        """
+        pass
 
 
 # ==================== 数据面接口（Data Plane） ====================
@@ -26,7 +94,7 @@ class StorageABC(ABC):
     """基础存储接口 - 数据面。
 
     Operator 通过此接口读写数据，无需关心外层如何调度分片、批次或并发。
-    外层控制面会在调用前设置好上下文（如 batch_step、current_chunk 等）。
+    外层控制面会在调用前设置好上下文（如 batch_step、_current_chunk 等）。
 
     使用示例:
         def run(self, storage: StorageABC):
@@ -40,7 +108,7 @@ class StorageABC(ABC):
         """读取当前上下文的数据。
 
         读取的数据来源由控制面决定：
-        - 如果 current_chunk 已设置，直接返回此数据
+        - 如果 _current_chunk 已设置，直接返回此数据
         - 否则从当前 operator_step 和 batch_step 对应的文件读取
 
         Args:
@@ -104,7 +172,7 @@ class PartitionableStorage(StorageABC):
     - files: 输入文件列表，files[batch_step] 是当前分片的输入
     - operator_step: 算子步骤索引，决定输出到第几步
     - batch_step: 批次/分片索引，决定处理哪个分片
-    - current_chunk: 预加载的数据块，用于优化性能
+    - _current_chunk: 预加载的数据块，用于优化性能
 
     文件路径规则：
     - operator_step == 0: files[batch_step]（输入文件）
@@ -145,22 +213,6 @@ class PartitionableStorage(StorageABC):
         """设置当前批次索引。"""
         pass
 
-    @property
-    @abstractmethod
-    def current_chunk(self) -> Optional[pd.DataFrame]:
-        """当前数据块（预加载的分片/批次数据）。
-
-        如果设置，read() 直接返回此数据，跳过文件读取。
-        用于优化性能，避免重复 IO。
-        """
-        pass
-
-    @current_chunk.setter
-    @abstractmethod
-    def current_chunk(self, value: Optional[pd.DataFrame]) -> None:
-        """设置预加载的数据块。"""
-        pass
-
     # ---------- 控制面方法 ----------
 
     @abstractmethod
@@ -188,7 +240,7 @@ class PartitionableStorage(StorageABC):
         这是并行分片处理的核心方法：
         1. 从 dependent_steps 对应的每个步骤加载数据
         2. 通过 id_key 合并所有步骤的数据（取交集）
-        3. 返回合并后的 DataFrame
+        3. 返回合并后的 DataFrame，并设置 self._current_chunk 供 read() 使用
 
         应用场景：
         - 多步骤并行处理后，需要取交集数据
@@ -199,6 +251,7 @@ class PartitionableStorage(StorageABC):
 
         Returns:
             合并后的分片数据 DataFrame（只包含所有步骤的交集）
+            同时设置 self._current_chunk，供后续 read() 调用使用
 
         Example:
             # 加载第 0 步和第 1 步的交集数据
@@ -208,21 +261,25 @@ class PartitionableStorage(StorageABC):
 
     @abstractmethod
     def split_input(self, num_partitions: int) -> list[str]:
-        """将输入数据分割成多个分片并存储。
+        """将数据源数据分割成多个分片并存储。
 
         用于 Pipeline 第一次输入数据时的分片处理。
-        从 files[0] 读取数据，分割后存储到 output_path/step_00000000/ 目录。
+        从 DataSource 读取数据，分割后存储到 output_path/step_00000000/ 目录。
         分割后更新 self.files 为分片路径列表，供后续 batch_step 遍历使用。
 
         Args:
+            data_source: 数据源实例
             num_partitions: 分片数量
 
         Returns:
             分片数据的存储路径列表
 
         Example:
-            storage = FileStorage("raw_input.jsonl")
-            paths = storage.split_input(num_partitions=10)
+            from .iface import create_data_source
+
+            source = create_data_source("s3://bucket/data.jsonl")
+            storage = FileStorage("output.jsonl")
+            paths = storage.split_input(data_source=source, num_partitions=10)
             # paths = ["cache/step_00000000/00000001.jsonl", ...]
             # 此时 files = paths，batch_step 可以遍历 0~9
         """
