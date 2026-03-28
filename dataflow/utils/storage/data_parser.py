@@ -160,7 +160,7 @@ class JsonlParser(DataParser):
             file_path = tmp.name
 
         try:
-            for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size):
+            for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size, engine="pyarrow"):
                 chunk: pd.DataFrame
                 for _, row in chunk.iterrows():
                     yield row.to_dict()
