@@ -138,6 +138,8 @@ class JsonlParser(DataParser):
     - 序列化：orient="records", lines=True
     """
 
+    total_read_file = 0
+
     def parse_to_dataframe(
         self,
         data: Union[io.BytesIO, StreamingBody],
@@ -155,8 +157,9 @@ class JsonlParser(DataParser):
         Raises:
             ValueError: JSONL 解析失败时抛出
         """
+        self.total_read_file += 1
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{self.total_read_file}") as tmp:
             shutil.copyfileobj(data, tmp)
             file_path = tmp.name
 
