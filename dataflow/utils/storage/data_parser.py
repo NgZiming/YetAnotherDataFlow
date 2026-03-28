@@ -160,10 +160,17 @@ class JsonlParser(DataParser):
             file_path = tmp.name
 
         try:
-            for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size, engine="pyarrow"):
-                chunk: pd.DataFrame
-                for _, row in chunk.iterrows():
-                    yield row.to_dict()
+            with open(file_path) as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                        yield d
+                    except Exception as e:
+                        logger.warn(f"skip json line: {line[:100]}")
+            # for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size, engine="pyarrow"):
+            #     chunk: pd.DataFrame
+            #     for _, row in chunk.iterrows():
+            #         yield row.to_dict()
         except Exception as e:
             logger.error(f"❌ JSONL 解析失败：{e}")
             raise ValueError(f"JSONL 解析失败：{e}")
