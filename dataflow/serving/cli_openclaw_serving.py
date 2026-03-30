@@ -357,7 +357,12 @@ class CLIOpenClawServing(LLMServingABC):
             f"(agent={self.agent_id}, max_workers={self.max_workers}, timeout={self.timeout}s)"
         )
 
-    def generate_from_input(self, user_inputs: List[str]) -> List[str]:
+    def generate_from_input(
+        self,
+        user_inputs: List[str],
+        system_prompt: str,
+        json_schema: dict,
+    ) -> List[str]:
         """
         生成文本响应（并发执行）。
 
