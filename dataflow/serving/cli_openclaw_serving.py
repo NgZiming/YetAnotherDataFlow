@@ -59,7 +59,7 @@ def _agent_store_dir(agent_id: str) -> Path:
 def _workspace_dir(agent_id: str) -> Path:
     """获取 agent workspace 目录路径。"""
     if agent_id == "main":
-        return OPENCLAW_BASE / "workspaces"
+        return OPENCLAW_BASE / "workspace"
     return OPENCLAW_BASE / "agents" / agent_id
 
 
