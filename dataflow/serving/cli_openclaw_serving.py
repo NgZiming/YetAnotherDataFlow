@@ -67,15 +67,11 @@ def _workspace_dir(agent_id: str) -> Path:
 def _list_existing_agents() -> set[str]:
     """列出所有已存在的 agents（小写标识符集合）。"""
     try:
-        env = os.environ.copy()
-        if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
-            env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
         result = subprocess.run(
             ["openclaw", "agents", "list"],
             capture_output=True,
             text=True,
             check=False,
-            env=env,
         )
         agents = set()
         for line in result.stdout.splitlines():
@@ -87,6 +83,84 @@ def _list_existing_agents() -> set[str]:
         return agents
     except FileNotFoundError:
         return set()
+
+
+def _copy_agent(source_id: str, target_id: str) -> None:
+    """
+    复制一个 agent（克隆 workspace 和配置）。
+
+    Args:
+        source_id: 源 agent 标识符
+        target_id: 目标 agent 标识符
+
+    Raises:
+        RuntimeError: 复制失败时抛出
+    """
+    source_ws = _workspace_dir(source_id)
+    target_ws = _workspace_dir(target_id)
+
+    # 确保目标目录存在
+    target_ws.mkdir(parents=True, exist_ok=True)
+
+    # 使用 rsync 复制 workspace 内容
+    result = subprocess.run(
+        ["rsync", "-av", "--delete", str(source_ws) + "/", str(target_ws)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to copy agent workspace: {result.stderr.strip()}")
+
+    # 注册新 agent（使用已存在的 workspace）
+    result = subprocess.run(
+        [
+            "openclaw",
+            "agents",
+            "add",
+            target_id,
+            "--workspace",
+            str(target_ws),
+            "--non-interactive",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        # 清理失败的目录
+        import shutil
+        shutil.rmtree(target_ws, ignore_errors=True)
+        raise RuntimeError(f"Failed to register agent {target_id}: {result.stderr.strip()}")
+
+
+def delete_agent(agent_id: str) -> None:
+    """
+    删除一个 agent（包括 workspace 和注册信息）。
+
+    Args:
+        agent_id: Agent 标识符
+    """
+    workspace = _workspace_dir(agent_id)
+    agent_store = _agent_store_dir(agent_id)
+
+    # 先尝试通过 CLI 删除注册
+    result = subprocess.run(
+        ["openclaw", "agents", "remove", agent_id, "--non-interactive"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # 清理 workspace 目录
+    if workspace.exists():
+        import shutil
+        shutil.rmtree(workspace, ignore_errors=True)
+
+    # 如果 agent_store 和 workspace 不同，也清理一下
+    if agent_store.exists() and agent_store != workspace:
+        import shutil
+        shutil.rmtree(agent_store, ignore_errors=True)
 
 
 def create_agent(agent_id: str, model: str) -> None:
@@ -102,9 +176,6 @@ def create_agent(agent_id: str, model: str) -> None:
     """
     ws = str(_workspace_dir(agent_id))
     Path(ws).mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
-        env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
     result = subprocess.run(
         [
             "openclaw",
@@ -120,7 +191,6 @@ def create_agent(agent_id: str, model: str) -> None:
         capture_output=True,
         text=True,
         check=False,
-        env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -223,38 +293,37 @@ def load_session(agent_id: str) -> Optional[List[Dict[str, Any]]]:
 
 
 def _execute_single_query(
-    agent_id: str,
+    base_agent_id: str,
     user_query: str,
-    session_id: str,
+    temp_agent_id: str,
     timeout: int,
     logger: Any,
 ) -> str:
     """
-    执行单个查询请求。
+    执行单个查询请求（使用临时 agent）。
 
     Args:
-        agent_id: Agent 标识符
+        base_agent_id: 基础 agent 标识符（用于复制）
         user_query: 用户查询内容
-        session_id: Session 标识符（UUID）
+        temp_agent_id: 临时 agent 标识符
         timeout: 超时时间（秒）
         logger: 日志对象
 
     Returns:
         助手的回复文本，如果执行失败则返回空字符串
     """
-    workspace = _workspace_dir(agent_id)
+    workspace = _workspace_dir(temp_agent_id)
 
     try:
-        env = os.environ.copy()
-        if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
-            env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
+        # 复制基础 agent 到临时 agent
+        logger.info(f"复制 agent {base_agent_id} -> {temp_agent_id}...")
+        _copy_agent(base_agent_id, temp_agent_id)
+
         cmd = [
             "openclaw",
             "agent",
             "--agent",
-            agent_id,
-            "--session-id",
-            session_id,
+            temp_agent_id,
             "--message",
             shlex.quote(user_query),
         ]
@@ -266,9 +335,8 @@ def _execute_single_query(
             cwd=str(workspace),
             timeout=timeout,
             check=False,
-            env=env,
         )
-        # 检查执行是否成功（0 或 -1 表示正常，-1 可能是被信号中断）
+        # 检查执行是否成功
         if result.returncode not in (0, -1):
             logger.warning(f"openclaw agent 退出码 {result.returncode}")
             raise Exception(result.stderr)
@@ -278,8 +346,15 @@ def _execute_single_query(
     except Exception:
         logger.exception("查询失败")
         raise
+    finally:
+        # 清理临时 agent
+        try:
+            logger.info(f"清理临时 agent {temp_agent_id}...")
+            delete_agent(temp_agent_id)
+        except Exception as e:
+            logger.warning(f"清理临时 agent 失败: {e}")
 
-    messages = load_session(agent_id)
+    messages = load_session(temp_agent_id)
     return json.dumps(messages, ensure_ascii=False) if messages else ""
 
 
@@ -358,7 +433,7 @@ class CLIOpenClawServing(LLMServingABC):
         json_schema: dict,
     ) -> List[str]:
         """
-        生成文本响应（并发执行）。
+        生成文本响应（并发执行，每个请求使用独立临时 agent）。
 
         Args:
             user_inputs: 用户输入列表
@@ -381,14 +456,15 @@ class CLIOpenClawServing(LLMServingABC):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             for i, question in enumerate(user_inputs):
-                session_id = str(uuid.uuid4())
+                # 为每个请求创建唯一的临时 agent ID
+                temp_agent_id = f"{self.agent_id}-tmp-{uuid.uuid4().hex[:8]}"
                 future = executor.submit(
                     _execute_single_query,
                     self.agent_id,
                     question,
-                    session_id,
+                    temp_agent_id,
                     self.timeout,
-                    self.logger,  # 传递 logger 用于记录错误
+                    self.logger,
                 )
                 futures[future] = i
 
