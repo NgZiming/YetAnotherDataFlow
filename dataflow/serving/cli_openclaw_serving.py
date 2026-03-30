@@ -23,8 +23,9 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 
 from __future__ import annotations
 
-import os
 import json
+import os
+import shlex
 import subprocess
 import time
 import uuid
@@ -221,28 +222,6 @@ def load_session(agent_id: str) -> Optional[List[Dict[str, Any]]]:
 # ============================================================================
 
 
-# def _extract_response(messages: List[Dict[str, Any]]) -> str:
-#     """
-#     从 session 消息列表中提取助手的最终回复。
-
-#     从后向前查找最后一个 role 为 "assistant" 的消息，提取其文本内容。
-#     """
-#     if not messages:
-#         return ""
-
-#     for msg in reversed(messages):
-#         if msg.get("role") == "assistant":
-#             content = msg.get("content", "")
-#             if isinstance(content, list):
-#                 parts = []
-#                 for block in content:
-#                     if isinstance(block, dict) and block.get("type") == "text":
-#                         parts.append(block.get("text", ""))
-#                 return "".join(parts)
-#             return content
-#     return ""
-
-
 def _execute_single_query(
     agent_id: str,
     user_query: str,
@@ -269,17 +248,19 @@ def _execute_single_query(
         env = os.environ.copy()
         if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
             env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
+        cmd = [
+            "openclaw",
+            "agent",
+            "--agent",
+            agent_id,
+            "--session-id",
+            session_id,
+            "--message",
+            shlex.quote(user_query),
+        ]
+        logger.info(" ".join(cmd))
         result = subprocess.run(
-            [
-                "openclaw",
-                "agent",
-                "--agent",
-                agent_id,
-                "--session-id",
-                session_id,
-                "--message",
-                user_query,
-            ],
+            cmd,
             capture_output=True,
             text=True,
             cwd=str(workspace),
@@ -289,10 +270,8 @@ def _execute_single_query(
         )
         # 检查执行是否成功（0 或 -1 表示正常，-1 可能是被信号中断）
         if result.returncode not in (0, -1):
-            logger.warning(
-                f"openclaw agent 退出码 {result.returncode}: {result.stderr[:200] if result.stderr else 'unknown error'}"
-            )
-            return ""
+            logger.warning(f"openclaw agent 退出码 {result.returncode}")
+            raise Exception(result.stderr)
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
         return ""
