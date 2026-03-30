@@ -219,26 +219,26 @@ def load_session(agent_id: str) -> Optional[List[Dict[str, Any]]]:
 # ============================================================================
 
 
-def _extract_response(messages: List[Dict[str, Any]]) -> str:
-    """
-    从 session 消息列表中提取助手的最终回复。
+# def _extract_response(messages: List[Dict[str, Any]]) -> str:
+#     """
+#     从 session 消息列表中提取助手的最终回复。
 
-    从后向前查找最后一个 role 为 "assistant" 的消息，提取其文本内容。
-    """
-    if not messages:
-        return ""
+#     从后向前查找最后一个 role 为 "assistant" 的消息，提取其文本内容。
+#     """
+#     if not messages:
+#         return ""
 
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(block.get("text", ""))
-                return "".join(parts)
-            return content
-    return ""
+#     for msg in reversed(messages):
+#         if msg.get("role") == "assistant":
+#             content = msg.get("content", "")
+#             if isinstance(content, list):
+#                 parts = []
+#                 for block in content:
+#                     if isinstance(block, dict) and block.get("type") == "text":
+#                         parts.append(block.get("text", ""))
+#                 return "".join(parts)
+#             return content
+#     return ""
 
 
 def _execute_single_query(
@@ -294,12 +294,9 @@ def _execute_single_query(
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
         return ""
-    except FileNotFoundError:
-        logger.error("openclaw CLI 未找到")
-        return ""
 
     messages = load_session(agent_id)
-    return _extract_response(messages) if messages else ""
+    return json.dumps(messages, ensure_ascii=False) if messages else ""
 
 
 # ============================================================================
