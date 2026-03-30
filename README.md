@@ -132,16 +132,6 @@ class MyOperator(OperatorABC):
 
 ---
 
-
-## 📖 New! Beginner Tutorial
-
-New to DataFlow? Check out our comprehensive [Tutorial](TUTORIAL.md) for step-by-step guides!
-
-- 🚀 [Beginner Tutorial (Chinese)](TUTORIAL.md) - Complete guide from zero to hero
-- 🚀 [Beginner Tutorial (English)](TUTORIAL-en.md) - Complete guide from zero to hero
-
----
-
 ## 6. Quick Reference
 
 ### Storage Usage Example
