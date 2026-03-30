@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import time
 import uuid
@@ -146,7 +145,7 @@ def delete_agent(agent_id: str) -> None:
 
     # 先尝试通过 CLI 删除注册
     result = subprocess.run(
-        ["openclaw", "agents", "remove", agent_id, "--non-interactive"],
+        ["openclaw", "agents", "delete", agent_id, "--force"],
         capture_output=True,
         text=True,
         check=False,
@@ -324,8 +323,8 @@ def _execute_single_query(
             "agent",
             "--agent",
             temp_agent_id,
-            "--message",
-            shlex.quote(user_query),
+            "-m",
+            user_query,
         ]
         logger.info(" ".join(cmd))
         result = subprocess.run(
