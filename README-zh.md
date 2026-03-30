@@ -104,6 +104,16 @@
 
 ### Operator 不受影响
 
+## 📖 新手教程
+
+第一次使用 DataFlow？查看我们的完整 [教程](TUTORIAL.md) 获取循序渐进的指南！
+
+- 🚀 [新手教程](TUTORIAL.md) - 从零开始的完整指南
+- 🚀 [Beginner Tutorial (English)](TUTORIAL-en.md) - Complete guide from zero to hero
+
+---
+
+
 **现有 Operator 代码无需修改！** Storage 模块的改动完全在控制面（Pipeline）和数据面（Storage）内部完成，Operator 的 `run()` 接口保持不变：
 
 ```python
