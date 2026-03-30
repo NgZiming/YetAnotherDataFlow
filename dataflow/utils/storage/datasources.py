@@ -1,3 +1,7 @@
+import json
+import os
+import tempfile
+
 """
 数据源实现模块。
 
@@ -15,7 +19,14 @@ from tqdm import tqdm
 
 from .iface import DataSource, DataSourceInfo
 from .data_parser import get_parser
-from ..s3_plugin import get_s3_client, list_s3_objects_detailed, read_s3_bytes
+from ..s3_plugin import (
+    get_s3_client,
+    get_s3_object_size,
+    list_s3_objects_detailed,
+    read_s3_bytes,
+)
+
+import pyarrow.parquet as pq
 
 
 class FileDataSource(DataSource):
@@ -36,6 +47,54 @@ class FileDataSource(DataSource):
 
     def get_info(self) -> DataSourceInfo:
         return DataSourceInfo(source_type="file", paths=self.paths)
+
+    def estimate_total_rows(self) -> int:
+        """通过采样估算总行数
+
+        根据 format_type 采用不同策略：
+        - Parquet: 读取 metadata 获取准确行数
+        - CSV/JSON/JSONL: 采样解析，计算平均每行字节数
+        - Pickle: 无法估算，返回 1
+        """
+        if not self.paths:
+            return 1
+
+        total_size = sum(Path(p).stat().st_size for p in self.paths)
+        if total_size == 0:
+            return 1
+
+        # Parquet 格式：直接读取 metadata 获取准确行数
+        if self.format_type == "parquet":
+            total_rows = 0
+            for p in self.paths:
+                pf = pq.ParquetFile(p)
+                total_rows += pf.metadata.num_rows
+
+            return max(1, total_rows)
+        # 其他格式：使用 Parser 采样解析
+        parser = get_parser(self.format_type)
+        sample_rows = 100
+        sampled_bytes = 0
+        sampled_count = 0
+
+        for p in self.paths:
+            with open(p, "rb") as f:
+                for row in parser.parse_to_dataframe(f, chunk_size=sample_rows):
+                    sampled_bytes += len(
+                        (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+                    )
+                    sampled_count += 1
+                    if sampled_count >= sample_rows:
+                        break
+            if sampled_count >= sample_rows:
+                break
+
+        if sampled_count == 0:
+            # 无法采样，用经验值
+            return max(1, int(total_size / 200))
+
+        avg_row_bytes = sampled_bytes / sampled_count
+        return max(1, int(total_size / avg_row_bytes))
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         parser = get_parser(self.format_type)
@@ -95,6 +154,68 @@ class S3DataSource(DataSource):
     def get_info(self) -> DataSourceInfo:
         return DataSourceInfo(source_type="s3", paths=self.s3_paths)
 
+    def estimate_total_rows(self) -> int:
+        """通过 S3 对象元数据估算总行数
+
+        根据 format_type 采用不同策略：
+        - Parquet: 只下载 footer 获取 metadata（高效）
+        - CSV/JSON/JSONL: 采样解析，计算平均每行字节数
+        """
+        if not self.s3_paths:
+            return 1
+        client = get_s3_client(self.endpoint, self.ak, self.sk)
+
+        total_size = 0
+        for p in self.s3_paths:
+            total_size += get_s3_object_size(client, p)
+        if total_size == 0:
+            return 1
+
+        # Parquet 格式：只下载 footer 获取 metadata（高效，~64KB）
+        if self.format_type == "parquet":
+            total_rows = 0
+            footer_size = 64 * 1024  # Parquet footer 通常在 64KB 内
+            for p in self.s3_paths:
+                # 获取文件大小
+                size = get_s3_object_size(client, p)
+                # 只下载尾部 footer
+                range_start = max(0, size - footer_size)
+                response = read_s3_bytes(
+                    client,
+                    p,
+                    range_start,
+                )
+                footer_data = response.read()
+                # 写入临时文件供 ParquetFile 读取
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".parquet"
+                ) as tmp:
+                    tmp.write(footer_data)
+                    tmp_path = tmp.name
+                try:
+                    pf = pq.ParquetFile(tmp_path)
+                    total_rows += pf.metadata.num_rows
+                finally:
+                    os.unlink(tmp_path)
+            return total_rows
+
+        # 其他格式：采样解析
+        sampled_bytes, sampled_count = 0, 0
+        content = read_s3_bytes(client, self.s3_paths[0])
+
+        for row in get_parser(self.format_type).parse_to_dataframe(
+            content, chunk_size=100
+        ):
+            sampled_bytes += len(
+                (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+            )
+            sampled_count += 1
+            if sampled_count >= 100:
+                break
+
+        avg = sampled_bytes / sampled_count if sampled_count else 200
+        return max(1, int(total_size / avg))
+
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         parser = get_parser(self.format_type)
         client = get_s3_client(self.endpoint, self.ak, self.sk)
@@ -147,6 +268,10 @@ class HuggingFaceDataSource(DataSource):
     def get_info(self) -> DataSourceInfo:
         return DataSourceInfo(source_type="huggingface", paths=[self.dataset])
 
+    def estimate_total_rows(self) -> int:
+        self._ensure_dataset()
+        return len(self.dataset)
+
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         self._ensure_dataset()
         # 对于流式数据集，无法预知总数，使用动态进度条
@@ -183,6 +308,10 @@ class ModelScopeDataSource(DataSource):
 
     def get_info(self) -> DataSourceInfo:
         return DataSourceInfo(source_type="modelscope", paths=[self.dataset])
+
+    def estimate_total_rows(self) -> int:
+        self._ensure_dataset()
+        return len(self.dataset)
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         self._ensure_dataset()
