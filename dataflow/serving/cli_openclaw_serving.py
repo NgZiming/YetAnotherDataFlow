@@ -23,6 +23,7 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 
 from __future__ import annotations
 
+import os
 import json
 import subprocess
 import time
@@ -63,11 +64,15 @@ def _workspace_dir(agent_id: str) -> Path:
 def _list_existing_agents() -> set[str]:
     """列出所有已存在的 agents（小写标识符集合）。"""
     try:
+        env = os.environ.copy()
+        if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
+            env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
         result = subprocess.run(
             ["openclaw", "agents", "list"],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
         agents = set()
         for line in result.stdout.splitlines():
@@ -94,6 +99,9 @@ def create_agent(agent_id: str, model: str) -> None:
     """
     ws = str(_workspace_dir(agent_id))
     Path(ws).mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
+        env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
     result = subprocess.run(
         [
             "openclaw",
@@ -109,6 +117,7 @@ def create_agent(agent_id: str, model: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -255,6 +264,9 @@ def _execute_single_query(
     workspace = _workspace_dir(agent_id)
 
     try:
+        env = os.environ.copy()
+        if "/root/.nvm/versions/node/v24.14.1/bin/" not in env["PATH"]:
+            env["PATH"] = "/root/.nvm/versions/node/v24.14.1/bin/:" + env["PATH"]
         result = subprocess.run(
             [
                 "openclaw",
@@ -271,6 +283,7 @@ def _execute_single_query(
             cwd=str(workspace),
             timeout=timeout,
             check=False,
+            env=env,
         )
         # 检查执行是否成功（0 或 -1 表示正常，-1 可能是被信号中断）
         if result.returncode not in (0, -1):
