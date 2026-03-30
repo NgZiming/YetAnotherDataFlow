@@ -177,10 +177,11 @@ class PipelineABC(ABC):
             # check if accumulated_keys have the input keys of this operator
             # print(op_node, op_node.input_keys, op_node.output_keys)
             for input_key in op_node.input_keys:
-                if input_key not in self.accumulated_keys[-1]:
+                input_key_first_part: str = input_key.split(".")[0]
+                if input_key_first_part not in self.accumulated_keys[-1]:
                     error_msg.append(
                         {
-                            "input_key": input_key,
+                            "input_key": input_key_first_part,
                             "op_name": op_node.op_name,
                             "class_name": op_node.op_obj.__class__.__name__,
                             "key_para_name": op_node.input_key_nodes[
@@ -247,11 +248,12 @@ class PipelineABC(ABC):
                 current_keynode: KeyNode = i_op.input_key_nodes[input_key]
                 current_keynode.set_index(idx)
 
-                if len(self.last_modified_index_of_keys[input_key]) > 0:
-                    last_modified_idx = self.last_modified_index_of_keys[input_key][-1]
+                input_key_first_part: str = input_key.split(".")[0]
+                if len(self.last_modified_index_of_keys[input_key_first_part]) > 0:
+                    last_modified_idx = self.last_modified_index_of_keys[input_key_first_part][-1]
                     last_modified_keynode: KeyNode = self.op_nodes_list[
                         last_modified_idx
-                    ].output_keys_nodes[input_key]
+                    ].output_keys_nodes[input_key_first_part]
                     # double side ptr for each nodes
                     last_modified_keynode.ptr.append(current_keynode)
                     current_keynode.ptr.append(last_modified_keynode)
