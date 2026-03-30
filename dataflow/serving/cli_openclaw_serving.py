@@ -58,7 +58,9 @@ def _agent_store_dir(agent_id: str) -> Path:
 
 def _workspace_dir(agent_id: str) -> Path:
     """获取 agent workspace 目录路径。"""
-    return OPENCLAW_BASE / "workspaces" / agent_id
+    if agent_id == "main":
+        return OPENCLAW_BASE / "workspaces"
+    return OPENCLAW_BASE / "agents" / agent_id
 
 
 def _list_existing_agents() -> set[str]:
@@ -294,6 +296,9 @@ def _execute_single_query(
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
         return ""
+    except Exception:
+        logger.exception("查询失败")
+        raise
 
     messages = load_session(agent_id)
     return json.dumps(messages, ensure_ascii=False) if messages else ""
