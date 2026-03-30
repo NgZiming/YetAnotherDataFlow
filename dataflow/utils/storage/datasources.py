@@ -40,6 +40,9 @@ class FileDataSource(DataSource):
         """
         files: list[str] = []
         for x in paths:
+            if x.endswith(f".{format_type}"):
+                files.append(x)
+                continue
             for y in Path(x).rglob(f"*.{format_type}"):
                 files.extend(str(y))
         self.paths = sorted(list(set(files)))

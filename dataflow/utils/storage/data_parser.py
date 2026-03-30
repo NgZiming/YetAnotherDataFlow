@@ -101,10 +101,8 @@ class JsonParser(DataParser):
             file_path = tmp.name
 
         try:
-            for chunk in pd.read_json(file_path, chunksize=chunk_size):
-                chunk: pd.DataFrame
-                for _, row in chunk.iterrows():
-                    yield row.to_dict()
+            for row in pd.read_json(file_path).to_dict("records"):
+                yield row
         except Exception as e:
             logger.error(f"❌ JSON 解析失败：{e}")
             raise ValueError(f"JSON 解析失败：{e}")
@@ -159,7 +157,9 @@ class JsonlParser(DataParser):
         """
         self.total_read_file += 1
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{self.total_read_file}") as tmp:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=f".{self.total_read_file}"
+        ) as tmp:
             shutil.copyfileobj(data, tmp)
             file_path = tmp.name
 
@@ -170,7 +170,7 @@ class JsonlParser(DataParser):
                         d = json.loads(line)
                         yield d
                     except Exception as e:
-                        logger.warn(f"skip json line: {line[:100]}")
+                        logger.warning(f"skip json line: {line[:100]}")
             # for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size, engine="pyarrow"):
             #     chunk: pd.DataFrame
             #     for _, row in chunk.iterrows():
@@ -289,10 +289,8 @@ class ParquetParser(DataParser):
             file_path = tmp.name
 
         try:
-            for chunk in pd.read_parquet(file_path, chunksize=chunk_size):
-                chunk: pd.DataFrame
-                for _, row in chunk.iterrows():
-                    yield row.to_dict()
+            for row in pd.read_parquet(file_path).to_dict("records"):
+                yield row
         except Exception as e:
             logger.error(f"❌ Parquet 解析失败：{e}")
             raise ValueError(f"Parquet 解析失败：{e}")
