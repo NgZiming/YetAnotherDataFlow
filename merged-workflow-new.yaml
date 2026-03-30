@@ -1,0 +1,420 @@
+# merged-workflow-new.yaml - 完整的多步工具调用轨迹生成流程（新 Storage 接口格式）
+# 合并了 tool-call.yaml (Stage 1-2) 和 trajectory-generation.yaml (Stage 3-7)
+# 使用新的 dataflow.utils.storage 接口：DataSource + Storage 分离
+
+metadata:
+  name: "merged-toolcall-trajectory-flow"
+  version: "1.0.0"
+  description: "从原始文本到高质量轨迹的完整流程：多步操作提取 → 工作流设计 → 轨迹生成 → 优化 → 验证 → 幻觉检测"
+
+# ==================== 数据源配置 ====================
+# 新的接口设计：DataSource 负责读取，Storage 负责写入
+data_sources:
+  # 默认数据源（被 storage 引用）
+  default:
+    type: "S3DataSource"
+    params:
+      endpoint: "${S3_EP:}"
+      ak: "${S3_AK:}"
+      sk: "${S3_SK:}"
+      # 输入数据路径（支持多个文件或目录）
+      s3_paths:
+        - s3://shared-base-data/datasets/lm2.8_base_data/en/ST-20250304-en-cc-main-2024-30-pretrain-2.8.0/
+      format_type: "jsonl"  # 可选：jsonl, json, csv, parquet
+
+# ==================== 存储配置 ====================
+# Storage 需要引用 data_source（通过 data_source 字段指定名称）
+storage:
+  type: "S3Storage"
+  # 引用哪个 DataSource（默认为 "default"）
+  data_source: "default"
+  params:
+    endpoint: "${S3_EP:}"
+    ak: "${S3_AK:}"
+    sk: "${S3_SK:}"
+    # 输出路径
+    output_s3_path: "s3://pedia-doc-ai/wuziming/merged-workflow-flow/output/"
+    id_key: "warc_record_id"
+    cache_type: "jsonl"
+
+# 可选：媒体存储（用于 VLM Serving）
+# media_storage:
+#   type: "S3MediaStorage"
+#   params:
+#     endpoint: "${S3_EP:}"
+#     ak: "${S3_AK:}"
+#     sk: "${S3_SK:}"
+
+# ==================== Serving 配置 ====================
+serving:
+  qwen3_5_122b:
+    type: "APILLMServing_request"
+    params:
+      api_url: "http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions"
+      model_name: "/data/share/models/Qwen3.5-122B-A10B/"
+      max_workers: 120
+      max_completion_tokens: 8192
+      chat_template_kwargs:
+        enable_thinking: false
+      read_timeout: 300
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 1.5
+      repetition_penalty: 1.0
+
+# ==================== Operator 配置 ====================
+operators:
+  # ========== Stage 1-2: Tool Call Extraction ==========
+
+  # Step 1: 多步操作识别
+  op_multistep_extractor:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            Determine whether the following text contains multi-step operations involving the use of an APP, website, computer, or other machine (such as robot, elevator, etc), if contains, generate one sentence summary of the task and identify the platform, domain and task category of the multi-step task.
+
+            # Detaild Instruction
+            1. Platform category: operator, computer, phone, machine, other
+            2. Domain category: adult, arts_and_entertainment, autos_and_vehicles, beauty_and_fitness, books_and_literature, business_and_industrial, computers_and_electronics, finance, food_and_drink, games, health, hobbies_and_leisure, home_and_garden, internet_and_telecom, jobs_and_education, law_and_government, news, online_communities, people_and_society, pets_and_animals, real_estate, science, sensitive_subjects, shopping, sports, travel_and_transportation
+            3. Task category: databases, multimedia_processing, cloud_platforms, calendar_management, cryptocurrency, location_services, communication, search, file_systems, web_scraping, ecommerce_and_retail, customer_data_platforms, developer_tools, virtualization, version_control, research_and_data, aigc, travel_and_transportation, note_taking, language_translation, rag_systems, security_and_iam, social_media, monitoring, weather_services, customer_support, blockchain, knowledge_and_memory, financial_trading, marketing, enterprise_business_intelligence, transportation_logistics, iphone_android, smart_home, education_elearning, robot_control, website_control, gaming_entertainment
+
+            # Input
+            {input_text_key}
+
+            # Output Format (JSON only)
+            {{"multi_step": false}}
+            Or:
+            {{"multi_step": true, "summary": "xxx", "domain": "Shopping, Sports", "platform": "Operator", "task": "customer_support"}}
+          on_missing: "raise"
+    keys:
+      input:
+        input_text_key: "text"
+      output:
+        output_key: "multistep_analysis"
+
+  # Step 2: JSON 解析
+  op_json_parser_multistep:
+    type: JsonParseFilter
+    serving: null
+    params:
+      required_fields: ["multi_step", "summary", "domain", "platform", "task"]
+      field_types:
+        multi_step: bool
+        summary: str
+        domain: str
+        platform: str
+        task: str
+      field_values:
+        multi_step: True
+    keys:
+      input:
+        input_key: "multistep_analysis"
+      output:
+        output_key: "multistep_analysis"
+
+  # Step 3: 工作流提取
+  op_workflow_extractor:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      system_prompt: You are an program design expert.
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            Given a workflow description in a scenario, your task is to design multiple functions to translate the execution process of this workflow into program.
+
+            # Instruction
+            1. Extract all intermediate steps in the workflow, if the text contains multiple workflows, output them in a list.
+            2. Convert **every** step to a function and represent them as an execution graph (i.e. (login)->(search_query)->..)
+            3. Based on the execution graph, generate real API calls that populate the tools with reasonable parameters, simulating a use case of actual tool invocation steps.
+            4. Provide detailed API definitions used in the above process.
+            5. Follow the following steps to generate more complex workflows and tools:
+               - Workflow Exploration: You need to explore multiple workflows or complex constraints that may exist in the document
+               - Tool Design (Functional API Level)
+                 Design a set of JSON-schema tools based on the text.
+
+            # Workflow Description
+            {input_text_key}
+
+            # Output Format (JSON only)
+            {{
+              "workflows": [
+                {{
+                  "description": "short task description for workflow 1",
+                  "steps": ["Step1: ...", "Step2: ..."],
+                  "execution_graph": "(api_name1)->(api_name2, api_name3)->..",
+                  "actions": [{{"name":"api_name", "arguments": {{"arg_name": "value"}}}}],
+                  "tools": [{{"name":"api_name1","description":"","inputSchema":{{"type":"object","properties":{{"arg_name1":{{"type":"","description":""}}}}, "required":["arg_name2"]}}}}]
+                }}
+              ]
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_text_key: "text"
+        input_multistep_analysis_key: "multistep_analysis"
+      output:
+        output_key: "workflow"
+
+  # Step 4: JSON 解析
+  op_workflow_parser:
+    type: JsonParseFilter
+    serving: null
+    params: {}
+    keys:
+      input:
+        input_key: "workflow"
+      output:
+        output_key: "workflow"
+
+  # ========== Stage 3-7: Trajectory Generation ==========
+
+  # Step 0: Workflow 展开
+  op_workflow_exploder:
+    type: WorkflowExploder
+    serving: null
+    params: {}
+    keys:
+      input:
+        input_id_key: "warc_record_id"
+        input_workflows_key: "workflow"
+      output:
+        output_workflow_key: "current_task"
+        output_tools_key: "candidate_tools"
+
+  # Stage 3: Trajectory Generation
+  op_trajectory_generator:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      system_prompt: |
+        You are tasked with generating high-quality multi-turn dialogue trajectories based on a given text document.
+
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            You will be provided with:
+            - A list of Available Tool Candidates;
+            - A source text document that contains the description of the scenario and task steps;
+
+            ## Given Inputs
+            ### Available Tool Candidates
+            {input_candidate_tools_key}
+
+            ### A source text document consisting of Task Steps Description
+            {input_current_task_key}
+
+            ## Output Format (JSON ONLY)
+            {{
+              "trajectory": [
+                {{"role": "system", "content": "..."}},
+                {{"role": "user", "content": "..."}},
+                {{"role": "assistant", "content": "...", "tool_calls": [...]}},
+                {{"role": "tool", "tool_call_id": "call_1", "name": "...", "content": "..."}}
+              ]
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_candidate_tools_key: "candidate_tools"
+        input_current_task_key: "current_task"
+      output:
+        output_key: "trajectory"
+
+  # Step 1.5: JSON 解析
+  op_trajectory_parser:
+    type: JsonParseFilter
+    serving: null
+    params:
+      required_fields: ["trajectory"]
+      field_types:
+        trajectory: list
+    keys:
+      input:
+        input_key: "trajectory"
+      output:
+        output_key: "trajectory"
+
+  # Stage 4: Trajectory Refinement
+  op_trajectory_refiner:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      system_prompt: |
+        You are rewriting a complex, realistic multi-turn tool-use trajectory for agentic training.
+
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            Goal: The trajectory should be complex, natural, no-hallucination and show the wisdom of the assistant.
+
+            ## Given Inputs
+            ### Available Tool Candidates
+            {input_candidate_tools_key}
+
+            ### Original Trajectory
+            {input_trajectory_key}
+
+            ## Output Format (JSON ONLY)
+            {{
+              "refined_trajectory": [...],
+              "improvements": [...]
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_candidate_tools_key: "candidate_tools"
+        input_trajectory_key: "trajectory"
+      output:
+        output_key: "refined_trajectory"
+
+  # Step 2.5: JSON 解析
+  op_refined_trajectory_parser:
+    type: JsonParseFilter
+    serving: null
+    params:
+      required_fields: ["refined_trajectory", "improvements"]
+      field_types:
+        refined_trajectory: list
+        improvements: list
+    keys:
+      input:
+        input_key: "refined_trajectory"
+      output:
+        output_key: "refined_trajectory"
+
+  # Stage 5: Trajectory Validation
+  op_trajectory_validator:
+    type: TrajectoryRuleValidator
+    serving: null
+    params:
+      tool_definition_rules:
+        required_fields: ["name", "description", "inputSchema"]
+        schema_required_fields: ["type", "properties", "required"]
+        name_pattern: "^[a-z][a-z0-9_]*$"
+        unique_names: true
+        valid_param_types: ["string", "number", "integer", "boolean", "array", "object"]
+      tool_call_rules:
+        validate_tool_names: true
+        validate_required_params: true
+        validate_param_types: true
+        reject_unknown_params: true
+      format_rules:
+        first_message_must_be_system: true
+        validate_turn_order: true
+    keys:
+      input:
+        input_candidate_tools_key: "candidate_tools"
+        input_trajectory_key: "refined_trajectory"
+      output:
+        output_key: "validation_result"
+
+  # Stage 6: Hallucination Detection
+  op_hallucination_checker:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      system_prompt: |
+        You are given a multi-turn tool-use trajectory. Please evaluate the trajectory according to the hallucination detection rubrics.
+
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            ## Rubric
+            R1: Tool-call hallucination
+            R2: Capability hallucination
+            R3: Context hallucination
+
+            ## Given Input
+            ### Trajectory
+            {input_trajectory_key}
+
+            ## Output Format (JSON ONLY)
+            {{"R1": 0 or 1, "R2": 0 or 1, "R3": 0 or 1}}
+          on_missing: "raise"
+    keys:
+      input:
+        input_trajectory_key: "refined_trajectory"
+      output:
+        output_key: "hallucination_score"
+
+  # Step 3.5: JSON 解析
+  op_hallucination_parser:
+    type: JsonParseFilter
+    serving: null
+    params:
+      required_fields: ["R1", "R2", "R3"]
+      field_types:
+        R1: int
+        R2: int
+        R3: int
+      field_values:
+        R1: 1
+        R2: 1
+        R3: 1
+    keys:
+      input:
+        input_key: "hallucination_score"
+      output:
+        output_key: "hallucination_score"
+
+  # Stage 7.5: 字段过滤
+  op_field_extractor:
+    type: NestExtractOperator
+    serving: null
+    params:
+      remove_all_keys: true
+    keys:
+      input:
+        input_warc_record_id_key: "warc_record_id"
+        input_candidate_tools_key: "candidate_tools"
+        input_current_task_key: "current_task"
+        input_text_key: "text"
+        input_language_key: "language"
+        input_url_key: "url"
+        input_multistep_analysis_key: "multistep_analysis"
+        input_refined_trajectory_key: "refined_trajectory"
+        input_hallucination_score_key: "hallucination_score"
+      output:
+        output_warc_record_id_key: "warc_record_id"
+        output_candidate_tools_key: "candidate_tools"
+        output_current_task_key: "current_task"
+        output_text_key: "text"
+        output_language_key: "language"
+        output_url_key: "url"
+        output_multistep_analysis_key: "multistep_analysis"
+        output_refined_trajectory_key: "refined_trajectory"
+        output_hallucination_score_key: "hallucination_score"
+
+# ==================== Pipeline 配置 ====================
+pipeline:
+  type: "PartitionPipelineParallelRun"
+  steps:
+    # Stage 1-2: Tool Call Extraction
+    - "op_multistep_extractor"
+    - "op_json_parser_multistep"
+    - "op_workflow_extractor"
+    - "op_workflow_parser"
+    # Stage 3-7: Trajectory Generation
+    - "op_workflow_exploder"
+    - "op_trajectory_generator"
+    - "op_trajectory_parser"
+    - "op_trajectory_refiner"
+    - "op_refined_trajectory_parser"
+    - "op_trajectory_validator"
+    - "op_hallucination_checker"
+    - "op_hallucination_parser"
+    - "op_field_extractor"
+  execution:
+    partitions: 14
+    max_parallelism: 4
