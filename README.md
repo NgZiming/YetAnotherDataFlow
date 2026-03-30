@@ -4,7 +4,7 @@ After making my changes, I found the codebase had drifted too far from v1.0.8 to
 
 main differences：
 1. S3 support
-2. Partitioned / Parallel run
+2. Partitioned / Parallel run / Dependency Analytics
 3. read/write Splitting
 4. openclaw serving
 
@@ -371,11 +371,7 @@ class ConvertPipeline(PipelineABC):
         )
 
     def forward(self):
-        self.storage.batch_step = 0
-        self.storage.operator_step = 0
-        df = self.storage.read()  # Read from S3 JSONL
-        # ... process data ...
-        self.storage.write(df)  # Write to local Parquet
+        pass
 ```
 
 **Note**: All files in the same DataSource must be in the **same format**.
