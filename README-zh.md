@@ -371,11 +371,7 @@ class ConvertPipeline(PipelineABC):
         )
 
     def forward(self):
-        self.storage.batch_step = 0
-        self.storage.operator_step = 0
-        df = self.storage.read()  # 从 S3 JSONL 读取
-        # ... 处理数据 ...
-        self.storage.write(df)  # 写入本地 Parquet
+        pass
 ```
 
 **注意**：同一个 DataSource 的所有文件必须是**相同格式**。
