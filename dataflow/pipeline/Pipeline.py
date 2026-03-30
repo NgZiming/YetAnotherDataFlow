@@ -100,7 +100,8 @@ class PipelineABC(ABC):
         if hasattr(self, "storage") and isinstance(self.storage, DataFlowStorage):
             self.logger.info(f"📦 分割输入数据为 {self._partitions} 个分片...")
             # 分片操作移到父类 compile() 中统一处理，这样子类不需要重写 compile()
-            self.storage.split_input(self._partitions)
+            parts = self.storage.split_input(self._partitions)
+            self._partitions = len(parts)
 
         self.compiled = True
         # 包装所有 Operator 为 AutoOP

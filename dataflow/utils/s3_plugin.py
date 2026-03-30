@@ -145,6 +145,29 @@ def get_s3_client(endpoint: str, ak: str, sk: str):
     )
 
 
+def get_s3_object_size(client, s3_path: str) -> int:
+    """检查 S3 对象是否存在。
+
+    Args:
+        client: boto3 S3 client 对象
+        s3_path: S3 路径
+
+    Returns:
+        int: 对象存在返回 bytes 大小，不存在返回 0
+
+    Raises:
+        ClientError: 除 404 以外的其他错误会抛出异常
+    """
+    try:
+        bucket, key = split_s3_path(s3_path)
+        head = client.head_object(Bucket=bucket, Key=key)
+        return head.get("ContentLength", 0)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return 0
+        raise e
+
+
 def exists_s3_object(client, s3_path: str) -> bool:
     """检查 S3 对象是否存在。
 
@@ -191,7 +214,7 @@ def is_s3_object_empty(client, path: str) -> bool | None:
         return None
 
 
-def read_s3_bytes(client, s3_path: str) -> StreamingBody:
+def read_s3_bytes(client, s3_path: str, skip: int = 0) -> StreamingBody:
     """读取 S3 对象的完整内容。
 
     Args:
@@ -205,7 +228,14 @@ def read_s3_bytes(client, s3_path: str) -> StreamingBody:
         适用于读取中小型文件，大文件建议使用流式读取。
     """
     bucket_name, object_key = split_s3_path(s3_path)
-    response = client.get_object(Bucket=bucket_name, Key=object_key)
+    if not skip:
+        response = client.get_object(Bucket=bucket_name, Key=object_key)
+    else:
+        response = client.get_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            Range=f"bytes={skip}-",
+        )
     streaming_body = response["Body"]
     return streaming_body
 

@@ -244,33 +244,42 @@ class S3Storage(PartitionableStorage):
         self.logger.info(f"📦 分割输入数据为 {num_partitions} 个分片...")
 
         # 流式写入：遍历一次 DataSource，分发到各个 partition 文件
-        rows = self.data_source.read()
-        total = sum(1 for _ in rows)
-
+        total = self.data_source.estimate_total_rows()
         if total < num_partitions:
-            raise RuntimeError("Rows count less than num of partitions.")
+            self.logger.critical(f"估算行数 {total} < partitions {num_partitions}")
+            raise Exception("分片数过多")
 
-        self._batch_size = (total + num_partitions - 1) // num_partitions
-        self.logger.info(f"📊 总行数：{total}, 每片大小：{self._batch_size}")
+        if num_partitions > 1:
+            self._batch_size = (total + num_partitions - 1) // num_partitions
+        else:
+            self._batch_size = 9223372036854775807
 
+        self.logger.info(f"📊 估算行数：{total}, 每片：{self._batch_size}")
         partition_paths = []
         rows = self.data_source.read()
-        for idx in tqdm(
-            range(num_partitions),
-            total=num_partitions,
-            desc="Partitioning",
-        ):
+
+        actual_total = 0
+        while True:
             part: list[dict] = []
-            for row in tqdm(rows, total=self._batch_size, desc="Reading Rows"):
+            for row in tqdm(
+                rows, total=self._batch_size, desc="Reading Rows", leave=False
+            ):
                 part.append(row)
+                actual_total += 1
                 if len(part) >= self._batch_size:
                     break
+
+            if not len(part):
+                break
+
             # 写入当前分片
-            partition_path = self._get_partition_file_path(idx + 1)
+            partition_path = self._get_partition_file_path(len(partition_paths) + 1)
             partition_paths.append(partition_path)
 
             if self.file_exists(partition_path):
-                self.logger.info(f"Partition {idx + 1} already exists, skipping")
+                self.logger.info(
+                    f"Partition {len(partition_paths)} already exists, skipping"
+                )
             else:
                 # 先写临时文件，再上传 S3
                 tmp = tempfile.NamedTemporaryFile(
@@ -283,13 +292,23 @@ class S3Storage(PartitionableStorage):
                     client = get_s3_client(self.endpoint, self.ak, self.sk)
                     upload_s3_object(client, partition_path, tmp_path)
                     self.logger.info(
-                        f"Partition {idx + 1} with {len(part)} rows created."
+                        f"Partition {len(partition_paths)} with {len(part)} rows created."
                     )
                 finally:
                     os.unlink(tmp_path)
 
+            if len(part) < self._batch_size:
+                break
+
+        if actual_total != total:
+            self.logger.info(f"📊 实际行数：{actual_total} (估算：{total})")
+        if len(partition_paths) != num_partitions:
+            self.logger.info(
+                f"📊 实际分片：{len(partition_paths)} (估算：{num_partitions})"
+            )
+
+        self.logger.info(f"Split input complete. {len(partition_paths)} partitions.")
         self._is_partitioned = True
-        self.logger.info(f"Split input complete. {num_partitions} partitions created.")
         return partition_paths
 
     def load_partition(self, dependent_steps: list[int]) -> pd.DataFrame:

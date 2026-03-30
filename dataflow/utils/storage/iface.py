@@ -74,6 +74,20 @@ class DataSource(ABC):
         pass
 
     @abstractmethod
+    def estimate_total_rows(self) -> int:
+        """估算总行数（无需完整读取数据）
+
+        不同数据源采用不同策略：
+        - 本地文件：采样估算或文件大小/平均每行
+        - S3：对象元数据估算
+        - HF/MS：数据集 API 直接返回
+
+        Returns:
+            估算的总行数（必须 >= 1）
+        """
+        pass
+
+    @abstractmethod
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
         """流式读取数据
 
