@@ -84,13 +84,14 @@ def _list_existing_agents() -> set[str]:
         return set()
 
 
-def _copy_agent(source_id: str, target_id: str) -> None:
+def _copy_agent(source_id: str, target_id: str, model: str) -> None:
     """
     复制一个 agent（克隆 workspace 和配置）。
 
     Args:
         source_id: 源 agent 标识符
         target_id: 目标 agent 标识符
+        model: 模型 ID（用于注册新 agent）
 
     Raises:
         RuntimeError: 复制失败时抛出
@@ -120,6 +121,8 @@ def _copy_agent(source_id: str, target_id: str) -> None:
             target_id,
             "--workspace",
             str(target_ws),
+            "--model",
+            model,
             "--non-interactive",
         ],
         capture_output=True,
@@ -129,8 +132,26 @@ def _copy_agent(source_id: str, target_id: str) -> None:
     if result.returncode != 0:
         # 清理失败的目录
         import shutil
+
         shutil.rmtree(target_ws, ignore_errors=True)
-        raise RuntimeError(f"Failed to register agent {target_id}: {result.stderr.strip()}")
+        raise RuntimeError(
+            f"Failed to register agent {target_id}: {result.stderr.strip()}"
+        )
+
+    # 等待 Gateway 完成 agent 注册（轮询检查）
+    for attempt in range(10):
+        time.sleep(0.5)
+        check_result = subprocess.run(
+            ["openclaw", "agents", "list"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if target_id in check_result.stdout:
+            return  # agent 已注册成功
+
+    # 如果轮询超时，尝试直接运行 agent 命令（Gateway 可能稍后才会识别）
+    # 不抛出错误，让后续执行处理
 
 
 def delete_agent(agent_id: str) -> None:
@@ -154,11 +175,13 @@ def delete_agent(agent_id: str) -> None:
     # 清理 workspace 目录
     if workspace.exists():
         import shutil
+
         shutil.rmtree(workspace, ignore_errors=True)
 
     # 如果 agent_store 和 workspace 不同，也清理一下
     if agent_store.exists() and agent_store != workspace:
         import shutil
+
         shutil.rmtree(agent_store, ignore_errors=True)
 
 
@@ -295,6 +318,7 @@ def _execute_single_query(
     base_agent_id: str,
     user_query: str,
     temp_agent_id: str,
+    model: str,
     timeout: int,
     logger: Any,
 ) -> str:
@@ -305,6 +329,7 @@ def _execute_single_query(
         base_agent_id: 基础 agent 标识符（用于复制）
         user_query: 用户查询内容
         temp_agent_id: 临时 agent 标识符
+        model: 模型 ID
         timeout: 超时时间（秒）
         logger: 日志对象
 
@@ -316,7 +341,7 @@ def _execute_single_query(
     try:
         # 复制基础 agent 到临时 agent
         logger.info(f"复制 agent {base_agent_id} -> {temp_agent_id}...")
-        _copy_agent(base_agent_id, temp_agent_id)
+        _copy_agent(base_agent_id, temp_agent_id, model)
 
         cmd = [
             "openclaw",
@@ -327,17 +352,28 @@ def _execute_single_query(
             user_query,
         ]
         logger.info(" ".join(cmd))
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(workspace),
-            timeout=timeout,
-            check=False,
-        )
-        # 检查执行是否成功
-        if result.returncode not in (0, -1):
-            logger.warning(f"openclaw agent 退出码 {result.returncode}")
+
+        # 重试机制：如果 Gateway 还没识别到 agent，等待后重试
+        max_retries = 3
+        for retry in range(max_retries):
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(workspace),
+                timeout=timeout,
+                check=False,
+            )
+            # 检查执行是否成功
+            if result.returncode in (0, -1):
+                break
+            # 检查是否是 "Unknown agent id" 错误
+            if "Unknown agent id" in result.stderr and retry < max_retries - 1:
+                logger.warning(
+                    f"Agent 未注册，等待后重试 ({retry + 1}/{max_retries})..."
+                )
+                time.sleep(1.0)
+                continue
             raise Exception(result.stderr)
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
@@ -462,6 +498,7 @@ class CLIOpenClawServing(LLMServingABC):
                     self.agent_id,
                     question,
                     temp_agent_id,
+                    self.model or "vllm//data/share/models/Qwen3.5-122B-A10B/",
                     self.timeout,
                     self.logger,
                 )
