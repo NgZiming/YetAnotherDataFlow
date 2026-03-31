@@ -250,7 +250,9 @@ class PipelineABC(ABC):
 
                 input_key_first_part: str = input_key.split(".")[0]
                 if len(self.last_modified_index_of_keys[input_key_first_part]) > 0:
-                    last_modified_idx = self.last_modified_index_of_keys[input_key_first_part][-1]
+                    last_modified_idx = self.last_modified_index_of_keys[
+                        input_key_first_part
+                    ][-1]
                     last_modified_keynode: KeyNode = self.op_nodes_list[
                         last_modified_idx
                     ].output_keys_nodes[input_key_first_part]
@@ -760,23 +762,38 @@ class PartitionPipelineParallelRun(PipelineABC):
         self.logger.info("🔍 检查已完成的任务...")
         initial_completed = 0
 
+        # 收集所有需要检查的 workload 和对应的 storage 副本
+        workloads_to_check = []
         for partition in range(self._partitions):
             for idx, node in enumerate(self.op_nodes_list):
                 # 跳过没有 operator 的节点（如 DATASET-INPUT/OUTPUT）
                 if node.op_obj is None:
                     continue
-
-                wl = Workload(partition, idx)
                 storage: DataFlowStorage = copy.copy(node.storage)
                 storage.batch_step = partition
+                workloads_to_check.append((partition, idx, storage))
 
-                # 检查输出文件是否存在
-                file_path = storage.write_file_path()
-                if storage.file_exists(file_path):
+        # 多线程检查文件是否存在
+        def check_workload(wl: Workload, storage: DataFlowStorage) -> tuple[Workload, bool]:
+            file_path = storage.write_file_path()
+            exists = storage.file_exists(file_path)
+            return wl, exists
+
+        # 使用线程池并行检查（根据 workload 数量动态调整线程数）
+        num_workers = min(32, len(workloads_to_check))
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for partition, idx, storage in workloads_to_check:
+                wl = Workload(partition, idx)
+                futures.append(executor.submit(check_workload, wl, storage))
+
+            for future in as_completed(futures):
+                wl, exists = future.result()
+                if exists:
                     completed_workloads.add(wl)
                     initial_completed += 1
                     self.logger.debug(
-                        f"✅ 已存在：{node.op_name} 分片 {partition + 1}/{self._partitions}"
+                        f"✅ 已存在：{self.op_nodes_list[wl.step].op_name} 分片 {wl.partition + 1}/{self._partitions}"
                     )
 
         # 从所有 workload 的依赖中移除已完成的任务
