@@ -774,7 +774,10 @@ class PartitionPipelineParallelRun(PipelineABC):
                 workloads_to_check.append((partition, idx, storage))
 
         # 多线程检查文件是否存在
-        def check_workload(wl: Workload, storage: DataFlowStorage) -> tuple[Workload, bool]:
+        def check_workload(
+            wl: Workload,
+            storage: DataFlowStorage,
+        ) -> tuple[Workload, bool]:
             file_path = storage.write_file_path()
             exists = storage.file_exists(file_path)
             return wl, exists
