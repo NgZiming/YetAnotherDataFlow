@@ -24,13 +24,12 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
-import uuid
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dataflow.core import LLMServingABC
 from dataflow.logger import get_logger
@@ -233,7 +232,6 @@ def _execute_single_query(
     user_query: str,
     timeout: int,
     logger: Any,
-    last_timestamp: Optional[float] = None,
 ) -> str:
     """
     执行单个查询请求（使用预先创建的 agent）。
@@ -243,11 +241,13 @@ def _execute_single_query(
         user_query: 用户查询内容
         timeout: 超时时间（秒）
         logger: 日志对象
-        last_timestamp: 上次读取的时间戳，用于过滤旧消息
 
     Returns:
         助手的回复文本，如果执行失败则返回空字符串
     """
+    # 记录 /new 之前的时间戳，只获取新 session 中的消息
+    last_timestamp = time.time()
+
     try:
         # 先执行 /new 创建新 session
         new_cmd = [
@@ -296,7 +296,7 @@ def _execute_single_query(
         logger.exception("查询失败")
         raise
 
-    # 只读取新消息
+    # 只读取新 session 中的消息
     messages = load_session_new_messages(agent_id, last_timestamp)
     return json.dumps(messages, ensure_ascii=False) if messages else ""
 
@@ -374,7 +374,7 @@ class CLIOpenClawServing(LLMServingABC):
                         f"创建 worker agent {worker_agent_id} (model={self.model})..."
                     )
                     create_agent(worker_agent_id, self.model)
-                    
+
                     # 等待 agent 注册成功
                     for attempt in range(10):
                         time.sleep(0.5)
@@ -450,7 +450,6 @@ class CLIOpenClawServing(LLMServingABC):
                     question,
                     self.timeout,
                     self.logger,
-                    None,  # last_timestamp
                 )
                 futures[future] = i
 
