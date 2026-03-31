@@ -338,7 +338,7 @@ class CLIOpenClawServing(LLMServingABC):
         self.logger = get_logger()
 
         self.agent_id = agent_id
-        self.model = model
+        self.model: str = model or "vllm//data/share/models/Qwen3.5-122B-A10B/"
         self.timeout = timeout
         self.create_if_missing = create_if_missing
         self.max_workers = max_workers
