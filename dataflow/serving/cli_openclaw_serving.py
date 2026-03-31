@@ -5,10 +5,10 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 使用线程池并发处理多个请求。
 
 特点:
-- 不使用 WebSocket API，直接调用 openclaw CLI
-- 每个请求在 agent 的不同 session 中执行
+- 不使用 WebSocket API，直接调用 openclaw CLI 命令
+- 每个请求在 agent 的不同 session 中执行（通过 /new 创建）
 - 支持并发处理，每次调用创建临时线程池
-- 对象可 pickle 拷贝（适合分布式任务）
+- 预先创建 worker 数量的 agent，避免重复创建失败
 
 使用示例:
     from dataflow.serving import create_openclaw_serving
@@ -82,107 +82,6 @@ def _list_existing_agents() -> set[str]:
         return agents
     except FileNotFoundError:
         return set()
-
-
-def _copy_agent(source_id: str, target_id: str, model: str) -> None:
-    """
-    复制一个 agent（克隆 workspace 和配置）。
-
-    Args:
-        source_id: 源 agent 标识符
-        target_id: 目标 agent 标识符
-        model: 模型 ID（用于注册新 agent）
-
-    Raises:
-        RuntimeError: 复制失败时抛出
-    """
-    source_ws = _workspace_dir(source_id)
-    target_ws = _workspace_dir(target_id)
-
-    # 确保目标目录存在
-    target_ws.mkdir(parents=True, exist_ok=True)
-
-    # 使用 rsync 复制 workspace 内容
-    result = subprocess.run(
-        ["rsync", "-av", "--delete", str(source_ws) + "/", str(target_ws)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to copy agent workspace: {result.stderr.strip()}")
-
-    # 注册新 agent（使用已存在的 workspace）
-    result = subprocess.run(
-        [
-            "openclaw",
-            "agents",
-            "add",
-            target_id,
-            "--workspace",
-            str(target_ws),
-            "--model",
-            model,
-            "--non-interactive",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        # 清理失败的目录
-        import shutil
-
-        shutil.rmtree(target_ws, ignore_errors=True)
-        raise RuntimeError(
-            f"Failed to register agent {target_id}: {result.stderr.strip()}"
-        )
-
-    # 等待 Gateway 完成 agent 注册（轮询检查）
-    for attempt in range(10):
-        time.sleep(0.5)
-        check_result = subprocess.run(
-            ["openclaw", "agents", "list"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if target_id in check_result.stdout:
-            return  # agent 已注册成功
-
-    # 如果轮询超时，尝试直接运行 agent 命令（Gateway 可能稍后才会识别）
-    # 不抛出错误，让后续执行处理
-
-
-def delete_agent(agent_id: str) -> None:
-    """
-    删除一个 agent（包括 workspace 和注册信息）。
-
-    Args:
-        agent_id: Agent 标识符
-    """
-    workspace = _workspace_dir(agent_id)
-    agent_store = _agent_store_dir(agent_id)
-
-    # 先尝试通过 CLI 删除注册
-    result = subprocess.run(
-        ["openclaw", "agents", "delete", agent_id, "--force"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    # 清理 workspace 目录
-    if workspace.exists():
-        import shutil
-
-        shutil.rmtree(workspace, ignore_errors=True)
-
-    # 如果 agent_store 和 workspace 不同，也清理一下
-    if agent_store.exists() and agent_store != workspace:
-        import shutil
-
-        shutil.rmtree(agent_store, ignore_errors=True)
 
 
 def create_agent(agent_id: str, model: str) -> None:
@@ -289,33 +188,37 @@ def _resolve_transcript_path(agent_id: str) -> Path:
     raise FileNotFoundError(f"Agent {agent_id} 的 session 文件在 {timeout} 秒内未生成")
 
 
-def load_session(agent_id: str) -> List[Dict[str, Any]]:
+def load_session_new_messages(
+    agent_id: str, last_timestamp: Optional[float] = None
+) -> List[Dict[str, Any]]:
     """
-    加载 session 文件并解析为消息列表。
+    加载 session 文件中指定时间之后的新消息。
 
     Args:
         agent_id: Agent 标识符
+        last_timestamp: 上次读取的时间戳（秒），只返回此时间之后的消息
 
     Returns:
-        Session 消息列表
+        新消息列表
 
     Raises:
         FileNotFoundError: session 文件不存在
         json.JSONDecodeError: 解析 session 文件失败
     """
     transcript_path = _resolve_transcript_path(agent_id)
-    if transcript_path is None:
-        raise FileNotFoundError(f"Agent {agent_id} 的 session 文件不存在")
 
     messages = []
     for line in transcript_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        messages.append(json.loads(line))
-
-    if not messages:
-        raise ValueError(f"Agent {agent_id} 的 session 文件为空")
+        msg = json.loads(line)
+        # 检查消息时间戳
+        msg_ts = msg.get("timestamp", 0)
+        if isinstance(msg_ts, (int, float)) and last_timestamp is not None:
+            if msg_ts <= last_timestamp:
+                continue
+        messages.append(msg)
 
     return messages
 
@@ -326,65 +229,65 @@ def load_session(agent_id: str) -> List[Dict[str, Any]]:
 
 
 def _execute_single_query(
-    base_agent_id: str,
+    agent_id: str,
     user_query: str,
-    temp_agent_id: str,
-    model: str,
     timeout: int,
     logger: Any,
+    last_timestamp: Optional[float] = None,
 ) -> str:
     """
-    执行单个查询请求（使用临时 agent）。
+    执行单个查询请求（使用预先创建的 agent）。
 
     Args:
-        base_agent_id: 基础 agent 标识符（用于复制）
+        agent_id: Agent 标识符
         user_query: 用户查询内容
-        temp_agent_id: 临时 agent 标识符
-        model: 模型 ID
         timeout: 超时时间（秒）
         logger: 日志对象
+        last_timestamp: 上次读取的时间戳，用于过滤旧消息
 
     Returns:
         助手的回复文本，如果执行失败则返回空字符串
     """
-    workspace = _workspace_dir(temp_agent_id)
-
     try:
-        # 复制基础 agent 到临时 agent
-        logger.info(f"复制 agent {base_agent_id} -> {temp_agent_id}...")
-        _copy_agent(base_agent_id, temp_agent_id, model)
+        # 先执行 /new 创建新 session
+        new_cmd = [
+            "openclaw",
+            "agent",
+            "--agent",
+            agent_id,
+            "-m",
+            "/new",
+        ]
+        logger.info(f"创建新 session: {' '.join(new_cmd)}")
+        new_result = subprocess.run(
+            new_cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if new_result.returncode != 0:
+            logger.warning(f"/new 命令失败：{new_result.stderr.strip()}")
 
+        # 执行用户查询
         cmd = [
             "openclaw",
             "agent",
             "--agent",
-            temp_agent_id,
+            agent_id,
             "-m",
             user_query,
         ]
         logger.info(" ".join(cmd))
 
-        # 重试机制：如果 Gateway 还没识别到 agent，等待后重试
-        max_retries = 3
-        for retry in range(max_retries):
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=str(workspace),
-                timeout=timeout,
-                check=False,
-            )
-            # 检查执行是否成功
-            if result.returncode in (0, -1):
-                break
-            # 检查是否是 "Unknown agent id" 错误
-            if "Unknown agent id" in result.stderr and retry < max_retries - 1:
-                logger.warning(
-                    f"Agent 未注册，等待后重试 ({retry + 1}/{max_retries})..."
-                )
-                time.sleep(1.0)
-                continue
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode != 0:
             raise Exception(result.stderr)
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
@@ -392,15 +295,9 @@ def _execute_single_query(
     except Exception:
         logger.exception("查询失败")
         raise
-    finally:
-        # 清理临时 agent
-        try:
-            logger.info(f"清理临时 agent {temp_agent_id}...")
-            delete_agent(temp_agent_id)
-        except Exception as e:
-            logger.warning(f"清理临时 agent 失败: {e}")
 
-    messages = load_session(temp_agent_id)
+    # 只读取新消息
+    messages = load_session_new_messages(agent_id, last_timestamp)
     return json.dumps(messages, ensure_ascii=False) if messages else ""
 
 
@@ -415,8 +312,8 @@ class CLIOpenClawServing(LLMServingABC):
 
     特点:
     - 使用 openclaw CLI 命令执行任务，不依赖 WebSocket API
-    - 每个请求在独立的 session 中运行
-    - 支持并发处理，每次 generate_from_input 调用创建临时线程池
+    - 每个请求在独立的 session 中运行（通过 /new 创建）
+    - 预先创建 worker 数量的 agent，避免重复创建失败
     - 对象可以被 pickle 拷贝（适合分布式任务场景）
     """
 
@@ -446,6 +343,7 @@ class CLIOpenClawServing(LLMServingABC):
         self.create_if_missing = create_if_missing
         self.max_workers = max_workers
         self._initialized = False
+        self._worker_agents: List[str] = []
 
     def _ensure_agent(self) -> None:
         """确保 agent 存在，不存在则创建。"""
@@ -460,16 +358,58 @@ class CLIOpenClawServing(LLMServingABC):
                     f"Agent {self.agent_id} 不存在，请设置 model 参数或手动创建"
                 )
 
+    def _setup_worker_agents(self) -> None:
+        """为每个 worker 预先创建独立的 agent。"""
+        if self._worker_agents:
+            return
+
+        existing = _list_existing_agents()
+        self._worker_agents = []
+
+        for i in range(self.max_workers):
+            worker_agent_id = f"{self.agent_id}-worker-{i}"
+            if worker_agent_id.lower() not in existing:
+                if self.create_if_missing and self.model:
+                    self.logger.info(
+                        f"创建 worker agent {worker_agent_id} (model={self.model})..."
+                    )
+                    create_agent(worker_agent_id, self.model)
+                    
+                    # 等待 agent 注册成功
+                    for attempt in range(10):
+                        time.sleep(0.5)
+                        check_result = subprocess.run(
+                            ["openclaw", "agents", "list"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        if worker_agent_id.lower() in check_result.stdout.lower():
+                            self.logger.info(f"Worker agent {worker_agent_id} 注册成功")
+                            break
+                        if attempt == 9:
+                            self.logger.warning(
+                                f"Worker agent {worker_agent_id} 注册超时，继续..."
+                            )
+                else:
+                    raise RuntimeError(
+                        f"Worker agent {worker_agent_id} 不存在，请设置 model 参数"
+                    )
+            self._worker_agents.append(worker_agent_id)
+
+        self.logger.info(f"Worker agents 就绪：{self._worker_agents}")
+
     def start_serving(self) -> None:
         """启动服务（确保 agent 存在）。"""
         if self._initialized:
             return
 
         self._ensure_agent()
+        self._setup_worker_agents()
         self._initialized = True
         self.logger.info(
             f"OpenClaw CLI Serving 已就绪 "
-            f"(agent={self.agent_id}, max_workers={self.max_workers}, timeout={self.timeout}s)"
+            f"(agent={self.agent_id}, workers={self.max_workers}, timeout={self.timeout}s)"
         )
 
     def generate_from_input(
@@ -479,7 +419,7 @@ class CLIOpenClawServing(LLMServingABC):
         json_schema: dict,
     ) -> List[str]:
         """
-        生成文本响应（并发执行，每个请求使用独立临时 agent）。
+        生成文本响应（并发执行，每个请求使用独立 worker agent）。
 
         Args:
             user_inputs: 用户输入列表
@@ -502,16 +442,15 @@ class CLIOpenClawServing(LLMServingABC):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             for i, question in enumerate(user_inputs):
-                # 为每个请求创建唯一的临时 agent ID
-                temp_agent_id = f"{self.agent_id}-tmp-{uuid.uuid4().hex[:8]}"
+                # 分配 worker agent（轮询）
+                worker_agent_id = self._worker_agents[i % len(self._worker_agents)]
                 future = executor.submit(
                     _execute_single_query,
-                    self.agent_id,
+                    worker_agent_id,
                     question,
-                    temp_agent_id,
-                    self.model or "vllm//data/share/models/Qwen3.5-122B-A10B/",
                     self.timeout,
                     self.logger,
+                    None,  # last_timestamp
                 )
                 futures[future] = i
 
