@@ -302,13 +302,16 @@ class FileStorage(PartitionableStorage):
         for operator_step in dependent_steps:
             kept_keys.append(set())
             # 读取指定步骤的文件
-            with open(self._get_cache_file_path(operator_step), "rb") as f:
+            f = open(self._get_cache_file_path(operator_step), "rb")
+            try:
                 df_temp = self._parser.parse_to_dataframe(f)
-            for d in df_temp:
-                if d[self.id_key] not in ds:
-                    ds[d[self.id_key]] = {}
-                ds[d[self.id_key]].update(d)  # 合并记录
-                kept_keys[-1].add(d[self.id_key])  # 记录 id_key
+                for d in df_temp:
+                    if d[self.id_key] not in ds:
+                        ds[d[self.id_key]] = {}
+                    ds[d[self.id_key]].update(d)  # 合并记录
+                    kept_keys[-1].add(d[self.id_key])  # 记录 id_key
+            finally:
+                f.close()
 
         # 取所有步骤的 id_key 交集
         all_keys = kept_keys[0]
