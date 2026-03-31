@@ -19,7 +19,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Literal, Generator
+from typing import Any, Optional, Literal
 
 import pandas as pd
 from tqdm import tqdm
@@ -29,9 +29,11 @@ from dataflow.logger import get_logger
 from .iface import (
     CacheStorage,
     DataSource,
+    IdSynthesizer,
     MediaStorage,
     PartitionableStorage,
     ProgressInfo,
+    UuidIdSynthesizer,
 )
 from .data_parser import get_parser, DataParser
 
@@ -58,6 +60,7 @@ class FileStorage(PartitionableStorage):
         id_key: str = "id",
         cache_path: str = "./cache",
         cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
+        id_synthesizer: Optional["IdSynthesizer"] = None,
     ):
         """
         初始化 FileStorage。
@@ -84,6 +87,8 @@ class FileStorage(PartitionableStorage):
         self.cache_path = cache_path
         self.cache_type = cache_type
         self.id_key = id_key
+        # 默认使用 UUID 合成器
+        self.id_synthesizer = id_synthesizer or UuidIdSynthesizer(prefix="row")
 
         # 获取对应的解析器
         self._parser: DataParser = get_parser(cache_type)
@@ -234,6 +239,10 @@ class FileStorage(PartitionableStorage):
             for row in tqdm(
                 rows, total=self._batch_size, desc="Reading Rows", leave=False
             ):
+                # 检查并合成缺失的 id_key
+                if self.id_key not in row:
+                    row[self.id_key] = self.id_synthesizer.synthesize(row, actual_total)
+
                 part.append(row)
                 actual_total += 1
                 if len(part) >= self._batch_size:

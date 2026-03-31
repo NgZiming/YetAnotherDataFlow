@@ -16,6 +16,7 @@ Storage 接口定义模块。
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Literal, TypedDict, List, Generator
 from dataclasses import dataclass
+import uuid
 
 import pandas as pd
 
@@ -98,6 +99,113 @@ class DataSource(ABC):
             逐行返回 dict 记录
         """
         pass
+
+
+# ==================== ID 合成器抽象类 ====================
+
+
+class IdSynthesizer(ABC):
+    """ID 合成器抽象基类
+
+    职责：为缺少 id_key 的数据行合成唯一 ID。
+    在 split_input() 时调用，检查每行数据是否包含 id_key，
+    如果不存在则使用 synthesizer 生成一个。
+
+    使用示例:
+        # 使用 UUID 合成器
+        synthesizer = UuidIdSynthesizer(prefix="row")
+        storage = FileStorage(data_source=source, id_key="id", id_synthesizer=synthesizer)
+
+        # 自定义合成器
+        class CustomIdSynthesizer(IdSynthesizer):
+            def __init__(self, prefix: str):
+                self.prefix = prefix
+                self.counter = 0
+
+            def synthesize(self, row: dict, row_index: int) -> str:
+                self.counter += 1
+                return f"{self.prefix}_{self.counter}"
+
+        synthesizer = CustomIdSynthesizer("custom")
+    """
+
+    @abstractmethod
+    def synthesize(self, row: dict, row_index: int) -> str:
+        """为单行数据合成唯一 ID。
+
+        Args:
+            row: 数据行（dict）
+            row_index: 行索引（从 0 开始，可用于调试或生成可追溯的 ID）
+
+        Returns:
+            合成的唯一 ID 字符串
+        """
+        pass
+
+
+class UuidIdSynthesizer(IdSynthesizer):
+    """基于 UUID 的 ID 合成器
+
+    生成格式：{prefix}-{uuid}，例如 "row-a1b2c3d4-e5f6-..."
+
+    Attributes:
+        prefix: ID 前缀，默认为 "row"
+    """
+
+    def __init__(self, prefix: str = "row"):
+        """
+        Args:
+            prefix: ID 前缀
+        """
+        self.prefix = prefix
+
+    def synthesize(self, row: dict, row_index: int) -> str:
+        """生成 UUID 格式的 ID。
+
+        Args:
+            row: 数据行（未使用，但保留参数以符合接口）
+            row_index: 行索引（未使用，但保留参数以符合接口）
+
+        Returns:
+            格式为 "{prefix}-{uuid}" 的唯一 ID
+        """
+        return f"{self.prefix}-{uuid.uuid4()}"
+
+
+class CounterIdSynthesizer(IdSynthesizer):
+    """基于计数器的 ID 合成器
+
+    生成格式：{prefix}_{递增数字}，例如 "row_0", "row_1", ...
+
+    注意：此合成器有状态，多线程/并发场景下可能不安全。
+
+    Attributes:
+        prefix: ID 前缀，默认为 "row"
+        start: 起始数字，默认为 0
+    """
+
+    def __init__(self, prefix: str = "row", start: int = 0):
+        """
+        Args:
+            prefix: ID 前缀
+            start: 起始数字
+        """
+        self.prefix = prefix
+        self._counter = start
+
+    def synthesize(self, row: dict, row_index: int) -> str:
+        """生成递增数字格式的 ID。
+
+        Args:
+            row: 数据行（未使用，但保留参数以符合接口）
+            row_index: 行索引（用于同步计数器，但实际使用内部计数器）
+
+        Returns:
+            格式为 "{prefix}_{counter}" 的唯一 ID
+        """
+        result = f"{self.prefix}_{self._counter:08}"
+        self._counter += 1
+        return result
 
 
 # ==================== 数据面接口（Data Plane） ====================
