@@ -339,7 +339,76 @@ print(f"预估总行数：{total_rows}")
 | 版本 | 日期 | 状态 |
 |------|------|------|
 | v1.0.10 | 2026-03-27 | 发布版 |
-| v1.0.0 (Workspace) | 2026-03-30 | 开发版 |
+| v1.0.0 (Workspace) | 2026-03-31 | 开发版 |
+
+---
+
+## 🆕 2026-03-31 更新日志
+
+### 对比基线：`6948eb5` (2026-03-30)
+
+#### 🚀 新功能
+
+##### `b0c12e8` - IdSynthesizer 抽象类
+- 新增 `IdSynthesizer` 抽象基类，支持缺失 `id_key` 的自动合成
+- 实现 `UuidIdSynthesizer`（默认）和 `CounterIdSynthesizer`
+- `FileStorage` 和 `S3Storage` 在 `split_input` 时自动合成缺失的 `id_key`
+
+```python
+from dataflow.utils.storage import FileStorage
+from dataflow.utils.iface import UuidIdSynthesizer, CounterIdSynthesizer
+
+# 默认自动用 UUID 合成
+storage = FileStorage(data_source=source, id_key="id")
+
+# 或者自定义
+storage = FileStorage(
+    data_source=source,
+    id_key="id",
+    id_synthesizer=CounterIdSynthesizer(prefix="item", start=1000)
+)
+```
+
+#### 🚀 OpenClaw CLI Serving 重构
+
+##### `3e9f94b` - 改用预先创建的 worker agents
+- 删除临时 agent 的创建和清理逻辑（`_copy_agent`, `delete_agent`）
+- 新增 `_setup_worker_agents()` 预先创建 worker agents
+- 每次请求前执行 `/new` 创建新 session
+- 请求轮询分配给不同的 worker agent
+
+##### `fc108ba` - Pipeline 并行检查优化
+- `_check_completed_workloads` 改为多线程并行检查
+- 预先拷贝 storage 并设置 `batch_step`，避免多线程竞争
+- 使用 `ThreadPoolExecutor`，最多 32 个 worker 并行检查
+
+##### `cce4704` - Session 文件等待增强
+- `load_session` 改为抛异常，不再返回 `None`
+- `_resolve_transcript_path` 超时从 15 秒延长到 60 秒
+- 超时后抛出 `FileNotFoundError`
+
+#### 🐛 Bug 修复
+
+| 提交 | 修复内容 |
+|------|---------|
+| `79c18b0` | 添加 agent 注册重试逻辑，解决竞态条件 |
+| `fdfc9d1` | 修复 openclaw CLI 命令，使用 `agents delete` 和 `-m` 标志 |
+| `7601512` | CLI serving 改用临时 agent 而非 `--session-id` |
+| `a29d612` | 修复 data_parser 和 datasources 读取问题 |
+| `9865233` | 修复文件未找到问题 |
+
+#### 📝 其他更新
+
+| 提交 | 内容 |
+|------|------|
+| `c734aa6` | shelex 功能更新 |
+| `c02c256` | 修复 agent 目录 |
+| `0023d74` | 修复 agent 目录 |
+| `53561ff` | 保存所有 sessions |
+| `c731aa0` | API 功能更新 |
+| `9c3781a` | 支持嵌套 keys |
+| `a733690` | 默认模型配置 |
+| `d5d806b` | 格式化 |
 
 **注意**: Workspace 版本号为 1.0.0，但功能上比 v1.0.10 更新。建议将 Workspace 版本升级为 1.1.0。
 
