@@ -225,7 +225,7 @@ def create_agent(agent_id: str, model: str) -> None:
 # ============================================================================
 
 
-def _resolve_transcript_path(agent_id: str) -> Optional[Path]:
+def _resolve_transcript_path(agent_id: str) -> Path:
     """
     解析新生成的 session 文件路径。
 
@@ -237,12 +237,19 @@ def _resolve_transcript_path(agent_id: str) -> Optional[Path]:
         agent_id: Agent 标识符
 
     Returns:
-        Session 文件路径，如果找不到则返回 None
+        Session 文件路径
+
+    Raises:
+        FileNotFoundError: 超时后文件仍未找到
     """
     agent_dir = _agent_store_dir(agent_id)
     sessions_dir = agent_dir / "sessions"
 
-    for attempt in range(15):
+    # 持续等待直到找到 session 文件（最多 60 秒）
+    start_time = time.time()
+    timeout = 60  # 60 秒超时
+
+    while time.time() - start_time < timeout:
         # 策略 1: 通过 sessions.json 索引查找
         sessions_json = sessions_dir / "sessions.json"
         if sessions_json.exists():
@@ -277,13 +284,12 @@ def _resolve_transcript_path(agent_id: str) -> Optional[Path]:
             if candidates:
                 return max(candidates, key=lambda p: p.stat().st_mtime)
 
-        if attempt < 14:
-            time.sleep(1.0)
+        time.sleep(1.0)
 
-    return None
+    raise FileNotFoundError(f"Agent {agent_id} 的 session 文件在 {timeout} 秒内未生成")
 
 
-def load_session(agent_id: str) -> Optional[List[Dict[str, Any]]]:
+def load_session(agent_id: str) -> List[Dict[str, Any]]:
     """
     加载 session 文件并解析为消息列表。
 
@@ -291,22 +297,27 @@ def load_session(agent_id: str) -> Optional[List[Dict[str, Any]]]:
         agent_id: Agent 标识符
 
     Returns:
-        Session 消息列表，如果加载失败则返回 None
+        Session 消息列表
+
+    Raises:
+        FileNotFoundError: session 文件不存在
+        json.JSONDecodeError: 解析 session 文件失败
     """
     transcript_path = _resolve_transcript_path(agent_id)
     if transcript_path is None:
-        return None
+        raise FileNotFoundError(f"Agent {agent_id} 的 session 文件不存在")
 
     messages = []
     for line in transcript_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        try:
-            messages.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
-    return messages if messages else None
+        messages.append(json.loads(line))
+
+    if not messages:
+        raise ValueError(f"Agent {agent_id} 的 session 文件为空")
+
+    return messages
 
 
 # ============================================================================
