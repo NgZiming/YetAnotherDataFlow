@@ -861,6 +861,8 @@ class PartitionPipelineParallelRun(PipelineABC):
                 dependencies[wl] = set()
                 for _, key_node in node.input_key_nodes.items():
                     # 添加依赖：当前 workload 依赖前驱节点的 workload
+                    if key_node.key_para_name.startswith("."):
+                        continue
                     dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
 
         # 第三步：为 filter 后续步骤添加依赖
