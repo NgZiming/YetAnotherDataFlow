@@ -315,7 +315,13 @@ def generate_file(content_json: Dict, output_dir: str = "test_files") -> Path:
 
     Returns:
         生成的文件路径
+
+    Raises:
+        ValueError: content 为空或格式不支持时
     """
+    if not content_json.get("content"):
+        raise ValueError("content 不能为空")
+
     output_path = Path(output_dir) / content_json["filename"]
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
