@@ -35,15 +35,7 @@ from dataflow.core import LLMServingABC
 from dataflow.logger import get_logger
 
 # 导入二进制文件生成模块
-try:
-    from dataflow.utils.generate_binary_files import (
-        generate_file,
-    )
-
-    HAS_BINARY_GENERATOR = True
-except ImportError:
-    HAS_BINARY_GENERATOR = False
-    generate_file = None
+from dataflow.utils.generate_binary_files import generate_file
 
 # OpenClaw 基础目录
 OPENCLAW_BASE = Path.home() / ".openclaw"
@@ -262,15 +254,23 @@ def _execute_single_query(
     last_timestamp = time.time()
 
     # 在 /new 之前生成二进制文件
-    if input_files_data and HAS_BINARY_GENERATOR:
+    if input_files_data:
         try:
             workspace = str(_workspace_dir(agent_id))
             for filename, content_data in input_files_data.items():
                 if not content_data or not isinstance(content_data, dict):
                     continue
-                output_path = Path(workspace) / Path(filename).name
-                generate_file({"filename": filename, "content": content_data}, workspace)
-                logger.info(f"生成文件：{output_path}")
+                # 将 /workspace/ 替换为当前 agent 的 workspace 地址
+                relative_path = filename.replace("/workspace/", "", 1)
+                new_path = Path(workspace) / relative_path
+                # 创建 parent 文件夹
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                # 传给 generate_file：只传文件名，output_dir 是 parent 目录
+                generate_file(
+                    {"filename": new_path.name, "content": content_data},
+                    str(new_path.parent),
+                )
+                logger.info(f"生成文件：{new_path}")
         except Exception as e:
             logger.error(f"生成文件失败：{e}")
 
