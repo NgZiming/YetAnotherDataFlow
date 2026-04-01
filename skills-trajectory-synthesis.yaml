@@ -1,0 +1,568 @@
+# tools-trajectory-synthesis.yaml
+# TOUCAN 风格的 Tools 轨迹合成 Pipeline
+# 用于合成和过滤 MCP tools 使用轨迹
+
+metadata:
+  name: "tools-trajectory-synthesis"
+  version: "1.0.0"
+  description: "基于 TOUCAN 方法的 Tools 轨迹合成与过滤 Pipeline"
+
+# ==================== 数据源 ====================
+data_source:
+  type: "FileDataSource"
+  params:
+    paths:
+      - "/root/start-data-test.jsonl"
+    format_type: "jsonl"
+
+# ==================== 存储 ====================
+storage:
+  type: "S3Storage"
+  params:
+    endpoint: http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/
+    ak: "${S3_AK:}"
+    sk: "${S3_SK:}"
+    output_s3_path: s3://pedia-doc-ai/wuziming/tools-trajectory-synthesis/test/v0002/
+    id_key: "task_id"
+    cache_type: "jsonl"
+
+# ==================== Serving ====================
+serving:
+  qwen3_5_122b:
+    type: "APILLMServing_request"
+    params:
+      api_url: "http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions"
+      model_name: "/data/share/models/Qwen3.5-122B-A10B/"
+      max_workers: 120
+      max_completion_tokens: 16384
+      read_timeout: 300
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 1.5
+      repetition_penalty: 1.0
+      chat_template_kwargs:
+        enable_thinking: false
+  openclaw:
+    type: "CLIOpenClawServing"
+    params:
+      agent_id: main
+      timeout: 600
+      create_if_missing: True
+      max_workers: 10
+
+# ==================== Operators ====================
+operators:
+  # ==========================================================================
+  # Stage 2: Task Synthesis - 任务合成
+  # ==========================================================================
+
+  # Step 1: 任务生成（统一单技能/多技能，模型自主选择 1-3 个 skills）
+  op_task_synthesis:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            ## 任务
+            基于提供的 skills 及其描述，生成一个**技能使用问题**。
+
+            ## 目标
+            分析提供的 skills 及其可用能力，然后创建一个自然需要使用**1-3 个 skills**来完全解决的真实用户问题。
+
+            ## 指南
+
+            ### 技能选择策略
+            - **随机选择 1-3 个 skills** 来构建任务
+            - 如果选择 1 个 skill：生成单技能任务，专注于该 skill 的核心能力
+            - 如果选择 2-3 个 skills：生成多技能协作任务，需要一系列或组合的技能调用来完全解决
+            - 根据技能如何相互补充并形成逻辑工作流来选择技能
+            - 在构思问题时考虑每项技能的描述和用途
+
+            ### 问题真实性
+            - 创建代表真实场景的问题，用户需要使用 skills 的能力
+            - 问题应听起来自然真实，就像有人真正需要完成任务时提出的
+            - 考虑常见的使用案例、问题或工作流，这些需要使用 skills 提供的功能
+
+            ### 技能选择
+            - 对于单技能任务：专注于**一项具体技能**，这项技能最适合回答问题
+            - 对于多技能任务：确保技能之间有明显的协作关系
+            - 根据技能提供的核心功能以及它们如何解决真实用户问题来选择技能
+            - 在构思问题时考虑每项技能的描述和用途
+
+            ### 问题复杂度
+            - **单技能任务**：创建清晰且具体到足以证明需要使用技能的问题，避免过于简单、无需技能就能回答的问题
+            - **多技能任务**：创建足够复杂以证明需要使用多个技能的问题，问题应有多个组件或需要多个步骤来解决
+            - 包含相关上下文或约束，使技能使用变得必要
+            - 问题中不要包含确切的技能名称
+            - **对于多技能任务**：确保问题不能合理地用单一技能回答
+
+            ### 输出格式
+            你的回答应包括：
+            1. **技能分析**：简要分析提供的 skills 及其主要功能。
+            2. **选择策略**：说明为什么选择这些特定的 skills 以及它们如何协作。
+            3. **目标技能**：应从提供的 skills 中使用的具体技能名称，按调用顺序排列。
+            4. **问题**：一个清晰、真实的技能使用问题。
+
+            ## 可用 Skills 列表
+            {input_all_skills_key}
+
+            ## 输出
+            请以以下 JSON 格式提供回答：
+
+            {{
+              "skill_analysis": "简要分析提供的 skills 及其主要功能。",
+              "selection_strategy": "说明为什么选择这些特定的 skills 以及它们如何协作。",
+              "target_skills": ["skill1", "skill2", "..."],
+              "num_skills": 2,
+              "question": "一个清晰、真实的技能使用问题。"
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_all_skills_key: "all_skills"
+      output:
+        output_key: "synthesized_task"
+
+  op_remove_all_skills:
+    type: NestExtractOperator
+    params:
+      remove_all_keys: true
+    keys:
+      input:
+        input_id_key: "task_id"
+        input_task_key: "synthesized_task"
+      output:
+        output_id_key: "task_id"
+        output_task_key: "synthesized_task"
+
+  # Step 2: JSON 解析 - 解析任务输出
+  op_task_json_parser:
+    type: JsonParseFilter
+    params:
+      required_fields:
+        [
+          "skill_analysis",
+          "selection_strategy",
+          "target_skills",
+          "num_skills",
+          "question",
+        ]
+      field_types:
+        skill_analysis: str
+        selection_strategy: str
+        target_skills: list
+        num_skills: int
+        question: str
+    keys:
+      input:
+        input_key: "synthesized_task"
+      output:
+        output_key: "synthesized_task"
+
+  op_extract_trajectory_generate_params:
+    type: NestExtractOperator
+    params:
+      remove_all_keys: false
+    keys:
+      input:
+        input_question_key: "synthesized_task.question"
+        input_skills_key: "synthesized_task.target_skills"
+      output:
+        output_question_key: "question"
+        output_skills_key: "target_skills"
+
+  # Step 3: 资产文件路径生成 - 检测问题中的文件类型并生成假文件路径
+  op_assets_path_generator:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      system_prompt: |
+        你是一个文件路径生成器。你的任务是：
+        1. 分析用户问题中是否涉及 PDF、XLSX、DOC、DOCX、PPT、PPTX、TXT、CSV、JSON、XML 等文件类型
+        2. 如果涉及，生成 1-5 个对应的假文件路径列表（使用 /workspace/assets/ 前缀）
+        3. 如果不涉及，返回空列表 []
+
+        请始终以 JSON 格式输出：{"assets": ["/workspace/assets/example.pdf", ...]}
+      temperature: 0.1
+    keys:
+      input:
+        input_question_key: "question"
+      output:
+        output_key: "assets_generation"
+
+  # Step 3.1: JSON 解析 - 解析资产文件路径生成结果
+  op_assets_path_json_parser:
+    type: JsonParseFilter
+    params:
+      required_fields: ["assets"]
+      field_types:
+        assets: "list"
+    keys:
+      input:
+        input_key: "assets_generation"
+      output:
+        output_key: "assets_generation"
+
+  # Step 3.2: 合并任务与资产路径
+  op_merge_task_assets:
+    type: NestExtractOperator
+    params:
+      remove_all_keys: false
+    keys:
+      input:
+        input_assets_key: "assets_generation.assets"
+      output:
+        output_assets_key: "assets"
+
+  # Step 3.3: 资产文件内容合成 - 使用 FileContextGenerator 生成文件内容数据
+  op_assets_generator:
+    type: FileContextGenerator
+    serving: qwen3_5_122b
+    params:
+      input_files_key: "assets"
+      input_question_key: "question"
+      output_key: "file_contents"
+    keys:
+      input:
+        input_files_key: "assets"
+        input_question_key: "question"
+      output:
+        output_key: "file_contents"
+
+  # Step 4: 任务质量过滤
+  op_task_quality_filter:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            ## 任务
+            对技能使用问题进行**问题质量评估**，涵盖六个关键维度，确保其符合真实技能使用场景的高标准。
+
+            ## 目标
+            分析提供的技能使用问题，并从六个主要维度评估其质量：
+            1. **技能选择难度** - 在给定所有可用技能的情况下，确定使用哪些技能的困难程度
+            2. **技能选择唯一性** - 所选技能对于此特定任务的唯一性和必要性
+            3. **问题质量** - 整体清晰度、具体性和有效性
+            4. **场景真实性** - 场景的真实可信程度
+            5. **可验证性** - 验证最终模型答案正确性的难易程度
+            6. **稳定性** - 在不同时间和地理位置请求时答案的稳定性
+
+            ## 评估标准
+
+            ### 1. 技能选择难度
+            **评估内容**：用户确定解决此问题所需的具体技能的困难程度。
+
+            **评分指南**：
+            - **very easy**：问题明确提到技能名称或使技能选择显而易见
+            - **easy**：技能选择 straightforward，有明确指示
+            - **medium**：需要一些推理，但技能需求相当明显
+            - **hard**：需要仔细分析以确定适当的技能
+            - **very hard**：需要专业知识和深入推理才能识别正确的技能
+
+            ### 2. 技能选择唯一性
+            **评估内容**：所选技能对于完成此特定任务的唯一性和必要性，以及任务是否只能按指定顺序使用这些技能完成。
+
+            **评分指南**：
+            - **not unique**：许多替代技能组合可以同样好地完成相同任务
+            - **somewhat unique**：存在一些替代方法，但所选技能具有优势
+            - **moderately unique**：所选技能适合，替代方法有限
+            - **quite unique**：所选技能与任务要求特别匹配
+            - **highly unique**：任务只能按此序列使用这些特定工具有效完成
+
+            ### 3. 问题质量
+            **评估内容**：问题作为真实用户查询的整体质量、清晰度和有效性。
+
+            **评分指南**：
+            - **very poor**：不清楚、模糊或构建不良的问题
+            - **poor**：有一些清晰度问题，缺少重要上下文
+            - **average**：清晰易懂，但可以更具体或更有吸引力
+            - **good**：构建良好、清晰、具体且真实
+            - **excellent**：异常清晰、详细、有吸引力且专业编写
+
+            ### 4. 场景真实性
+            **评估内容**：所描述场景的真实、可信和真实程度。
+
+            **评分指南**：
+            - **unrealistic**：人工、刻意或不可能的场景
+            - **somewhat unrealistic**：有一些真实元素但感觉勉强或不太可能
+            - **moderately realistic**：可信场景，有轻微真实性问题
+            - **realistic**：代表真实用例的真实场景
+            - **highly realistic**：完全自然、真实的场景，与真实用户需求无异
+
+            ### 5. 可验证性
+            **评估内容**：验证最终模型答案正确性的难易程度。
+
+            **评分指南**：
+            - **hard to verify**：完全自由形式的答案，需要大量人工判断
+            - **somewhat hard**：主要是主观答案，有一些可验证元素
+            - **moderately verifiable**：可以通过 LLM 比较验证的短句
+            - **mostly verifiable**：具有清晰客观组件和一些主观元素的答案
+            - **easy to verify**：可以通过简单规则、精确匹配或清晰成功标准验证的答案
+
+            ### 6. 稳定性（1-5 分制）
+            **评估内容**：在不同环境条件和系统上下文中提出问题时，答案的稳定性和一致性。考虑时间依赖性、地理变化、操作系统差异、网络环境和软件版本变化等因素。
+
+            **评分指南**：
+            - **highly unstable**：答案在不同条件下显著变化（实时数据、位置特定、系统依赖）
+            - **somewhat unstable**：答案可能因环境或系统因素而适度变化
+            - **moderately stable**：答案基本一致，因上下文有轻微变化
+            - **mostly stable**：答案在不同条件下保持基本一致
+            - **highly stable**：答案完全独立于环境和系统因素
+
+            ## 问题分析
+
+            ### 任务 JSON
+            ```
+            {input_task_json_key}
+            ```
+
+            ## 输出
+            请以以下 JSON 格式提供回答：
+
+            {{
+              "skill_selection_difficulty": {{
+                "reasoning": "包括模糊程度、所需领域知识以及给定所有可用技能的替代解决方案的详细解释",
+                "rating": "very easy|easy|medium|hard|very hard"
+              }},
+              "skill_selection_uniqueness": {{
+                "reasoning": "关于技能必要性、顺序依赖性以及给定所有可用技能的替代工具有效性的详细解释",
+                "rating": "not unique|somewhat unique|moderately unique|quite unique|highly unique"
+              }},
+              "question_quality": {{
+                "reasoning": "涵盖语言质量、信息架构和可操作性的详细解释",
+                "rating": "very poor|poor|average|good|excellent"
+              }},
+              "scenario_realism": {{
+                "reasoning": "关于行业真实性、工作流准确性和利益相关者行为的详细解释",
+                "rating": "unrealistic|somewhat unrealistic|moderately realistic|realistic|highly realistic"
+              }},
+              "verifiable": {{
+                "reasoning": "关于答案格式、客观标准和地面真实可用性的详细解释",
+                "rating": "hard to verify|somewhat hard|moderately verifiable|mostly verifiable|easy to verify"
+              }},
+              "stability": {{
+                "reasoning": "关于时间/地理/系统依赖性和环境因素的详细解释",
+                "rating": "highly unstable|somewhat unstable|moderately stable|mostly stable|highly stable"
+              }}
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_task_json_key: "synthesized_task"
+      output:
+        output_key: "task_annotation"
+
+  # Step 5: JSON 解析 - 解析任务标注
+  op_annotation_json_parser:
+    type: JsonParseFilter
+    params:
+      required_fields:
+        [
+          "skill_selection_difficulty",
+          "skill_selection_uniqueness",
+          "question_quality",
+          "scenario_realism",
+          "verifiable",
+          "stability",
+        ]
+      field_types:
+        skill_selection_difficulty: dict
+        skill_selection_uniqueness: dict
+        question_quality: dict
+        scenario_realism: dict
+        verifiable: dict
+        stability: dict
+    keys:
+      input:
+        input_key: "task_annotation"
+      output:
+        output_key: "task_annotation"
+
+  # ==========================================================================
+  # Stage 4: Trajectory Generation - 轨迹生成
+  # ==========================================================================
+
+  # Step 5: 轨迹生成 - 使用 FormatStrPromptedAgenticGenerator 支持文件内容
+  op_trajectory_generator:
+    type: FormatStrPromptedAgenticGenerator
+    serving: openclaw
+    params:
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            使用下面的技能:
+            {input_skills_key}
+
+            技能存储的位置是:
+            /root/clawhub
+
+            完成下面的任务:
+            {input_question_key}
+
+            任务相关文件都在在 workspace 中
+
+            要求：
+            不允许写任何文件，请将所有内容输出到聊天框
+          on_missing: "raise"
+    keys:
+      input:
+        input_question_key: "question"
+        input_skills_key: "target_skills"
+        input_files_data_key: "file_contents"
+      output:
+        output_key: "generated_trajectory"
+
+  # Step 6: JSON 解析 - 解析轨迹
+  op_trajectory_json_parser:
+    type: JsonParseFilter
+    params: {}
+    keys:
+      input:
+        input_key: "generated_trajectory"
+      output:
+        output_key: "generated_trajectory"
+
+  # ==========================================================================
+  # Stage 5: Trajectory Filtering - 轨迹过滤
+  # ==========================================================================
+
+  # Step 7: 轨迹质量标注
+  op_trajectory_quality_filter:
+    type: FormatStrPromptedGenerator
+    serving: qwen3_5_122b
+    params:
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            ## 任务
+            对技能使用对话进行**响应质量评估**，涵盖两个 LLM 评分维度，第三个维度在 LLM 外部自动计算。
+
+            ## 目标
+            分析提供的对话，并从 LLM 评分的两个主要维度评估其响应质量，同时将额外的技能调用准确性维度保留用于自动评分：
+            1. 完整性 - 助手是否从头到尾完全完成了用户的请求
+            2. 简洁性 - 助手是否使用最必要的步骤和简洁性解决了任务
+
+            ## 评估标准
+
+            ### 1. 完整性
+            **评估内容**：给定对话上下文，助手是否完全满足了用户的目标？考虑助手是否：
+            - 从头到尾执行了所有必要步骤（包括保存/导出/下载等适用情况）
+            - 在受阻时提供最终交付物或可行的替代方案（例如，技能失败但有可用的回退方案）
+            - 包含必要的确认、路径或指令来实现结果
+            - 避免遗漏关键要求或让用户留下未解决的差距
+
+            **评分指南**：
+            - very incomplete：缺少主要要求；没有可用的结果
+            - incomplete：缺少一些关键要求；结果不能直接使用
+            - partially complete：核心步骤已尝试；结果仅在使用户努力或缺少次要要求时可用
+            - mostly complete：满足大多数要求；仍有小遗漏或轻微问题
+            - fully complete：满足所有要求并交付可用结果
+
+            ### 2. 简洁性
+            **评估内容**：助手是否以最少的冗余和步骤实现目标？考虑助手是否：
+            - 避免了重复或不必要的解释/技能调用
+            - 使用完成任务的最小组步/技能集
+            - 在保持清晰的同时保持语言简洁
+
+            **评分指南**：
+            - very redundant：过多的重复或不必要的步骤/技能调用
+            - redundant：明显的冗长或超出需要的额外步骤
+            - average：合理简洁，有轻微多余内容
+            - concise：高效且重点突出，开销最小
+            - very concise：在清晰完整的同时最大化效率
+
+            ## 响应分析
+
+            ### 轨迹 JSON
+            ```
+            {input_trajectory_json_key}
+            ```
+
+            ## 输出要求
+            - 在完整性和简洁性评分之前提供详细推理
+            - 不要评分技能调用准确性；仅包含占位符
+
+            ## 输出
+            请以以下 JSON 格式提供回答：
+
+            {{
+              "completeness": {{
+                "reasoning": "评估助手是否交付了端到端可用的结果，解决了所有要求，使用替代方案处理技能失败，并提供了必要的确认/路径。",
+                "rating": "very incomplete|incomplete|partially complete|mostly complete|fully complete"
+              }},
+              "conciseness": {{
+                "reasoning": "评估助手是否最小化了冗余步骤/解释，避免了不必要的技能调用，并在清晰的同时保持了高效的消息。",
+                "rating": "very redundant|redundant|average|concise|very concise"
+              }}
+            }}
+          on_missing: "raise"
+    keys:
+      input:
+        input_trajectory_json_key: "generated_trajectory"
+      output:
+        output_key: "trajectory_annotation"
+
+  # Step 8: JSON 解析 - 解析轨迹标注
+  op_traj_annotation_parser:
+    type: JsonParseFilter
+    params:
+      required_fields: ["completeness", "conciseness"]
+      field_types:
+        completeness: dict
+        conciseness: dict
+    keys:
+      input:
+        input_key: "trajectory_annotation"
+      output:
+        output_key: "trajectory_annotation"
+
+  # Step 10: 合并所有输出（包含 assets 字段）
+  op_merge_outputs:
+    type: NestExtractOperator
+    params:
+      remove_all_keys: true
+    keys:
+      input:
+        input_task_key: "synthesized_task"
+        input_annotation_key: "task_annotation"
+        input_assets_key: "assets"
+        input_trajectory_key: "generated_trajectory"
+        input_traj_annotation_key: "trajectory_annotation"
+      output:
+        output_task_key: "task"
+        output_annotation_key: "task_annotation"
+        output_assets_key: "assets"
+        output_trajectory_key: "trajectory"
+        output_traj_annotation_key: "trajectory_annotation"
+
+# ==================== Pipeline ====================
+pipeline:
+  type: "PartitionPipelineParallelRun"
+  steps:
+    - "op_task_synthesis"
+    - "op_remove_all_skills"
+    - "op_task_json_parser"
+    - "op_assets_path_generator"
+    - "op_assets_path_json_parser"
+    - "op_merge_task_assets"
+    - "op_assets_generator"
+    - "op_task_quality_filter"
+    - "op_annotation_json_parser"
+    - "op_extract_trajectory_generate_params"
+    - "op_trajectory_generator"
+    - "op_trajectory_json_parser"
+    - "op_trajectory_quality_filter"
+    - "op_traj_annotation_parser"
+    - "op_merge_outputs"
+  execution:
+    partitions: 1
+    max_parallelism: 4
