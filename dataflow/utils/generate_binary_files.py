@@ -289,6 +289,81 @@ def generate_txt(content: Dict, output_path: Path):
         f.write("\n".join(content["lines"]))
 
 
+def generate_md(content: Dict, output_path: Path):
+    """生成 Markdown 文件"""
+    with open(str(output_path), "w", encoding="utf-8") as f:
+        # 如果 content 有 title 和 sections，转换为 Markdown 格式
+        if "title" in content:
+            f.write(f"# {content['title']}\n\n")
+        for section in content.get("sections", []):
+            f.write(f"## {section['heading']}\n\n")
+            for para in section.get("paragraphs", []):
+                f.write(f"{para}\n\n")
+        # 如果有表格
+        if "table" in content and content["table"]:
+            headers = content["table"]["headers"]
+            rows = content["table"]["rows"]
+            # 表头
+            f.write("| " + " | ".join(str(h) for h in headers) + " |\n")
+            f.write("| " + " | ".join("---" for _ in headers) + " |\n")
+            # 数据行
+            for row in rows:
+                f.write("| " + " | ".join(str(c) for c in row) + " |\n")
+            f.write("\n")
+
+
+def generate_html(content: Dict, output_path: Path):
+    """生成 HTML 文件"""
+    with open(str(output_path), "w", encoding="utf-8") as f:
+        title = content.get("title", "Untitled")
+        f.write(
+            f'<!DOCTYPE html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>{title}</title>\n'
+        )
+        if "head" in content and "styles" in content["head"]:
+            f.write(f"<style>{content['head']['styles']}</style>\n")
+        f.write("</head>\n<body>\n")
+        if "body" in content:
+            f.write(f"{content['body']}\n")
+        f.write("</body>\n</html>")
+
+
+def generate_yaml(content: Dict, output_path: Path):
+    """生成 YAML 文件"""
+    with open(str(output_path), "w", encoding="utf-8") as f:
+        # 如果 content 有 content 字段，直接写入
+        if "content" in content:
+            f.write(content["content"])
+        else:
+            # 否则将 data 转换为简单的 YAML 格式（不依赖 pyyaml）
+            def to_yaml(data, indent=0):
+                result = []
+                prefix = "  " * indent
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        if isinstance(value, (dict, list)):
+                            result.append(f"{prefix}{key}:")
+                            result.append(to_yaml(value, indent + 1))
+                        elif isinstance(value, list):
+                            result.append(f"{prefix}{key}:")
+                            for item in value:
+                                if isinstance(item, dict):
+                                    result.append(f"{prefix}  -")
+                                    result.append(to_yaml(item, indent + 2))
+                                else:
+                                    result.append(f"{prefix}  - {item}")
+                        else:
+                            result.append(f"{prefix}{key}: {value}")
+                return "\n".join(result)
+
+            f.write(to_yaml(content.get("data", {})))
+
+
+def generate_code(content: Dict, output_path: Path):
+    """生成代码文件 (py/js/ts)"""
+    with open(str(output_path), "w", encoding="utf-8") as f:
+        f.write(content.get("code", ""))
+
+
 # 格式到生成函数的映射
 format_handlers = {
     "pdf": generate_pdf,
@@ -302,6 +377,15 @@ format_handlers = {
     "json": generate_json,
     "xml": generate_xml,
     "txt": generate_txt,
+    # 新增格式
+    "md": generate_md,
+    "html": generate_html,
+    "yaml": generate_yaml,
+    "yml": generate_yaml,
+    "py": generate_code,
+    "js": generate_code,
+    "ts": generate_code,
+    "log": generate_txt,  # 日志文件复用 txt
 }
 
 
