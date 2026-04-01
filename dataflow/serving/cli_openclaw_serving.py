@@ -263,7 +263,7 @@ def _execute_single_query(
             new_cmd,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
             check=False,
         )
         if new_result.returncode != 0:
@@ -291,14 +291,14 @@ def _execute_single_query(
             raise Exception(result.stderr)
     except subprocess.TimeoutExpired:
         logger.warning(f"查询超时 ({timeout}s)")
-        return ""
+        raise
     except Exception:
         logger.exception("查询失败")
         raise
 
     # 只读取新 session 中的消息
     messages = load_session_new_messages(agent_id, last_timestamp)
-    return json.dumps(messages, ensure_ascii=False) if messages else ""
+    return json.dumps({"messages": messages}, ensure_ascii=False) if messages else ""
 
 
 # ============================================================================
