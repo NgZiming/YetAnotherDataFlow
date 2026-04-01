@@ -178,6 +178,8 @@ class PipelineABC(ABC):
             # print(op_node, op_node.input_keys, op_node.output_keys)
             for input_key in op_node.input_keys:
                 input_key_first_part: str = input_key.split(".")[0]
+                if not input_key_first_part:
+                    continue
                 if input_key_first_part not in self.accumulated_keys[-1]:
                     error_msg.append(
                         {
@@ -249,6 +251,8 @@ class PipelineABC(ABC):
                 current_keynode.set_index(idx)
 
                 input_key_first_part: str = input_key.split(".")[0]
+                if not input_key_first_part:
+                    continue
                 if len(self.last_modified_index_of_keys[input_key_first_part]) > 0:
                     last_modified_idx = self.last_modified_index_of_keys[
                         input_key_first_part
