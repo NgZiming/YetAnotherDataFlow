@@ -170,7 +170,7 @@ class FileStorage(PartitionableStorage):
         优先从 DataSource 获取 schema，如果未提供则读取文件。
         """
         for row in self.data_source.read():
-            return sorted(row.keys())
+            return sorted(set(list(row.keys()) + [self.id_key]))
         return []
 
     # ---------- 控制面实现 ----------
