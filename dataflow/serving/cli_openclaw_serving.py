@@ -36,9 +36,10 @@ from dataflow.logger import get_logger
 
 # 导入二进制文件生成模块
 try:
-    from dataflow_extensions.operators.agentic.generate_binary_files import (
+    from dataflow.utils.generate_binary_files import (
         generate_file,
     )
+
     HAS_BINARY_GENERATOR = True
 except ImportError:
     HAS_BINARY_GENERATOR = False
@@ -242,6 +243,7 @@ def _execute_single_query(
     user_query: str,
     timeout: int,
     logger: Any,
+    input_files_data: Dict,
 ) -> str:
     """
     执行单个查询请求（使用预先创建的 agent）。
@@ -251,12 +253,26 @@ def _execute_single_query(
         user_query: 用户查询内容
         timeout: 超时时间（秒）
         logger: 日志对象
+        input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
 
     Returns:
         助手的回复文本，如果执行失败则返回空字符串
     """
     # 记录 /new 之前的时间戳，只获取新 session 中的消息
     last_timestamp = time.time()
+
+    # 在 /new 之前生成二进制文件
+    if input_files_data and HAS_BINARY_GENERATOR:
+        try:
+            workspace = str(_workspace_dir(agent_id))
+            for filename, content_data in input_files_data.items():
+                if not content_data or not isinstance(content_data, dict):
+                    continue
+                output_path = Path(workspace) / Path(filename).name
+                generate_file({"filename": filename, "content": content_data}, workspace)
+                logger.info(f"生成文件：{output_path}")
+        except Exception as e:
+            logger.error(f"生成文件失败：{e}")
 
     try:
         # 先执行 /new 创建新 session
@@ -427,9 +443,7 @@ class CLIOpenClawServing(LLMServingABC):
         user_inputs: List[str],
         system_prompt: str,
         json_schema: dict,
-        input_files_data: Optional[List[Dict]] = None,
-        input_files_data_key: Optional[str] = None,
-        storage = None,
+        input_files_data: List[Dict],
     ) -> List[str]:
         """
         生成文本响应（并发执行，每个请求使用独立 worker agent）。
@@ -438,9 +452,8 @@ class CLIOpenClawServing(LLMServingABC):
             user_inputs: 用户输入列表
             system_prompt: 系统提示词（CLI 模式下不使用）
             json_schema: JSON schema（CLI 模式下不使用）
-            input_files_data: 可选，FileContextGenerator 输出的文件内容数据列表
-            input_files_data_key: 可选，如果提供则从 storage 读取此 key 对应的数据
-            storage: 可选，DataFlowStorage 实例，用于读取 input_files_data_key
+            input_files_data: 与 user_inputs 长度相同，每个元素是对应 query 的文件内容数据
+                             格式：{filename: content_data}
 
         Returns:
             回复列表，长度与输入相同，失败位置为空字符串
@@ -451,18 +464,11 @@ class CLIOpenClawServing(LLMServingABC):
         if not user_inputs:
             return []
 
-        # 如果有文件生成需求，先生成二进制文件
-        generated_files = []
-        if HAS_BINARY_GENERATOR:
-            if input_files_data:
-                generated_files = self._generate_binary_files_from_data(input_files_data)
-            elif input_files_data_key and storage:
-                generated_files = self._generate_binary_files_from_key(
-                    input_files_data_key, storage
-                )
-            
-            if generated_files:
-                self.logger.info(f"生成 {len(generated_files)} 个二进制文件")
+        if len(input_files_data) != len(user_inputs):
+            raise ValueError(
+                f"input_files_data 长度 ({len(input_files_data)}) "
+                f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
+            )
 
         self.logger.info(
             f"处理 {len(user_inputs)} 个请求 (workers={self.max_workers})..."
@@ -473,12 +479,14 @@ class CLIOpenClawServing(LLMServingABC):
             for i, question in enumerate(user_inputs):
                 # 分配 worker agent（轮询）
                 worker_agent_id = self._worker_agents[i % len(self._worker_agents)]
+                # 传入对应的文件数据
                 future = executor.submit(
                     _execute_single_query,
                     worker_agent_id,
                     question,
                     self.timeout,
                     self.logger,
+                    input_files_data[i],
                 )
                 futures[future] = i
 
@@ -508,73 +516,6 @@ class CLIOpenClawServing(LLMServingABC):
         """清理资源。"""
         self._initialized = False
         self.logger.info("OpenClaw CLI Serving 已清理")
-
-    def _generate_binary_files_from_data(
-        self, files_data: List[Dict], output_key: Optional[str] = None
-    ) -> List[Path]:
-        """
-        从文件内容数据列表生成二进制文件。
-
-        Args:
-            files_data: FileContextGenerator 输出的数据列表，每个 row 包含
-                       output_key 对应的 {filename: content_data} 字典
-            output_key: FileContextGenerator 的输出 key，如果提供则只处理此 key
-
-        Returns:
-            生成的文件路径列表
-        """
-        generated = []
-        workspace = str(_workspace_dir(self.agent_id))
-
-        for row_data in files_data:
-            # 如果有指定的 output_key，只处理这个 key
-            keys_to_process = [output_key] if output_key else row_data.keys()
-            
-            for key in keys_to_process:
-                file_contents = row_data.get(key)
-                if not isinstance(file_contents, dict):
-                    continue
-                
-                for filename, content_data in file_contents.items():
-                    if not content_data or not isinstance(content_data, dict):
-                        self.logger.warning(f"跳过无效内容：{filename}")
-                        continue
-                    
-                    try:
-                        # 生成文件到 workspace
-                        output_path = Path(workspace) / Path(filename).name
-                        generate_file({"filename": filename, "content": content_data}, workspace)
-                        generated.append(output_path)
-                        self.logger.info(f"生成文件：{output_path}")
-                    except Exception as e:
-                        self.logger.error(f"生成文件失败 {filename}: {e}")
-
-        return generated
-
-    def _generate_binary_files_from_key(
-        self, data_key: str, storage=None
-    ) -> List[Path]:
-        """
-        从 storage 中读取指定 key 的数据并生成二进制文件。
-
-        Args:
-            data_key: storage 中的 key，对应 FileContextGenerator 的 output_key
-            storage: DataFlowStorage 实例（可选）
-
-        Returns:
-            生成的文件路径列表
-        """
-        if storage is None:
-            self.logger.error("storage 参数不能为 None")
-            return []
-
-        try:
-            dataframe = storage.read("dataframe")
-            rows = dataframe.to_dict("records")
-            return self._generate_binary_files_from_data(rows)
-        except Exception as e:
-            self.logger.error(f"读取 storage 失败：{e}")
-            return []
 
 
 def create_openclaw_serving(
