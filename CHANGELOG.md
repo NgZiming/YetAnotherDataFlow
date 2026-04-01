@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] - 2026-04-01
+
+### Fixed
+
+- **Pipeline 输入键检查增强** (`ad3bdf3`, `fc60bf0`)
+  - `PipelineABC._check_input_keys`: 添加空 `input_key_first_part` 检查，避免空字符串导致的错误
+  - `PipelineABC._check_input_keys_for_step`: 同上，确保后续步骤的输入键检查健壮性
+  - `PartitionPipelineParallelRun`: 跳过以 `.` 开头的 `key_para_name`，避免错误的依赖添加
+
+- **OpenClaw CLI Serving 超时处理** (`ab06a92`, `c6d20a9`)
+  - `_execute_single_query`: timeout 从硬编码 30 秒改为使用传入的 `timeout` 参数
+  - 超时异常从返回空字符串改为抛出异常，确保调用方能正确处理超时
+  - 返回值格式统一为 `{"messages": [...]}` 结构
+
+- **Storage schema 包含 id_key** (`bacc6c1`, `814176f`)
+  - `FileStorage.get_schema`: 返回的 schema 包含 `id_key`，确保后续步骤能正确识别主键
+  - `S3Storage.get_schema`: 同上
+
+- **文件句柄泄漏修复** (`6cd60cd`)
+  - `FileStorage._load_data_for_pruning`: 添加 try-finally 确保文件正确关闭
+
+---
+
 ## [1.0.1] - 2026-03-31
 
 ### Added
