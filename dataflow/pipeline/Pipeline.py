@@ -897,12 +897,12 @@ class PartitionPipelineParallelRun(PipelineABC):
                 f"简化后依赖数：{simplified_dep_count}, 移除：{original_dep_count - simplified_dep_count}"
             )
 
-        # 打印 partition=1 的完整依赖图（用于调试）
-        self.logger.info("📋 依赖图 (partition=1):")
+        # 打印 partition=self._partitions 的完整依赖图（用于调试）
+        self.logger.info(f"📋 依赖图 (partition={self._partitions}):")
         partition_1_deps = [
             (wl, deps)
             for wl, deps in simplified_dependencies.items()
-            if wl.partition == 1 and len(deps) > 0
+            if wl.partition == self._partitions - 1 and len(deps) > 0
         ]
         for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
             op_name = self.op_nodes_list[wl.step].op_name
