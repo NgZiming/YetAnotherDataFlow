@@ -253,26 +253,42 @@ def _execute_single_query(
     # 记录 /new 之前的时间戳，只获取新 session 中的消息
     last_timestamp = time.time()
 
+    # 清理 assets 目录（失败或结束时也会清理）
+    assets_dir = _workspace_dir(agent_id) / "assets"
+
+    def _cleanup_assets():
+        """清空 assets 目录"""
+        if assets_dir.exists():
+            import shutil
+
+            try:
+                shutil.rmtree(assets_dir)
+                logger.info(f"已清空 assets 目录：{assets_dir}")
+            except Exception as e:
+                logger.warning(f"清空 assets 目录失败：{e}")
+
+    new_file_paths: list[str] = []
     # 在 /new 之前生成二进制文件
     if input_files_data:
         try:
-            workspace = str(_workspace_dir(agent_id))
+            # 统一使用 /workspace/assets/ 目录
+            assets_dir.mkdir(parents=True, exist_ok=True)
             for filename, content_data in input_files_data.items():
                 if not content_data or not isinstance(content_data, dict):
                     continue
-                # 将 /workspace/ 替换为当前 agent 的 workspace 地址
-                relative_path = filename.replace("/workspace/", "", 1)
-                new_path = Path(workspace) / relative_path
-                # 创建 parent 文件夹
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                # 传给 generate_file：只传文件名，output_dir 是 parent 目录
+                # 所有文件都放在 assets 目录下，忽略原始路径
+                new_path = assets_dir / Path(filename).name
+                # 传给 generate_file：只传文件名，output_dir 是 assets 目录
                 generate_file(
                     {"filename": new_path.name, "content": content_data},
-                    str(new_path.parent),
+                    str(assets_dir),
                 )
                 logger.info(f"生成文件：{new_path}")
+                new_file_paths.append(str(new_path))
         except Exception as e:
             logger.error(f"生成文件失败：{e}")
+            _cleanup_assets()
+            raise
 
     try:
         # 先执行 /new 创建新 session
@@ -294,7 +310,10 @@ def _execute_single_query(
         )
         if new_result.returncode != 0:
             logger.warning(f"/new 命令失败：{new_result.stderr.strip()}")
+            raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
+        if len(new_file_paths) > 0:
+            user_query += f"\n下面是任务相关的文件: \n{new_file_paths}"
         # 执行用户查询
         cmd = [
             "openclaw",
@@ -321,6 +340,9 @@ def _execute_single_query(
     except Exception:
         logger.exception("查询失败")
         raise
+    finally:
+        # 清空 assets
+        _cleanup_assets()
 
     # 只读取新 session 中的消息
     messages = load_session_new_messages(agent_id, last_timestamp)
