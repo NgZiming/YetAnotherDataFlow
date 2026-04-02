@@ -1,23 +1,15 @@
 numpy<2.0.0
 datasets
 scipy
-torch
-torchvision
-torchaudio
 tqdm
-transformers
 math_verify
 word2number
-accelerate
 rapidfuzz
 colorlog
 appdirs
-datasketch
 modelscope
-addict
 pytest
 rich
-docstring_parser
 pydantic
 nltk
 colorama
@@ -27,21 +19,14 @@ tiktoken
 pyarrow==20.0.0 # larger than this will bug on python 3.10
 cookiecutter # auto template gen from CLI
 pypdf
-
 # text2sql
-func_timeout
-sqlglot
 pymysql
-
 # general text
 fasttext; python_version >= "3.13" # https://github.com/OpenDCAI/DataFlow/pull/470
 fasttext-wheel; python_version < "3.13" # https://github.com/OpenDCAI/DataFlow/pull/470
-
 langkit
 openai
-sentencepiece
-datasketch
-presidio_analyzer[transformers]
+presidio_analyzer
 presidio_anonymizer
 vendi-score==0.0.3
 google-api-core
@@ -50,47 +35,14 @@ evaluate
 contractions
 symspellpy
 simhash
-
-# knowledge base cleaning
-chonkie
-trafilatura
-lxml_html_clean
-pymupdf
-httpx[socks]
-
 # dataflow agent
-cloudpickle
-fastapi
-httpx
 pandas
 openpyxl>=3.1.0
 python-docx>=1.0.0
 python-pptx>=0.6.23
 xlwt>=1.3.0
 reportlab>=4.0.0
-psutil
-pyfiglet
 pyyaml
 requests
-termcolor
-uvicorn
-sseclient-py
-
-# speech
-librosa
-soundfile
-
-# map visualize
-# matplotlib - removed as no longer needed
-
-# google vertex ai
-google-cloud-aiplatform>=1.55
-google-cloud-bigquery
 google-genai
-gcsfs
-
-db-dtypes
-google-cloud-bigquery-storage
-
-# s3
 boto3
