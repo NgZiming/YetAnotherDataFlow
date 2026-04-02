@@ -1,9 +1,13 @@
-DataFlow 是个好项目, 但是我的工作来得太快了，我没时间等它实现我需要的功能。
+[English](README.md) | 简体中文
 
-等我适配好了我的环境，交付了我自己的项目，发现距离v1.0.8已经太远了，没有合回去的可能性。所以自己建了一个repo。
+---
+
+DataFlow 是个好项目，但是我的工作来得太快了，我没时间等它实现我需要的功能。
+
+等我适配好了我的环境，交付了我自己的项目，发现距离 v1.0.8 已经太远了，没有合回去的可能性。所以自己建了一个 repo。
 
 主要差异：
-1. 支持S3
+1. 支持 S3
 2. 并发数分片运行，依赖分析
 3. 读写分离
 4. openclaw serving
@@ -19,7 +23,7 @@ DataFlow 是个好项目, 但是我的工作来得太快了，我没时间等它
 1. [环境准备](#1-环境准备)
 2. [第一个 Pipeline：文本翻译](#2-第一个-pipeline 文本翻译)
 3. [多步骤 Pipeline](#3-多步骤-pipeline)
-4. [S3 数据源支持](#4-s3-数据源支持)
+4. [S3 数据源支持](#4-s3 数据源支持)
 5. [常见问题](#5-常见问题)
 
 ---
@@ -593,3 +597,112 @@ serving = create_openclaw_serving(
 )
 responses = serving.generate_from_input(["问题 1", "问题 2"])
 ```
+
+---
+
+## 版本历史
+
+### [1.0.3] - 2026-04-02
+
+#### Added
+
+- **核心算子模块**
+  - `JsonParseFilter`: JSON 解析和验证算子，支持字段类型检查、正则匹配、数值范围验证
+  - `NestExtractOperator`: 嵌套 JSON 提取算子，支持点号路径和数组索引语法
+  - `FormatStrPromptedAgenticGenerator`: 基于模板提示的 Agent 生成算子，支持传递文件内容数据
+  - `FileContextGenerator`: 文件内容合成算子，根据文件路径和问题生成表格/文档/PPT/代码等内容
+
+- **二进制文件生成系统**
+  - `generate_binary_files.py`: 支持 11 种格式的测试文件生成
+  - `CLIOpenClawServing` 增强：支持在 LLM 调用前注入二进制文件内容数据
+  - 5 类 Prompt 模板：table/document/presentation/structured/text/code
+
+- **依赖更新**
+  - 新增 `openpyxl`, `python-pptx`, `reportlab`, `docx`
+
+#### Fixed
+
+- 文件验证和路径处理修复
+- Pipeline 输入检查增强
+
+### [1.0.2] - 2026-04-01
+
+#### Fixed
+
+- **Pipeline 输入键检查增强**
+  - `PipelineABC._check_input_keys`: 添加空 `input_key_first_part` 检查
+  - `PartitionPipelineParallelRun`: 跳过以 `.` 开头的 `key_para_name`
+
+- **OpenClaw CLI Serving 超时处理**
+  - timeout 从硬编码 30 秒改为使用传入的 `timeout` 参数
+  - 超时异常从返回空字符串改为抛出异常
+
+- **Storage schema 包含 id_key**
+  - `FileStorage.get_schema` 和 `S3Storage.get_schema` 返回的 schema 包含 `id_key`
+
+- **文件句柄泄漏修复**
+  - `FileStorage._load_data_for_pruning`: 添加 try-finally 确保文件正确关闭
+
+### [1.0.1] - 2026-03-31
+
+#### Added
+
+- **IdSynthesizer 抽象类**
+  - 新增 `IdSynthesizer` 抽象基类，支持缺失 `id_key` 的自动合成
+  - 实现 `UuidIdSynthesizer`（默认）和 `CounterIdSynthesizer`
+
+- **OpenClaw CLI Serving 重构**
+  - 改用预先创建的 worker agents，避免重复创建失败
+  - 每次请求前执行 `/new` 创建新 session
+
+- **Pipeline 并行检查优化**
+  - `_check_completed_workloads` 改为多线程并行检查
+
+#### Changed
+
+- **Session 文件等待增强**
+  - `load_session` 改为抛异常，不再返回 `None`
+  - `_resolve_transcript_path` 超时从 15 秒延长到 60 秒
+
+- **Worker agent 注册等待**
+  - 创建 worker agent 后轮询检查是否注册成功
+
+### [1.0.0] - 2026-03-30
+
+#### Added
+
+- **Storage 模块架构重构**
+  - 重构为 6 个模块化文件
+  - 数据面/控制面分离设计
+  - DataSource 抽象类，支持本地文件、S3、HuggingFace、ModelScope
+
+- **智能行数估算**
+  - Parquet 格式 O(1) 复杂度读取 metadata
+  - S3 Parquet 仅下载 footer (~64KB)
+
+- **PartitionPipelineParallelRun** - 支持大规模数据并行处理
+
+- **数据格式支持扩展**
+  - Parquet、Pickle、JSON
+
+- **S3 性能优化**
+  - S3 Range 请求：Parquet 文件仅下载 footer
+
+#### Changed
+
+- **Pipeline 接口简化**
+  - 使用 `storage.step()` 自动管理分片和步骤
+  - 自动分片和依赖管理
+
+#### Documentation
+
+- 新增 `TUTORIAL.md` (中文) 和 `TUTORIAL-en.md` (英文)
+- 更新 `README.md` 和 `README-zh.md`
+
+---
+
+<div align="center">
+
+**有问题？查看 [GitHub Issues](https://github.com/OpenDCAI/DataFlow/issues) 或加入 [社区](#11-community--support)**
+
+</div>
