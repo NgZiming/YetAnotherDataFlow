@@ -613,3 +613,104 @@ responses = serving.generate_from_input(["Question 1", "Question 2"])
 ```
 
 ---
+
+## Changelog
+
+### [1.0.3] - 2026-04-02
+
+#### Added
+
+- **Core Operators**
+  - `JsonParseFilter`: JSON parsing and validation operator with type checking, regex matching, range validation
+  - `NestExtractOperator`: Nested JSON extraction with dot notation (`user.address.city`) and array indexing (`items[0].name`)
+  - `FormatStrPromptedAgenticGenerator`: Template-based Agent generation with file content data support
+  - `FileContextGenerator`: File content synthesis for tables/documents/PPT/code
+
+- **Binary File Generation System**
+  - `generate_binary_files.py`: Support for 11 formats (CSV/XLSX/PDF/DOCX/PPTX/JSON/XML/HTML/YAML/TXT/Py/JS/TS)
+  - `CLIOpenClawServing` enhancement: Inject binary file content data before LLM calls
+  - 5 Prompt templates: table/document/presentation/structured/text/code
+
+- **Dependencies**
+  - Added `openpyxl`, `python-pptx`, `reportlab`, `docx`
+
+#### Fixed
+
+- File validation and path handling
+- Pipeline input key checking
+
+### [1.0.2] - 2026-04-01
+
+#### Fixed
+
+- **Pipeline input key checking**
+  - `PipelineABC._check_input_keys`: Empty `input_key_first_part` check
+  - `PartitionPipelineParallelRun`: Skip `key_para_name` starting with `.`
+
+- **OpenClaw CLI Serving timeout handling**
+  - Timeout from hardcoded 30s to use passed `timeout` parameter
+  - Timeout exception from returning empty string to throwing exception
+
+- **Storage schema includes id_key**
+  - `FileStorage.get_schema` and `S3Storage.get_schema` return schema with `id_key`
+
+- **File handle leak fix**
+  - `FileStorage._load_data_for_pruning`: try-finally to ensure file closure
+
+### [1.0.1] - 2026-03-31
+
+#### Added
+
+- **IdSynthesizer abstract class**
+  - `IdSynthesizer` base class for auto-generating missing `id_key`
+  - `UuidIdSynthesizer` (default) and `CounterIdSynthesizer`
+
+- **OpenClaw CLI Serving refactoring**
+  - Use pre-created worker agents
+  - Execute `/new` before each request
+
+- **Pipeline parallel check optimization**
+  - `_check_completed_workloads` to multi-threaded parallel check
+
+#### Changed
+
+- **Session file wait enhancement**
+  - `load_session` throws exception instead of returning `None`
+  - `_resolve_transcript_path` timeout from 15s to 60s
+
+- **Worker agent registration wait**
+  - Poll for registration success after creating worker agent
+
+### [1.0.0] - 2026-03-30
+
+#### Added
+
+- **Storage module architecture refactoring**
+  - Refactored into 6 modular files
+  - Data plane/Control plane separation
+  - DataSource abstract class: Local, S3, HuggingFace, ModelScope
+
+- **Smart row count estimation**
+  - Parquet O(1) metadata reading
+  - S3 Parquet footer-only download (~64KB)
+
+- **PartitionPipelineParallelRun** - Large-scale parallel processing
+
+- **Data format support**
+  - Parquet, Pickle, JSON
+
+- **S3 performance optimization**
+  - S3 Range requests for Parquet footer-only download
+
+#### Changed
+
+- **Pipeline interface simplification**
+  - `storage.step()` for automatic partition and step management
+  - Automatic partitioning and dependency management
+
+#### Documentation
+
+- Added `TUTORIAL.md` (Chinese) and `TUTORIAL-en.md` (English)
+- Updated `README.md` and `README-zh.md`
+
+---
