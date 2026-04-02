@@ -9,10 +9,13 @@ metadata:
 
 # ==================== 数据源 ====================
 data_source:
-  type: "FileDataSource"
+  type: "S3DataSource"
   params:
-    paths:
-      - "/root/start-data-test.jsonl"
+    endpoint: http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/
+    ak: "${S3_AK:}"
+    sk: "${S3_SK:}"
+    s3_paths:
+      - s3://pedia-doc-ai/wuziming/toolcall-extractor-flow/datasets/start-data-00000000.jsonl
     format_type: "jsonl"
 
 # ==================== 存储 ====================
@@ -22,7 +25,7 @@ storage:
     endpoint: http://aoss-internal.cn-sh-01.sensecoreapi-oss.cn/
     ak: "${S3_AK:}"
     sk: "${S3_SK:}"
-    output_s3_path: s3://pedia-doc-ai/wuziming/tools-trajectory-synthesis/test/v0002/
+    output_s3_path: s3://pedia-doc-ai/wuziming/tools-trajectory-synthesis/200m_part_00000000/v0000/
     id_key: "task_id"
     cache_type: "jsonl"
 
@@ -50,7 +53,7 @@ serving:
       agent_id: main
       timeout: 600
       create_if_missing: True
-      max_workers: 10
+      max_workers: 100
 
 # ==================== Operators ====================
 operators:
@@ -180,14 +183,19 @@ operators:
     type: FormatStrPromptedGenerator
     serving: qwen3_5_122b
     params:
-      system_prompt: |
-        你是一个文件路径生成器。你的任务是：
-        1. 分析用户问题中是否涉及 PDF、XLSX、DOC、DOCX、PPT、PPTX、TXT、CSV、JSON、XML 等文件类型
-        2. 如果涉及，生成 1-5 个对应的假文件路径列表（使用 /workspace/assets/ 前缀）
-        3. 如果不涉及，返回空列表 []
+      prompt_template:
+        type: FormatStrPrompt
+        params:
+          f_str_template: |
+            你是一个文件路径生成器。你的任务是：
+            1. 分析用户问题中是否涉及 csv, xlsx, xls, pdf, docx, doc, pptx, ppt, json, xml, txt 等文件类型
+            2. 如果涉及，生成 1-5 个对应的假文件路径列表（使用 /workspace/assets/ 前缀）
+            3. 如果不涉及，返回空列表 []
 
-        请始终以 JSON 格式输出：{"assets": ["/workspace/assets/example.pdf", ...]}
-      temperature: 0.1
+            用户问题：
+            {input_question_key}
+
+            请始终以 JSON 格式输出：{"assets": ["/workspace/assets/example.pdf", ...]}
     keys:
       input:
         input_question_key: "question"
@@ -222,10 +230,7 @@ operators:
   op_assets_generator:
     type: FileContextGenerator
     serving: qwen3_5_122b
-    params:
-      input_files_key: "assets"
-      input_question_key: "question"
-      output_key: "file_contents"
+    params: {}
     keys:
       input:
         input_files_key: "assets"
@@ -398,19 +403,26 @@ operators:
         type: FormatStrPrompt
         params:
           f_str_template: |
+            使用下面的技能替换 web_search 和 web_fetch：
+            /root/dataflow-skills/webtools-proxy-mainland
+
+            proxy地址为：
+            export HTTP_PROXY=http://senseparrots:5a0cdf45bf7f@10.119.176.202:3128
+            export HTTPS_PROXY=http://senseparrots:5a0cdf45bf7f@10.119.176.202:3128
+
             使用下面的技能:
             {input_skills_key}
 
-            技能存储的位置是:
-            /root/clawhub
+            这些技能存储的位置是:
+            "/root/clawhub/{{skill 名称}}/"
 
             完成下面的任务:
             {input_question_key}
 
-            任务相关文件都在在 workspace 中
+            任务相关文件都在在workspace的assets文件夹中
 
             要求：
-            不允许写任何文件，请将所有内容输出到聊天框
+            如果新建了任何文件，请务必写在workspace的assets文件夹里，其他文件夹都不是持久化的。
           on_missing: "raise"
     keys:
       input:
@@ -450,6 +462,8 @@ operators:
             分析提供的对话，并从 LLM 评分的两个主要维度评估其响应质量，同时将额外的技能调用准确性维度保留用于自动评分：
             1. 完整性 - 助手是否从头到尾完全完成了用户的请求
             2. 简洁性 - 助手是否使用最必要的步骤和简洁性解决了任务
+            3. 技能调用准确性 - 助手是否正确使用了任务中提到的技能，是否都用到了
+            4. 技能使用规范性 - 助手是否遵守了每个 skill 的文档中描述的使用规范
 
             ## 评估标准
 
@@ -480,16 +494,54 @@ operators:
             - concise：高效且重点突出，开销最小
             - very concise：在清晰完整的同时最大化效率
 
+            ### 3. 技能调用准确性
+            **评估内容**：助手是否正确使用了任务中提到的技能，是否都用到了？考虑助手是否：
+            - 使用了任务指定的所有技能（target_skills）
+            - 按正确的顺序调用/引用技能
+            - **对于可执行技能**：调用方式、参数正确性、返回值处理
+            - **对于指导性技能**：是否正确理解并遵循了文档中的建议/指导
+            - 没有误用或错误调用技能
+
+            **评分指南**：
+            - very inaccurate：使用了错误的技能，或完全未使用指定技能
+            - inaccurate：遗漏了多个指定技能，或技能使用/引用方式错误
+            - partially accurate：使用了大部分指定技能，但有遗漏或误用
+            - mostly accurate：正确使用了所有指定技能，仅有小问题
+            - fully accurate：完全正确使用了所有指定技能，顺序和方式都准确无误
+            - **注意**：对于纯指导性文档类技能，评估重点是对文档内容的正确理解和应用，而非技术调用
+
+            ### 4. 技能使用规范性
+            **评估内容**：助手是否遵守了被调用 skill 的文档中描述的使用规范？这是一个通用评估标准，适用于所有类型的技能。根据技能类型区分评估重点：
+
+            **对于可执行技能（有接口/脚本）**：
+            - **前置条件**：是否满足技能调用的前置要求（如依赖安装、配置设置、环境准备等）
+            - **参数规范**：是否按照技能文档描述的参数格式、类型和必填项进行调用
+            - **调用方式**：是否使用文档推荐的方式调用技能（如函数调用、命令行参数等）
+            - **返回值处理**：是否正确解析和处理技能返回的数据结构
+            - **错误处理**：当技能调用失败或返回错误时，是否采取了合理的处理措施
+            - **约束遵守**：是否遵守技能文档中明确说明的限制和约束条件
+            - **最佳实践**：是否遵循文档中建议的最佳实践和使用模式
+
+            **对于指导性技能（纯文档，无接口/脚本）**：
+            - **内容理解**：是否正确理解文档的核心指导和建议
+            - **建议应用**：是否将文档中的建议正确应用到当前任务场景
+            - **信息引用**：是否正确引用了文档中的关键信息（如命令、配置、步骤等）
+            - **约束遵守**：是否遵守文档中明确说明的限制和注意事项
+            - **最佳实践**：是否遵循文档中推荐的方法论和工作流
+
+            **通用评分指南**：
+            - **very poor**：完全无视技能的核心规范要求，导致技能无法正常工作或结果完全错误
+            - **poor**：遗漏了多个关键规范要求，导致技能调用失败或结果不可用
+            - **average**：基本遵循了技能的主要要求，但有明显的规范偏差，可能影响结果质量
+            - **good**：遵循了大部分规范要求，仅有轻微的偏差或不严谨，不影响最终结果
+            - **excellent**：严格遵守了技能文档中的所有规范要求，包括显式和隐式要求
+
             ## 响应分析
 
             ### 轨迹 JSON
             ```
             {input_trajectory_json_key}
             ```
-
-            ## 输出要求
-            - 在完整性和简洁性评分之前提供详细推理
-            - 不要评分技能调用准确性；仅包含占位符
 
             ## 输出
             请以以下 JSON 格式提供回答：
@@ -502,6 +554,25 @@ operators:
               "conciseness": {{
                 "reasoning": "评估助手是否最小化了冗余步骤/解释，避免了不必要的技能调用，并在清晰的同时保持了高效的消息。",
                 "rating": "very redundant|redundant|average|concise|very concise"
+              }},
+              "skill_usage_accuracy": {{
+                "reasoning": "详细分析 target_skills 是否都被正确使用，包括技能顺序、调用方式、参数正确性，以及是否有遗漏或误用。",
+                "rating": "very inaccurate|inaccurate|partially accurate|mostly accurate|fully accurate",
+                "used_skills": ["实际使用的技能列表"],
+                "missing_skills": ["未使用的技能列表"],
+                "misused_skills": ["误用的技能列表及原因"]
+              }},
+              "skill_usage_norm_compliance": {{
+                "reasoning": "详细分析每个被调用的 skill 是否按照其文档中的规范要求使用，包括前置条件、参数格式、调用方式、返回值处理、错误处理等方面。",
+                "rating": "very poor|poor|average|good|excellent",
+                "skills_checked": [
+                  {{
+                    "skill_name": "skill 名称",
+                    "requirements_checked": ["前置条件", "参数规范", "调用方式", "返回值处理", "错误处理", "约束遵守", "最佳实践"],
+                    "compliance_status": "fully compliant|partially compliant|non-compliant",
+                    "violations": ["违反的具体要求及原因"]
+                  }}
+                ]
               }}
             }}
           on_missing: "raise"
@@ -515,10 +586,18 @@ operators:
   op_traj_annotation_parser:
     type: JsonParseFilter
     params:
-      required_fields: ["completeness", "conciseness"]
+      required_fields:
+        [
+          "completeness",
+          "conciseness",
+          "skill_usage_accuracy",
+          "skill_usage_norm_compliance",
+        ]
       field_types:
         completeness: dict
         conciseness: dict
+        skill_usage_accuracy: dict
+        skill_usage_norm_compliance: dict
     keys:
       input:
         input_key: "trajectory_annotation"
@@ -532,17 +611,21 @@ operators:
       remove_all_keys: true
     keys:
       input:
+        input_task_id_key: "task_id"
         input_task_key: "synthesized_task"
         input_annotation_key: "task_annotation"
         input_assets_key: "assets"
         input_trajectory_key: "generated_trajectory"
         input_traj_annotation_key: "trajectory_annotation"
+        input_files_data_key: "file_contents"
       output:
+        output_task_id_key: "task_id"
         output_task_key: "task"
-        output_annotation_key: "task_annotation"
+        output_annotation_key: "task_quality"
         output_assets_key: "assets"
         output_trajectory_key: "trajectory"
-        output_traj_annotation_key: "trajectory_annotation"
+        output_traj_annotation_key: "trajectory_quality"
+        output_files_data_key: "file_contents"
 
 # ==================== Pipeline ====================
 pipeline:
@@ -551,18 +634,18 @@ pipeline:
     - "op_task_synthesis"
     - "op_remove_all_skills"
     - "op_task_json_parser"
+    - "op_extract_trajectory_generate_params"
     - "op_assets_path_generator"
     - "op_assets_path_json_parser"
     - "op_merge_task_assets"
     - "op_assets_generator"
     - "op_task_quality_filter"
     - "op_annotation_json_parser"
-    - "op_extract_trajectory_generate_params"
     - "op_trajectory_generator"
     - "op_trajectory_json_parser"
     - "op_trajectory_quality_filter"
     - "op_traj_annotation_parser"
     - "op_merge_outputs"
   execution:
-    partitions: 1
+    partitions: 1000
     max_parallelism: 4
