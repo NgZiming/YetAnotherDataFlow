@@ -614,6 +614,212 @@ responses = serving.generate_from_input(["Question 1", "Question 2"])
 
 ---
 
+## 7. New Operators Tutorial (v1.0.3)
+
+### 7.1 JsonParseFilter - JSON Parsing and Validation
+
+Parse JSON strings returned by LLM and validate fields.
+
+```python
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.core import JsonParseFilter
+
+
+class JsonParsePipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./input.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        # Create JSON parser operator
+        self.json_parser = JsonParseFilter(
+            required_fields=["filename", "format"],  # Required fields
+            field_types={"filename": "str", "rows": "int"},  # Type checking
+            field_ranges={"rows": (1, 1000)},  # Range validation
+        )
+
+    def forward(self):
+        # Parse JSON string column, store result in new column
+        self.json_parser.run(
+            self.storage.step(),
+            input_key="llm_output",  # Column with JSON strings
+            output_key="parsed_data",  # Parsed dict stored here
+        )
+```
+
+### 7.2 NestExtractOperator - Nested JSON Extraction
+
+Extract fields from nested JSON structures to flat columns.
+
+```python
+from dataflow.operators.core import NestExtractOperator
+
+
+class ExtractPipeline(PipelineABC):
+    def __init__(self):
+        # ... initialize Storage ...
+        # Create nested extraction operator
+        extract_op = NestExtractOperator(
+            # Input column (with JSON)
+            input_data_name_key="user_json.user_name",
+            input_data_age_key="user_json.user_age",
+            input_tags_name_key="user_json.user_tags",
+            output_data_name_key="user_name",  # Extract from user_json.name
+            output_data_age_key="user_age",  # Extract from user_json.age
+            output_tags_name_key="user_tags",  # Extract from user_json.tags
+        )
+
+        # Support complex paths: dot notation and array indexing
+        extract_op_with_path = NestExtractOperator(
+            input_user_name_key="data.name",
+            input_user_email_key="data.email",
+            input_first_tag_key="data.tags[0]",
+            input_nested_value_key="data.nested",
+            output_user_name_key="name",  # data.name
+            output_user_email_key="email",  # data.email
+            output_first_tag_key="tags",  # data.tags[0]
+            output_nested_value_key="nested",  # data.nested.value
+        )
+        pass
+
+    def forward(self):
+        extract_op.run(
+            self.storage.step(),
+        )
+```
+
+### 7.3 FileContextGenerator + FormatStrPromptedAgenticGenerator - Binary File Generation
+
+Generate test binary files (tables/documents/PPT/code, etc.).
+
+```python
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.agentic import FileContextGenerator
+from dataflow.operators.agentic import FormatStrPromptedAgenticGenerator
+from dataflow.serving import CLIOpenClawServing
+from dataflow.prompts.core_text import FormatStrPrompt
+
+
+class BinaryFileGenerationPipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        # OpenClaw CLI Serving
+        self.llm = CLIOpenClawServing(
+            agent_id="main",
+            model="custom/Qwen3.5-122B-A10B",
+            max_workers=4,
+        )
+
+        # File content generation operator
+        self.file_generator = FileContextGenerator(llm_serving=self.llm)
+
+        # Template-based generation operator
+        self.content_generator = FormatStrPromptedAgenticGenerator(
+            llm_serving=self.llm,
+            prompt_template=FormatStrPrompt,
+            system_prompt="You are a helpful assistant.",
+        )
+
+    def forward(self):
+        # Step 0: Generate file content based on tasks
+        self.file_generator.run(
+            self.storage.step(),
+            input_files_key="file_paths",  # File paths column
+            input_question_key="task_description",  # Task description column
+            output_key="file_contents",  # Output: {filename: content_data}
+        )
+
+        # Step 1: Use file content to generate additional data
+        self.content_generator.run(
+            self.storage.step(),
+            input_files_data_key="file_contents",  # Pass file content data
+            input_task_key="task_description",
+            output_key="additional_content",
+        )
+```
+
+**Supported File Formats:**
+
+| Category | Formats | Description |
+|----------|---------|-------------|
+| Tables | CSV, XLSX, XLS | Spreadsheet data |
+| Documents | PDF, DOCX, DOC, MD | Reports, documents |
+| Presentations | PPTX, PPT | Slide decks |
+| Structured | JSON, XML, HTML, YAML, YML | Config files, data exchange |
+| Text | TXT, LOG | Plain text, logs |
+| Code | PY, JS, TS | Python/JavaScript/TypeScript |
+
+### 7.4 Complete Example: Generate Test Dataset
+
+```python
+# tasks.jsonl content example:
+# {"id": 1, "file_paths": ["/workspace/sales_data.xlsx"], "task_description": "Generate Q1 2026 sales data"}
+# {"id": 2, "file_paths": ["/workspace/report.pdf"], "task_description": "Generate project progress report"}
+
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.agentic import FileContextGenerator
+from dataflow.serving import CLIOpenClawServing
+
+
+class TestDataGenerationPipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        self.llm = CLIOpenClawServing(
+            agent_id="main",
+            model="custom/Qwen3.5-122B-A10B",
+            max_workers=4,
+        )
+
+        self.file_generator = FileContextGenerator(llm_serving=self.llm)
+
+    def forward(self):
+        self.file_generator.run(
+            self.storage.step(),
+            input_files_key="file_paths",
+            input_question_key="task_description",
+            output_key="file_contents",
+        )
+
+
+if __name__ == "__main__":
+    pipeline = TestDataGenerationPipeline()
+    pipeline.compile()
+    pipeline.forward()
+    print("✅ Test file generation complete!")
+```
+
+---
+
 ## Changelog
 
 ### [1.0.3] - 2026-04-02

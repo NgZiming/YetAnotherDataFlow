@@ -600,6 +600,212 @@ responses = serving.generate_from_input(["问题 1", "问题 2"])
 
 ---
 
+## 7. 新增算子使用教程 (v1.0.3)
+
+### 7.1 JsonParseFilter - JSON 解析和验证
+
+用于解析 LLM 返回的 JSON 字符串，并验证字段是否符合预期。
+
+```python
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.core import JsonParseFilter
+
+
+class JsonParsePipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./input.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        # 创建 JSON 解析算子
+        self.json_parser = JsonParseFilter(
+            required_fields=["filename", "format"],  # 必填字段
+            field_types={"filename": "str", "rows": "int"},  # 类型检查
+            field_ranges={"rows": (1, 1000)},  # 数值范围检查
+        )
+
+    def forward(self):
+        # 解析 JSON 字符串列，结果存入新列
+        self.json_parser.run(
+            self.storage.step(),
+            input_key="llm_output",  # 包含 JSON 字符串的列
+            output_key="parsed_data",  # 解析后的字典存入此列
+        )
+```
+
+### 7.2 NestExtractOperator - 嵌套 JSON 提取
+
+从嵌套 JSON 结构中提取字段到扁平列。
+
+```python
+from dataflow.operators.core import NestExtractOperator
+
+
+class ExtractPipeline(PipelineABC):
+    def __init__(self):
+        # ... 初始化 Storage ...
+        # 创建嵌套提取算子
+        extract_op = NestExtractOperator(
+            # 输入列（包含 JSON）
+            input_data_name_key="user_json.user_name",
+            input_data_age_key="user_json.user_age",
+            input_tags_name_key="user_json.user_tags",
+            output_data_name_key="user_name",  # 从 user_json.name 提取
+            output_data_age_key="user_age",  # 从 user_json.age 提取
+            output_tags_name_key="user_tags",  # 从 user_json.tags 提取
+        )
+
+        # 支持复杂路径：点号和数组索引
+        extract_op_with_path = NestExtractOperator(
+            input_user_name_key="data.name",
+            input_user_email_key="data.email",
+            input_first_tag_key="data.tags[0]",
+            input_nested_value_key="data.nested",
+            output_user_name_key="name",  # data.name
+            output_user_email_key="email",  # data.email
+            output_first_tag_key="tags",  # data.tags[0]
+            output_nested_value_key="nested",  # data.nested.value
+        )
+        pass
+
+    def forward(self):
+        extract_op.run(
+            self.storage.step(),
+        )
+```
+
+### 7.3 FileContextGenerator + FormatStrPromptedAgenticGenerator - 二进制文件生成
+
+生成测试用的二进制文件（表格/文档/PPT/代码等）。
+
+```python
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.agentic import FileContextGenerator
+from dataflow.operators.agentic import FormatStrPromptedAgenticGenerator
+from dataflow.serving import CLIOpenClawServing
+from dataflow.prompts.core_text import FormatStrPrompt
+
+
+class BinaryFileGenerationPipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        # OpenClaw CLI Serving
+        self.llm = CLIOpenClawServing(
+            agent_id="main",
+            model="custom/Qwen3.5-122B-A10B",
+            max_workers=4,
+        )
+
+        # 文件内容生成算子
+        self.file_generator = FileContextGenerator(llm_serving=self.llm)
+
+        # 基于模板的生成算子
+        self.content_generator = FormatStrPromptedAgenticGenerator(
+            llm_serving=self.llm,
+            prompt_template=FormatStrPrompt,
+            system_prompt="You are a helpful assistant.",
+        )
+
+    def forward(self):
+        # 步骤 0: 根据任务生成文件内容
+        self.file_generator.run(
+            self.storage.step(),
+            input_files_key="file_paths",  # 文件路径列表列
+            input_question_key="task_description",  # 任务描述列
+            output_key="file_contents",  # 输出：{filename: content_data}
+        )
+
+        # 步骤 1: 使用文件内容生成其他数据
+        self.content_generator.run(
+            self.storage.step(),
+            input_files_data_key="file_contents",  # 传入文件内容数据
+            input_task_key="task_description",
+            output_key="additional_content",
+        )
+```
+
+**支持的文件格式：**
+
+| 类别   | 格式                       | 说明                         |
+| ------ | -------------------------- | ---------------------------- |
+| 表格   | CSV, XLSX, XLS             | 电子表格数据                 |
+| 文档   | PDF, DOCX, DOC, MD         | 报告、文档                   |
+| 演示   | PPTX, PPT                  | 演示文稿                     |
+| 结构化 | JSON, XML, HTML, YAML, YML | 配置文件、数据交换           |
+| 文本   | TXT, LOG                   | 纯文本、日志                 |
+| 代码   | PY, JS, TS                 | Python/JavaScript/TypeScript |
+
+### 7.4 完整示例：生成测试数据集
+
+```python
+# tasks.jsonl 内容示例：
+# {"id": 1, "file_paths": ["/workspace/sales_data.xlsx"], "task_description": "生成 2026 年第一季度销售数据"}
+# {"id": 2, "file_paths": ["/workspace/report.pdf"], "task_description": "生成项目进度报告"}
+
+from dataflow.pipeline import PipelineABC
+from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
+from dataflow.operators.agentic import FileContextGenerator
+from dataflow.serving import CLIOpenClawServing
+
+
+class TestDataGenerationPipeline(PipelineABC):
+    def __init__(self):
+        progress_storage = FileCacheStorage(cache_path="./cache")
+        super().__init__(progress_storage)
+
+        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
+        self.storage = FileStorage(
+            data_source=self.data_source,
+            id_key="id",
+            cache_path="./cache",
+            cache_type="jsonl",
+        )
+
+        self.llm = CLIOpenClawServing(
+            agent_id="main",
+            model="custom/Qwen3.5-122B-A10B",
+            max_workers=4,
+        )
+
+        self.file_generator = FileContextGenerator(llm_serving=self.llm)
+
+    def forward(self):
+        self.file_generator.run(
+            self.storage.step(),
+            input_files_key="file_paths",
+            input_question_key="task_description",
+            output_key="file_contents",
+        )
+
+
+if __name__ == "__main__":
+    pipeline = TestDataGenerationPipeline()
+    pipeline.compile()
+    pipeline.forward()
+    print("✅ 测试文件生成完成！")
+```
+
+---
+
 ## 版本历史
 
 ### [1.0.3] - 2026-04-02
