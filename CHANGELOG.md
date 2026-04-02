@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.3] - 2026-04-02
+
+### Added
+
+- **核心算子模块** (`7fee81e`)
+  - `JsonParseFilter`: JSON 解析和验证算子，支持字段类型检查、正则匹配、数值范围验证
+  - `NestExtractOperator`: 嵌套 JSON 提取算子，支持点号路径 (`user.address.city`) 和数组索引 (`items[0].name`) 语法
+  - `FormatStrPromptedAgenticGenerator`: 基于模板提示的 Agent 生成算子，支持传递文件内容数据
+  - `FileContextGenerator`: 文件内容合成算子，根据文件路径和问题生成表格/文档/PPT/代码等内容
+
+- **二进制文件生成系统** (`95b10c0`, `7055f70`)
+  - `generate_binary_files.py`: 支持 11 种格式的测试文件生成 (CSV/XLSX/PDF/DOCX/PPTX/JSON/XML/HTML/YAML/TXT/Py/JS/TS)
+  - `CLIOpenClawServing` 增强：支持在 LLM 调用前注入二进制文件内容数据
+  - 5 类 Prompt 模板：table/document/presentation/structured/text/code
+
+- **依赖更新** (`a095d18`)
+  - 新增 `openpyxl` - Excel 文件读写
+  - 新增 `python-pptx` - PPTX 文件生成
+  - 新增 `reportlab` - PDF 文件生成
+  - 新增 `docx` - DOCX 文件生成
+
+### Fixed
+
+- **文件验证和路径处理** (`5186b80`)
+  - `generate_file` 内容验证逻辑修复
+  - 路径处理从 `/workspace/` 到 agent workspace 的转换
+
+- **Pipeline 输入检查** (`cd0b60a`)
+  - Pipeline 步骤输入键检查增强
+
+### Changed
+
+- **版本更新** (`version.py`)
+  - 从 v1.0.2 升级到 v1.0.3
+
+---
+
 ## [1.0.2] - 2026-04-01
 
 ### Fixed
