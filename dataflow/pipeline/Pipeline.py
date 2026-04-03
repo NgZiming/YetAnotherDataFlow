@@ -154,6 +154,11 @@ class PipelineABC(ABC):
             self.storage.is_partitioned = True
             self.logger.info(f"✅ 分片已完成 ({self._partitions} 片)，跳过")
 
+        # 同步更新所有 operator node 中的 storage 的 is_partitioned 属性
+        for node in self.op_nodes_list:
+            if node.storage is not None and isinstance(node.storage, DataFlowStorage):
+                node.storage.is_partitioned = True
+
     def _build_operator_nodes_graph(self):
         """构建算子节点图 📊
 
