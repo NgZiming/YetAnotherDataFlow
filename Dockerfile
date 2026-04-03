@@ -1,39 +1,57 @@
-# Base Image
-FROM --platform=linux/amd64 nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# Dockerfile with Miniconda and Python 3.12 environment
+FROM ubuntu:24.04
 
-# Environment variables
-ENV DEBIAN_FRONTEND=noninteractive \
-    LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
 
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-venv python3-pip python3-dev \
-      git build-essential pkg-config \
-      ffmpeg libgl1 libglib2.0-0 \
-      ca-certificates curl \
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    bzip2 \
+    libreoffice \
+    ca-certificates \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Python environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
-RUN python -m pip install --upgrade pip wheel
+# Install Node.js 24 via NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    apt-get install -y nodejs && \
+    node -v && npm -v && \
+    npm install -g openclaw && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Setup pip mirror
-RUN mkdir -p /etc && \
-    printf "[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\ntimeout = 120\ntrusted-host = pypi.tuna.tsinghua.edu.cn\n" > /etc/pip.conf
+# Install Miniconda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/miniconda && \
+    rm /tmp/miniconda.sh && \
+    /opt/miniconda/bin/conda init bash
 
-# Set up the application directory and copy source code into a subdirectory
-# DataFlow Commit b27d6bc24cf86835fda7bc6fe1a289cb9eb63bd2
-WORKDIR /app
-COPY . ./DataFlow/
+ENV PATH="/opt/miniconda/bin:${PATH}"
 
-# Set the working directory to the project source
-WORKDIR /app/DataFlow
+# Create Python 3.12 environment
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+RUN conda create -n dataflow python=3.12 -y
 
-# Install the project in editable mode with its dependencies
-RUN pip install -e ".[vllm]"
+SHELL ["/bin/bash", "-c"]
 
-# Set the container's default command to an interactive shell
-CMD ["/bin/bash"]
+RUN source activate dataflow && pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+
+# Copy local dataflow code into container
+COPY . .
+
+RUN source activate dataflow && pip install --no-cache-dir -e .
+
+WORKDIR /workspace
+
+# Copy and setup entrypoint script
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Put your skills here
+# COPY skills /root/skills
+
+# Set entrypoint for OpenClaw initialization
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
