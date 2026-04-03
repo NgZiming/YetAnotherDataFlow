@@ -311,11 +311,17 @@ class PartitionableStorage(StorageABC):
 
     @property
     @abstractmethod
-    def batch_size(self) -> Optional[int]:
-        """批次大小，None 表示不分批。
+    def is_partitioned(self) -> bool:
+        """是否已完成分片。
 
-        用于计算分片数量：num_partitions = (total_rows + batch_size - 1) // batch_size
+        用于 Pipeline 判断是否需要调用 split_input()。
         """
+        pass
+
+    @is_partitioned.setter
+    @abstractmethod
+    def is_partitioned(self, value: bool) -> None:
+        """设置分片完成状态。"""
         pass
 
     @property

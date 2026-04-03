@@ -176,8 +176,14 @@ class FileStorage(PartitionableStorage):
     # ---------- 控制面实现 ----------
 
     @property
-    def batch_size(self) -> Optional[int]:
-        return self._batch_size
+    def is_partitioned(self) -> bool:
+        """是否已完成分片。"""
+        return self._is_partitioned
+
+    @is_partitioned.setter
+    def is_partitioned(self, value: bool) -> None:
+        """设置分片完成状态。"""
+        self._is_partitioned = value
 
     @property
     def batch_step(self) -> int:
@@ -224,28 +230,27 @@ class FileStorage(PartitionableStorage):
             self.logger.critical(f"估算行数 {total} < partitions {num_partitions}")
             raise Exception("分片数过多")
 
-        if num_partitions > 1:
-            self._batch_size = (total + num_partitions - 1) // num_partitions
-        else:
-            self._batch_size = 9223372036854775807
-
-        self.logger.info(f"📊 估算行数：{total}, 每片：{self._batch_size}")
+        # ✅ 使用局部变量，不存为 self 属性
+        batch_size = (
+            (total + num_partitions - 1) // num_partitions
+            if num_partitions > 1
+            else 9223372036854775807
+        )
+        self.logger.info(f"📊 估算行数：{total}, 每片：{batch_size}")
         partition_paths = []
         rows = self.data_source.read()
 
         actual_total = 0
         while True:
             part: list[dict] = []
-            for row in tqdm(
-                rows, total=self._batch_size, desc="Reading Rows", leave=False
-            ):
+            for row in tqdm(rows, total=batch_size, desc="Reading Rows", leave=False):
                 # 检查并合成缺失的 id_key
                 if self.id_key not in row:
                     row[self.id_key] = self.id_synthesizer.synthesize(row, actual_total)
 
                 part.append(row)
                 actual_total += 1
-                if len(part) >= self._batch_size:
+                if len(part) >= batch_size:
                     break
 
             if not len(part):
@@ -266,7 +271,7 @@ class FileStorage(PartitionableStorage):
                     f"Partition {len(partition_paths)} with {len(part)} rows created."
                 )
 
-            if len(part) < self._batch_size:
+            if len(part) < batch_size:
                 break
 
         if actual_total != total:
