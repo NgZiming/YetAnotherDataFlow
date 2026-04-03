@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4.hotfix] - 2026-04-03
+
+### Fixed
+
+- **Pipeline.is_partitioned 同步问题** (`main`)  
+  - `Pipeline.compile()`: 在设置 `self.storage.is_partitioned = True` 后，同步更新所有 operator nodes 中的 storage
+  - 修复 `_build_operator_nodes_graph()` 在 `is_partitioned` 设置之前被调用导致的问题
+  - 确保 `execute_workload()` 中 `copy.copy(node.storage)` 获得正确的 `is_partitioned` 值
+
+- **entrypoint.sh heredoc 语法** (`main`)  
+  - 修复 `openclaw config set` 不支持直接 heredoc 的问题
+  - 改为使用 `$(cat << 'EOF')` 命令替换
+  - 移除环境变量默认值，强制要求设置
+  - 修改 gateway 启动方式为 `nohup openclaw gateway run > gateway.log 2>&1 &`
+
+---
+
 ## [1.0.4] - 2026-04-03
 
 ### Added
