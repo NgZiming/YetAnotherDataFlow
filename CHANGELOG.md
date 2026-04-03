@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-04-03
+
+### Added
+
+- **Pipeline 分片跳过优化** (`b13860c`)
+  - `Pipeline.compile()`: 检查 progress 中的 `total_shards`，已分片则跳过 `split_input()`
+  - 新增 `is_partitioned` 属性到 `PartitionableStorage` 接口
+  - 支持任务重启时跳过已完成分片，避免重复处理
+
+- **Storage 接口优化** (`b13860c`)
+  - 移除 `batch_size` 属性（分片时动态计算）
+  - `get_keys()` 从 DataSource 读取字段名
+
+### Changed
+
+- **Docker 镜像优化** (`13bb3bb`)
+  - 代码拷贝路径改为 `/opt/dataflow`
+  - 更新 `.dockerignore` 排除非运行时文件
+    - `dataflow/example/` - 示例数据
+    - `dataflow/cli_funcs/` - CLI 功能
+    - `dataflow/webui/` - Web UI
+    - `static/` - 静态资源
+
+- **本地安装支持** (`85319e6`)
+  - Dockerfile 改为安装本地文件夹而非远程 git
+  - 移除包含敏感信息的远程 git URL
+
+### Removed
+
+- **BatchedPipeline 相关代码** (`b13860c`)
+  - 删除 `BatchedPipelineABC`, `StreamBatchedPipelineABC` 类
+  - 删除 `BatchedFileStorage`, `StreamBatchedFileStorage` 类
+  - 删除测试文件 `test/test_batched_pipeline.py`, `test/test_batched_stream_pipeline.py`
+  - 删除模板文件 `my_pipeline.py`
+
+### Fixed
+
+- **Pipeline 进度初始化** (`b13860c`)
+  - `progress["partitions"]` 列表长度改为 `self._partitions`
+  - `_build_operator_nodes_graph()` 移到 progress 创建之前
+
+- **Pipeline 类名获取** (`b13860c`)
+  - `pipeline_class` 改为 `type(self).__bases__[0].__name__`
+  - 确保获取基类名 (`PipelineABC` 或 `PartitionPipelineParallelRun`)
+
+- **依赖修复** (`589a542`)
+  - `requirements.txt` 新增依赖
+
+---
+
 ## [1.0.3] - 2026-04-02
 
 ### Added
