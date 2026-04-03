@@ -24,3 +24,44 @@ build/
 .venv
 venv/
 env/
+
+# Logs
+*.log
+logs/
+
+# Tests
+test/
+tests/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Data files
+data/
+dataflow/statics/
+
+# Examples
+dataflow/example/
+
+# CLI (not needed for runtime)
+dataflow/cli_funcs/
+
+# WebUI (not needed for runtime)
+dataflow/webui/
+
+# Static assets
+static/
+
+# Test configs
+pytest.ini
+
+# License
+LICENSE
