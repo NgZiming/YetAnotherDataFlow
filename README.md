@@ -2,13 +2,44 @@ DataFlow is an excellent tool, but the project was launched too quickly and I co
 
 After making my changes, I found the codebase had drifted too far from v1.0.8 to merge back, so I created a separate repository.
 
-main differences：
+main differences:
 1. S3 support
 2. Partitioned / Parallel run / Dependency Analytics
 3. read/write Splitting
 4. openclaw serving
+5. **Docker Image Support** - Build DataFlow image with OpenClaw
 
 Welcome to use it.
+
+## 🐳 Docker Image Build
+
+This project provides a Dockerfile to build a DataFlow image with OpenClaw:
+
+```bash
+# Build image
+docker build -t dataflow:latest .
+
+# Run container
+docker run -it --rm dataflow:latest
+```
+
+**Image Features:**
+- Python 3.12 + Miniconda environment management
+- Node.js 24 + OpenClaw CLI
+- DataFlow core code and operators
+- Optimized `.dockerignore` to exclude non-runtime files
+
+**Usage Example:**
+
+```bash
+# After entering the container, use dataflow command directly
+dataflow -v
+
+# Run Pipeline
+python my_pipeline.py
+```
+
+See [Dockerfile](Dockerfile) and [.dockerignore](.dockerignore) for detailed configuration.
 
 # DataFlow Pipeline Tutorial for Beginners
 
@@ -142,8 +173,8 @@ cat cache/partition_1.jsonl
 
 Output example:
 ```json
-{"id": 1, "raw_content": "Hello, world!", "translation": "你好，世界！"}
-{"id": 2, "raw_content": "DataFlow is awesome!", "translation": "DataFlow 太棒了！"}
+{"id": 1, "raw_content": "Hello, world!", "translation": "你好,世界!"}
+{"id": 2, "raw_content": "DataFlow is awesome!", "translation": "DataFlow 太棒了!"}
 {"id": 3, "raw_content": "Machine learning is fun", "translation": "机器学习很有趣"}
 ```
 
@@ -821,6 +852,56 @@ if __name__ == "__main__":
 ---
 
 ## Changelog
+
+### [1.0.4] - 2026-04-03
+
+#### Added
+
+- **Pipeline Partition Skip Optimization**
+  - `Pipeline.compile()`: Check `total_shards` in progress, skip `split_input()` if already partitioned
+  - Added `is_partitioned` property to `PartitionableStorage` interface
+  - Support skipping completed partitions on task restart, avoiding reprocessing
+
+- **Storage Interface Optimization**
+  - Removed `batch_size` property (dynamically calculated during partitioning)
+  - `get_keys()` reads field names from DataSource
+
+#### Changed
+
+- **Docker Image Optimization**
+  - Code copy path changed to `/opt/dataflow`
+  - Updated `.dockerignore` to exclude non-runtime files
+    - `dataflow/example/` - Example data
+    - `dataflow/cli_funcs/` - CLI features
+    - `dataflow/webui/` - Web UI
+    - `static/` - Static assets
+
+- **Local Installation Support**
+  - Dockerfile now installs from local folder instead of remote git
+  - Removed remote git URL containing sensitive information
+
+#### Removed
+
+- **BatchedPipeline Related Code**
+  - Deleted `BatchedPipelineABC`, `StreamBatchedPipelineABC` classes
+  - Deleted `BatchedFileStorage`, `StreamBatchedFileStorage` classes
+  - Deleted test files `test/test_batched_pipeline.py`, `test/test_batched_stream_pipeline.py`
+  - Deleted template file `my_pipeline.py`
+
+#### Fixed
+
+- **Pipeline Progress Initialization**
+  - `progress["partitions"]` list length changed to `self._partitions`
+  - `_build_operator_nodes_graph()` moved before progress creation
+
+- **Pipeline Class Name Retrieval**
+  - `pipeline_class` changed to `type(self).__bases__[0].__name__`
+  - Ensures base class name is retrieved (`PipelineABC` or `PartitionPipelineParallelRun`)
+
+- **Dependency Fixes**
+  - `requirements.txt` added dependencies
+
+---
 
 ### [1.0.3] - 2026-04-02
 
