@@ -40,7 +40,8 @@ SHELL ["/bin/bash", "-c"]
 RUN source activate dataflow && pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
 # Copy local dataflow code into container
-COPY . .
+COPY . /opt/dataflow
+WORKDIR /opt/dataflow
 
 RUN source activate dataflow && pip install --no-cache-dir -e .
 
