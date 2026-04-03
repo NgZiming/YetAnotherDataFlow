@@ -7,15 +7,15 @@ if [ ! -d "$HOME/.openclaw" ]; then
     # Create basic workspace structure
     mkdir -p "$HOME/.openclaw/workspace"
 
-    openclaw config set models.providers.vllm << EOF
+    openclaw config set models.providers.vllm "$(cat << 'EOF'
 {
-  "baseUrl": "${VLLM_BASE_URL:-http://xxxxxxxxxx:8000/v1}",
+  "baseUrl": "${VLLM_BASE_URL}",
   "apiKey": "${VLLM_API_KEY}",
   "api": "openai-completions",
   "models": [
     {
-      "id": "${VLLM_MODEL_ID:-xxxxxxx}",
-      "name": "${VLLM_MODEL_NAME:-xxxxxxx}",
+      "id": "${VLLM_MODEL_ID}",
+      "name": "${VLLM_MODEL_NAME}",
       "reasoning": false,
       "input": ["text"],
       "cost": {
@@ -30,7 +30,9 @@ if [ ! -d "$HOME/.openclaw" ]; then
   ]
 }
 EOF
-    openclaw models set ${VLLM_MODEL_ID:-vllm/MY_MODEL}
+)"
+
+    openclaw models set "vllm/${VLLM_MODEL_ID}"
     openclaw config set gateway.mode local
 
     # Create auth profiles for vllm provider
@@ -56,8 +58,6 @@ EOF
   }
 }
 EOF
-
-    openclaw gateway install
 
     echo "OpenClaw configuration initialized."
 fi
