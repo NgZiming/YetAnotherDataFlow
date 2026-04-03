@@ -1,4 +1,4 @@
-__version__ = '1.0.4.hotfix'
+__version__ = '1.0.4.post1'
 short_version = __version__
 
 def parse_version_info(version_str):
