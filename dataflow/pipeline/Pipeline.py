@@ -87,21 +87,15 @@ class PipelineABC(ABC):
         """编译管道 🔧
 
         执行以下操作：
-        1. 标记管道为已编译状态
-        2. 将所有 Operator 包装为 AutoOP（自动注入运行时信息）
-        3. 调用 forward() 触发包装回调，收集 OPRuntime
-        4. 构建算子节点图，验证字段名完整性
+        1. 检查/创建 progress（用于分片状态追踪）
+        2. 检查分片是否已完成，跳过已完成的分片
+        3. 标记管道为已编译状态
+        4. 将所有 Operator 包装为 AutoOP（自动注入运行时信息）
+        5. 调用 forward() 触发包装回调，收集 OPRuntime
+        6. 构建算子节点图，验证字段名完整性
         """
 
-        # 兼容旧代码：如果子类未设置 _partitions，默认为 1（不分片）
-        if not hasattr(self, "_partitions"):
-            self._partitions = 1
-
-        if hasattr(self, "storage") and isinstance(self.storage, DataFlowStorage):
-            self.logger.info(f"📦 分割输入数据为 {self._partitions} 个分片...")
-            # 分片操作移到父类 compile() 中统一处理，这样子类不需要重写 compile()
-            parts = self.storage.split_input(self._partitions)
-            self._partitions = len(parts)
+        assert hasattr(self, "storage") and isinstance(self.storage, DataFlowStorage)
 
         self.compiled = True
         # 包装所有 Operator 为 AutoOP
@@ -119,6 +113,46 @@ class PipelineABC(ABC):
             f"🔧 编译管道 | 验证 {len(self.op_runtimes)} 个算子的字段名完整性..."
         )
         self._build_operator_nodes_graph()
+
+        # ✅ 首次创建或获取 progress
+        progress = self.cache_storage.get_progress()
+        if not progress or progress.get("total_shards", 0) == 0:
+            # 分片未完成，执行 split_input
+            self.logger.info(f"📦 分割输入数据为 {self._partitions} 个分片...")
+            parts = self.storage.split_input(self._partitions)
+            self._partitions = len(parts)
+
+            progress = ProgressInfo(
+                shard_type="partition",
+                partitions=[
+                    PartitionOrBatchProgress(
+                        id=i,
+                        completed_steps=[],
+                        current_steps=[],
+                        steps_rows_nums={},
+                    )
+                    for i in range(self._partitions)
+                ],
+                total_shards=self._partitions,
+                total_steps=len(self.op_nodes_list) - 2,
+                start_time=None,
+                last_update=None,
+                overall_status="running",
+                error_message=None,
+                extra={},
+                pipeline_class=type(self).__bases__[0].__name__,
+                op_list=[
+                    node.op_name
+                    for node in self.op_nodes_list
+                    if node.op_obj is not None
+                ],
+            )
+            self.cache_storage.record_progress(progress)
+        else:
+            # 分片已完成，跳过 split_input
+            self._partitions = progress["total_shards"]
+            self.storage.is_partitioned = True
+            self.logger.info(f"✅ 分片已完成 ({self._partitions} 片)，跳过")
 
     def _build_operator_nodes_graph(self):
         """构建算子节点图 📊
@@ -536,31 +570,6 @@ class PipelineABC(ABC):
         """
         if resume_from_last:
             progress = self.cache_storage.get_progress()
-            if not progress or progress.get("total_shards", 0) == 0:
-                progress = ProgressInfo(
-                    shard_type="partition",
-                    total_steps=len(self.op_nodes_list) - 2,
-                    total_shards=1,
-                    partitions=[
-                        PartitionOrBatchProgress(
-                            id=0,
-                            completed_steps=[],
-                            current_steps=[],
-                            steps_rows_nums={},
-                        )
-                    ],
-                    overall_status="running",
-                    start_time=None,
-                    last_update=None,
-                    error_message=None,
-                    extra={},
-                    pipeline_class="PipelineABC",
-                    op_list=[
-                        node.op_name
-                        for node in self.op_nodes_list
-                        if node.op_obj is not None
-                    ],
-                )
             assert progress["pipeline_class"] == "PipelineABC"
             assert progress["total_steps"] == len(self.op_nodes_list) - 2
             assert progress["op_list"] == [
@@ -931,34 +940,6 @@ class PartitionPipelineParallelRun(PipelineABC):
         """
         # 读取上次中断时的进度
         progress: ProgressInfo = self.cache_storage.get_progress()
-
-        # 初始化：如果是全新运行，则创建新的进度信息
-        if not progress or progress.get("total_shards", 0) == 0:
-            progress = ProgressInfo(
-                shard_type="partition",
-                total_steps=len(self.op_nodes_list) - 2,
-                total_shards=self._partitions,
-                partitions=[
-                    PartitionOrBatchProgress(
-                        id=i,
-                        completed_steps=[],
-                        current_steps=[],
-                        steps_rows_nums={},
-                    )
-                    for i in range(self._partitions)
-                ],
-                overall_status="running",
-                start_time=None,
-                last_update=None,
-                error_message=None,
-                extra={},
-                pipeline_class="PartitionPipelineParallelRun",
-                op_list=[
-                    node.op_name
-                    for node in self.op_nodes_list
-                    if node.op_obj is not None
-                ],
-            )
         assert progress["pipeline_class"] == "PartitionPipelineParallelRun"
         assert progress["total_steps"] == len(self.op_nodes_list) - 2
         assert progress["op_list"] == [
