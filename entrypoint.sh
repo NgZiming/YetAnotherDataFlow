@@ -64,7 +64,7 @@ fi
 
 # Start OpenClaw gateway (loopback only)
 echo "Starting OpenClaw gateway..."
-openclaw gateway start
+nohup openclaw gateway run > gateway.log 2>&1 &
 
 # Activate dataflow environment and keep container running
 source /opt/miniconda/etc/profile.d/conda.sh
