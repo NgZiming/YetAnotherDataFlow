@@ -879,7 +879,22 @@ class PartitionPipelineParallelRun(PipelineABC):
                         continue
                     dependencies[wl].add(Workload(partition, key_node.ptr[-1].index))
 
-        # 第三步：为 filter 后续步骤添加依赖
+        # 第三步：Filter 步骤依赖前面的所有步骤
+        # 如果某个 step 是 filter，那么它必须等待前面所有步骤完成
+        # 原因：Filter 需要看到完整的数据集才能做出正确的过滤决策
+        for partition in range(self._partitions):
+            for filter_step in filter_steps:
+                # 对于每个 Filter，让它依赖前面的所有步骤
+                for prev_step in range(filter_step):
+                    prev_wl = Workload(partition, prev_step)
+                    filter_wl = Workload(partition, filter_step)
+                    if prev_wl not in dependencies[filter_wl]:
+                        dependencies[filter_wl].add(prev_wl)
+                        self.logger.debug(
+                            f"🔗 添加 Filter 前置依赖：filter_step={filter_step} 依赖 prev_step={prev_step}"
+                        )
+
+        # 第四步：为 filter 后续步骤添加依赖
         # 如果某个 step 是 filter，那么它之后的所有 step 都应该依赖这个 filter
         for partition in range(self._partitions):
             for idx, node in enumerate(self.op_nodes_list):
@@ -912,16 +927,60 @@ class PartitionPipelineParallelRun(PipelineABC):
             )
 
         # 打印 partition=self._partitions 的完整依赖图（用于调试）
+        # 按照依赖层级（拓扑排序）进行打印
         self.logger.info(f"📋 依赖图 (partition={self._partitions}):")
-        partition_1_deps = [
-            (wl, deps)
+        partition_wls = {
+            wl: deps
             for wl, deps in simplified_dependencies.items()
-            if wl.partition == self._partitions - 1 and len(deps) > 0
-        ]
-        for wl, deps in sorted(partition_1_deps, key=lambda x: x[0].step):
-            op_name = self.op_nodes_list[wl.step].op_name
-            dep_strs = [f"{self.op_nodes_list[d.step].op_name}" for d in deps]
-            self.logger.info(f"  {op_name} (step={wl.step}) → [{', '.join(dep_strs)}]")
+            if wl.partition == self._partitions - 1
+        }
+
+        # 计算每个 workload 的层级（没有依赖的层级为 0）
+        def get_level(wl, memo={}):
+            if wl not in partition_wls:
+                return 0
+            if wl in memo:
+                return memo[wl]
+            deps = partition_wls[wl]
+            if not deps:
+                memo[wl] = 0
+                return 0
+            # 层级 = max(依赖的层级) + 1
+            max_dep_level = max(get_level(d, memo) for d in deps)
+            memo[wl] = max_dep_level + 1
+            return memo[wl]
+
+        # 计算所有 workload 的层级
+        levels_memo = {}
+        for wl in partition_wls.keys():
+            get_level(wl, levels_memo)
+
+        # 按层级分组
+        level_groups: dict[int, list] = {}
+        for wl, level in levels_memo.items():
+            if level not in level_groups:
+                level_groups[level] = []
+            level_groups[level].append(wl)
+
+        # 按层级打印
+        for level in sorted(level_groups.keys()):
+            wls_at_level = sorted(level_groups[level], key=lambda x: x.step)
+            self.logger.info(f"  ━━━ 层级 {level} ━━━")
+            for wl in wls_at_level:
+                op_name = self.op_nodes_list[wl.step].op_name
+                deps = partition_wls[wl]
+                if deps:
+                    dep_strs = [
+                        f"{self.op_nodes_list[d.step].op_name}(L{levels_memo[d]})"
+                        for d in sorted(deps, key=lambda x: x.step)
+                    ]
+                    self.logger.info(
+                        f"    ├─ {op_name} (step={wl.step}) ← [{', '.join(dep_strs)}]"
+                    )
+                else:
+                    self.logger.info(
+                        f"    ├─ {op_name} (step={wl.step}) ← [无依赖，入口节点]"
+                    )
 
         # 创建用于运行时检查的副本
         dependencies_checks = copy.deepcopy(simplified_dependencies)
