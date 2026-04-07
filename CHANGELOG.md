@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-04-07
+
+### Fixed
+
+- **Unicode surrogate 字符清理** (`data_parser.py`)
+  - 新增 `clean_surrogates()` 工具函数，递归清理字符串中的 U+D800-U+DFFF 字符
+  - 在 `DataParser` 基类中添加 `_clean_data_for_serialization()` 静态方法
+  - 所有 Parser (Json/Jsonl/Csv/Parquet/Pickle) 的 `serialize_to_file()` 都会先清理数据
+  - 修复 `'utf-8 codec can't encode character surrogates not allowed'` 错误
+
+---
+
 ## [1.0.4.post1] - 2026-04-03
 
 ### Fixed
