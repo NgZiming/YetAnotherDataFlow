@@ -68,6 +68,27 @@ class DataParser(ABC):
     - Pickle: PickleParser
     """
 
+    # 默认临时目录，可被子类覆盖
+    DEFAULT_TEMP_DIR = tempfile.gettempdir()  # 系统默认临时目录（通常是 /tmp）
+
+    @classmethod
+    def set_temp_dir(cls, temp_dir: str) -> None:
+        """设置临时文件创建目录。
+
+        Args:
+            temp_dir: 临时目录路径（不能为 None）
+        """
+        cls.DEFAULT_TEMP_DIR = temp_dir
+
+    @classmethod
+    def _get_temp_dir(cls) -> str:
+        """获取临时目录路径。
+
+        Returns:
+            临时目录路径，默认为系统默认临时目录
+        """
+        return cls.DEFAULT_TEMP_DIR
+
     @staticmethod
     def _clean_data_for_serialization(data: Any) -> Any:
         """清理数据中的 Unicode surrogate 字符，准备序列化。
@@ -123,6 +144,26 @@ class DataParser(ABC):
         """
         pass
 
+    def _create_temp_file(
+        self, suffix: str = ""
+    ) -> tuple[str, tempfile._TemporaryFileWrapper]:
+        """创建临时文件。
+
+        Args:
+            suffix: 文件后缀名
+
+        Returns:
+            (file_path, file_obj) 元组
+        """
+        temp_dir = self._get_temp_dir()
+        if temp_dir:
+            # 确保目录存在
+            os.makedirs(temp_dir, exist_ok=True)
+            tmp = tempfile.NamedTemporaryFile(dir=temp_dir, delete=False, suffix=suffix)
+        else:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        return tmp.name, tmp
+
 
 class JsonParser(DataParser):
     """JSON 格式解析器。
@@ -150,18 +191,19 @@ class JsonParser(DataParser):
             ValueError: JSON 解析失败时抛出
         """
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            shutil.copyfileobj(data, tmp)
-            file_path = tmp.name
-
+        file_path, tmp = self._create_temp_file(suffix=".json")
         try:
+            shutil.copyfileobj(data, tmp)
+            tmp.close()  # 关闭临时文件
+
             for row in pd.read_json(file_path).to_dict("records"):
                 yield row
         except Exception as e:
             logger.error(f"❌ JSON 解析失败：{e}")
             raise ValueError(f"JSON 解析失败：{e}")
         finally:
-            os.unlink(file_path)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSON 文件。
@@ -213,13 +255,11 @@ class JsonlParser(DataParser):
         """
         self.total_read_file += 1
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=f".{self.total_read_file}"
-        ) as tmp:
-            shutil.copyfileobj(data, tmp)
-            file_path = tmp.name
-
+        file_path, tmp = self._create_temp_file(suffix=f".{self.total_read_file}")
         try:
+            shutil.copyfileobj(data, tmp)
+            tmp.close()  # 关闭临时文件
+
             with open(file_path) as f:
                 for line in f:
                     try:
@@ -227,15 +267,12 @@ class JsonlParser(DataParser):
                         yield d
                     except Exception as e:
                         logger.warning(f"skip json line: {line[:100]}")
-            # for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size, engine="pyarrow"):
-            #     chunk: pd.DataFrame
-            #     for _, row in chunk.iterrows():
-            #         yield row.to_dict()
         except Exception as e:
             logger.error(f"❌ JSONL 解析失败：{e}")
             raise ValueError(f"JSONL 解析失败：{e}")
         finally:
-            os.unlink(file_path)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSONL 文件。
@@ -282,11 +319,11 @@ class CsvParser(DataParser):
             ValueError: CSV 解析失败时抛出
         """
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            shutil.copyfileobj(data, tmp)
-            file_path = tmp.name
-
+        file_path, tmp = self._create_temp_file(suffix=".csv")
         try:
+            shutil.copyfileobj(data, tmp)
+            tmp.close()  # 关闭临时文件
+
             for chunk in pd.read_csv(file_path, chunksize=chunk_size):
                 chunk: pd.DataFrame
                 for _, row in chunk.iterrows():
@@ -295,7 +332,8 @@ class CsvParser(DataParser):
             logger.error(f"❌ CSV 解析失败：{e}")
             raise ValueError(f"CSV 解析失败：{e}")
         finally:
-            os.unlink(file_path)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 CSV 文件。
@@ -344,18 +382,19 @@ class ParquetParser(DataParser):
             ValueError: Parquet 解析失败时抛出
         """
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            shutil.copyfileobj(data, tmp)
-            file_path = tmp.name
-
+        file_path, tmp = self._create_temp_file(suffix=".parquet")
         try:
+            shutil.copyfileobj(data, tmp)
+            tmp.close()  # 关闭临时文件
+
             for row in pd.read_parquet(file_path).to_dict("records"):
                 yield row
         except Exception as e:
             logger.error(f"❌ Parquet 解析失败：{e}")
             raise ValueError(f"Parquet 解析失败：{e}")
         finally:
-            os.unlink(file_path)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 Parquet 文件。
@@ -406,11 +445,11 @@ class PickleParser(DataParser):
             Pickle 格式存在安全风险，仅用于受信任的数据源。
         """
         # file-like 对象：先拷贝到临时文件
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            shutil.copyfileobj(data, tmp)
-            file_path = tmp.name
-
+        file_path, tmp = self._create_temp_file(suffix=".pkl")
         try:
+            shutil.copyfileobj(data, tmp)
+            tmp.close()  # 关闭临时文件
+
             # Pickle 不支持 chunksize，需要全部加载
             df = pd.read_pickle(file_path)
             for _, row in df.iterrows():
@@ -419,7 +458,8 @@ class PickleParser(DataParser):
             logger.error(f"❌ Pickle 解析失败：{e}")
             raise ValueError(f"Pickle 解析失败：{e}")
         finally:
-            os.unlink(file_path)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 Pickle 文件。
