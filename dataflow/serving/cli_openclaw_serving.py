@@ -31,6 +31,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from tqdm import tqdm
+
 from dataflow.core import LLMServingABC
 from dataflow.logger import get_logger
 
@@ -230,7 +232,7 @@ def load_session_new_messages(
 # ============================================================================
 
 
-def _execute_single_query(
+def _execute_query_once(
     agent_id: str,
     user_query: str,
     timeout: int,
@@ -238,7 +240,7 @@ def _execute_single_query(
     input_files_data: Dict,
 ) -> str:
     """
-    执行单个查询请求（使用预先创建的 agent）。
+    执行单个查询请求（单次尝试，不重试）。
 
     Args:
         agent_id: Agent 标识符
@@ -248,7 +250,10 @@ def _execute_single_query(
         input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
 
     Returns:
-        助手的回复文本，如果执行失败则返回空字符串
+        助手的回复文本
+
+    Raises:
+        Exception: 执行失败时抛出异常
     """
     # 记录 /new 之前的时间戳，只获取新 session 中的消息
     last_timestamp = time.time()
@@ -263,9 +268,8 @@ def _execute_single_query(
 
             try:
                 shutil.rmtree(assets_dir)
-                logger.info(f"已清空 assets 目录：{assets_dir}")
             except Exception as e:
-                logger.warning(f"清空 assets 目录失败：{e}")
+                logger.error(f"清空 assets 目录失败：{e}")
 
     new_file_paths: list[str] = []
     # 在 /new 之前生成二进制文件
@@ -283,7 +287,6 @@ def _execute_single_query(
                     {"filename": new_path.name, "content": content_data},
                     str(assets_dir),
                 )
-                logger.info(f"生成文件：{new_path}")
                 new_file_paths.append(str(new_path))
         except Exception as e:
             logger.error(f"生成文件失败：{e}")
@@ -300,7 +303,6 @@ def _execute_single_query(
             "-m",
             "/new",
         ]
-        logger.info(f"创建新 session: {' '.join(new_cmd)}")
         new_result = subprocess.run(
             new_cmd,
             capture_output=True,
@@ -309,11 +311,10 @@ def _execute_single_query(
             check=False,
         )
         if new_result.returncode != 0:
-            logger.warning(f"/new 命令失败：{new_result.stderr.strip()}")
             raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
         if len(new_file_paths) > 0:
-            user_query += f"\n下面是任务相关的文件: \n{new_file_paths}"
+            user_query += f"\n下面是任务相关的文件：\n{new_file_paths}"
         # 执行用户查询
         cmd = [
             "openclaw",
@@ -323,7 +324,6 @@ def _execute_single_query(
             "-m",
             user_query,
         ]
-        logger.info(" ".join(cmd))
 
         result = subprocess.run(
             cmd,
@@ -335,10 +335,8 @@ def _execute_single_query(
         if result.returncode != 0:
             raise Exception(result.stderr)
     except subprocess.TimeoutExpired:
-        logger.warning(f"查询超时 ({timeout}s)")
         raise
     except Exception:
-        logger.exception("查询失败")
         raise
     finally:
         # 清空 assets
@@ -347,6 +345,48 @@ def _execute_single_query(
     # 只读取新 session 中的消息
     messages = load_session_new_messages(agent_id, last_timestamp)
     return json.dumps({"messages": messages}, ensure_ascii=False) if messages else ""
+
+
+def _execute_single_query(
+    agent_id: str,
+    user_query: str,
+    timeout: int,
+    logger: Any,
+    input_files_data: Dict,
+    max_retries: int = 3,
+) -> str:
+    """
+    执行单个查询请求（使用预先创建的 agent，带重试）。
+
+    Args:
+        agent_id: Agent 标识符
+        user_query: 用户查询内容
+        timeout: 超时时间（秒）
+        logger: 日志对象
+        input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
+        max_retries: 最大重试次数，默认 3
+
+    Returns:
+        助手的回复文本，如果执行失败则返回空字符串
+    """
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return _execute_query_once(
+                agent_id, user_query, timeout, logger, input_files_data
+            )
+        except Exception as e:
+            last_error = e
+
+            if attempt < max_retries:
+                # 指数退避：1s, 2s, 4s...
+                backoff_time = 2**attempt
+                time.sleep(backoff_time)
+            else:
+                logger.error(f"请求失败 (after {max_retries + 1} attempts): {e}")
+
+    return ""
 
 
 # ============================================================================
@@ -372,6 +412,7 @@ class CLIOpenClawServing(LLMServingABC):
         timeout: int = 300,
         create_if_missing: bool = True,
         max_workers: int = 4,
+        max_retries: int = 3,
     ):
         """
         初始化 CLIOpenClawServing。
@@ -382,6 +423,7 @@ class CLIOpenClawServing(LLMServingABC):
             timeout: 单次查询超时时间（秒），默认 300
             create_if_missing: 如果 agent 不存在是否自动创建，默认 True
             max_workers: 并发 worker 数量，默认 4
+            max_retries: 请求失败时的最大重试次数，默认 3
         """
         self.logger = get_logger()
 
@@ -390,6 +432,7 @@ class CLIOpenClawServing(LLMServingABC):
         self.timeout = timeout
         self.create_if_missing = create_if_missing
         self.max_workers = max_workers
+        self.max_retries = max_retries
         self._initialized = False
         self._worker_agents: List[str] = []
 
@@ -399,7 +442,6 @@ class CLIOpenClawServing(LLMServingABC):
 
         if self.agent_id.lower() not in existing:
             if self.create_if_missing and self.model:
-                self.logger.info(f"创建 agent {self.agent_id} (model={self.model})...")
                 create_agent(self.agent_id, self.model)
             else:
                 raise RuntimeError(
@@ -418,9 +460,6 @@ class CLIOpenClawServing(LLMServingABC):
             worker_agent_id = f"{self.agent_id}-worker-{i}"
             if worker_agent_id.lower() not in existing:
                 if self.create_if_missing and self.model:
-                    self.logger.info(
-                        f"创建 worker agent {worker_agent_id} (model={self.model})..."
-                    )
                     create_agent(worker_agent_id, self.model)
 
                     # 等待 agent 注册成功
@@ -433,19 +472,12 @@ class CLIOpenClawServing(LLMServingABC):
                             check=False,
                         )
                         if worker_agent_id.lower() in check_result.stdout.lower():
-                            self.logger.info(f"Worker agent {worker_agent_id} 注册成功")
                             break
-                        if attempt == 9:
-                            self.logger.warning(
-                                f"Worker agent {worker_agent_id} 注册超时，继续..."
-                            )
                 else:
                     raise RuntimeError(
                         f"Worker agent {worker_agent_id} 不存在，请设置 model 参数"
                     )
             self._worker_agents.append(worker_agent_id)
-
-        self.logger.info(f"Worker agents 就绪：{self._worker_agents}")
 
     def start_serving(self) -> None:
         """启动服务（确保 agent 存在）。"""
@@ -455,10 +487,6 @@ class CLIOpenClawServing(LLMServingABC):
         self._ensure_agent()
         self._setup_worker_agents()
         self._initialized = True
-        self.logger.info(
-            f"OpenClaw CLI Serving 已就绪 "
-            f"(agent={self.agent_id}, workers={self.max_workers}, timeout={self.timeout}s)"
-        )
 
     def generate_from_input(
         self,
@@ -492,9 +520,9 @@ class CLIOpenClawServing(LLMServingABC):
                 f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
             )
 
-        self.logger.info(
-            f"处理 {len(user_inputs)} 个请求 (workers={self.max_workers})..."
-        )
+        total = len(user_inputs)
+        completed = 0
+        failed = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
@@ -509,25 +537,25 @@ class CLIOpenClawServing(LLMServingABC):
                     self.timeout,
                     self.logger,
                     input_files_data[i],
+                    self.max_retries,
                 )
                 futures[future] = i
 
-            results: list[str] = [""] * len(user_inputs)
-            completed = 0
-            failed = 0
+            results: list[str] = [""] * total
 
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    results[idx] = future.result()
-                    completed += 1
-                except Exception as e:
-                    self.logger.error(f"生成失败 (idx={idx}): {e}")
-                    results[idx] = ""
-                    failed += 1
+            with tqdm(total=total, desc="处理请求", unit="task") as pbar:
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        results[idx] = future.result()
+                        completed += 1
+                    except Exception as e:
+                        self.logger.error(f"[任务 {idx + 1}/{total}] 失败：{e}")
+                        results[idx] = ""
+                        failed += 1
+                    pbar.update(1)
 
-            self.logger.info(f"完成：{completed} 成功，{failed} 失败")
-            return results
+        return results
 
     def generate_embedding_from_input(self, texts: List[str]) -> List[List[float]]:
         """生成嵌入向量（CLI 模式不支持，返回空向量）。"""
@@ -541,7 +569,11 @@ class CLIOpenClawServing(LLMServingABC):
 
 
 def create_openclaw_serving(
-    agent_id: str = "main", model: Optional[str] = None, max_workers: int = 4, **kwargs
+    agent_id: str = "main",
+    model: Optional[str] = None,
+    max_workers: int = 4,
+    max_retries: int = 3,
+    **kwargs,
 ) -> CLIOpenClawServing:
     """
     创建 CLIOpenClawServing 实例的工厂函数。
@@ -550,8 +582,13 @@ def create_openclaw_serving(
         agent_id: Agent 标识符，默认 "main"
         model: 模型名称
         max_workers: 并发 worker 数量，默认 4
+        max_retries: 请求失败时的最大重试次数，默认 3
         **kwargs: 其他参数（timeout, create_if_missing）
     """
     return CLIOpenClawServing(
-        agent_id=agent_id, model=model, max_workers=max_workers, **kwargs
+        agent_id=agent_id,
+        model=model,
+        max_workers=max_workers,
+        max_retries=max_retries,
+        **kwargs,
     )
