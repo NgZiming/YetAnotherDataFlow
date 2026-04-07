@@ -22,6 +22,38 @@ from dataflow.logger import get_logger
 logger = get_logger()
 
 
+def clean_surrogates(obj: Any) -> Any:
+    """递归清理字符串中的 Unicode surrogate 字符。
+
+    Unicode surrogate 字符（U+D800-U+DFFF）在 UTF-8 中是无效的，
+    会导致编码错误。此函数遍历对象中的所有字符串，
+    移除或替换这些无效字符。
+
+    Args:
+        obj: 任意对象（str, dict, list, 或其他类型）
+
+    Returns:
+        清理后的对象，保持原类型
+
+    Example:
+        # 清理单个字符串
+        cleaned = clean_surrogates("hello\\udfe8 world")
+
+        # 清理嵌套数据结构
+        data = {"text": "hello\\udfe8", "list": ["item\\udfe8"]}
+        cleaned = clean_surrogates(data)
+    """
+    if isinstance(obj, str):
+        # 移除所有 surrogate 字符（U+D800 到 U+DFFF）
+        return "".join(c for c in obj if not ("\ud800" <= c <= "\udfff"))
+    elif isinstance(obj, dict):
+        return {k: clean_surrogates(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(clean_surrogates(item) for item in obj)
+    else:
+        return obj
+
+
 class DataParser(ABC):
     """数据解析器抽象基类。
 
@@ -35,6 +67,28 @@ class DataParser(ABC):
     - Parquet: ParquetParser
     - Pickle: PickleParser
     """
+
+    @staticmethod
+    def _clean_data_for_serialization(data: Any) -> Any:
+        """清理数据中的 Unicode surrogate 字符，准备序列化。
+
+        在序列化前调用此方法清理 DataFrame 或 dict 中的无效字符。
+
+        Args:
+            data: 要清理的数据（DataFrame, dict, list 等）
+
+        Returns:
+            清理后的数据
+        """
+        if isinstance(data, pd.DataFrame):
+            # 对 DataFrame 的每一列进行处理
+            cleaned_data = data.copy()
+            for col in cleaned_data.columns:
+                if cleaned_data[col].dtype == "object":
+                    cleaned_data[col] = cleaned_data[col].apply(clean_surrogates)
+            return cleaned_data
+        else:
+            return clean_surrogates(data)
 
     @abstractmethod
     def parse_to_dataframe(
@@ -120,6 +174,8 @@ class JsonParser(DataParser):
             ValueError: 序列化失败时抛出
         """
         try:
+            # 清理 Unicode surrogate 字符
+            df = self._clean_data_for_serialization(df)
             df.to_json(dst, orient="records", force_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"❌ JSON 序列化失败：{e}")
@@ -192,6 +248,8 @@ class JsonlParser(DataParser):
             ValueError: 序列化失败时抛出
         """
         try:
+            # 清理 Unicode surrogate 字符
+            df = self._clean_data_for_serialization(df)
             df.to_json(dst, orient="records", lines=True, force_ascii=False)
         except Exception as e:
             logger.error(f"❌ JSONL 序列化失败：{e}")
@@ -250,6 +308,8 @@ class CsvParser(DataParser):
             ValueError: 序列化失败时抛出
         """
         try:
+            # 清理 Unicode surrogate 字符
+            df = self._clean_data_for_serialization(df)
             df.to_csv(dst, index=False)
         except Exception as e:
             logger.error(f"❌ CSV 序列化失败：{e}")
@@ -308,6 +368,8 @@ class ParquetParser(DataParser):
             ValueError: 序列化失败时抛出
         """
         try:
+            # 清理 Unicode surrogate 字符
+            df = self._clean_data_for_serialization(df)
             df.to_parquet(dst, index=False)
         except Exception as e:
             logger.error(f"❌ Parquet 序列化失败：{e}")
@@ -370,6 +432,8 @@ class PickleParser(DataParser):
             ValueError: 序列化失败时抛出
         """
         try:
+            # 清理 Unicode surrogate 字符
+            df = self._clean_data_for_serialization(df)
             df.to_pickle(dst)
         except Exception as e:
             logger.error(f"❌ Pickle 序列化失败：{e}")
