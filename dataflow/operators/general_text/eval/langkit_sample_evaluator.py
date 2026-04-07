@@ -3,12 +3,14 @@ from dataflow.utils.registry import OPERATOR_REGISTRY
 from dataflow.utils.storage import DataFlowStorage
 from dataflow import get_logger
 import pandas as pd
-from langkit import light_metrics, extract
+
 from tqdm import tqdm
 
 @OPERATOR_REGISTRY.register()
 class LangkitSampleEvaluator(OperatorABC):
     def __init__(self):
+        from langkit import light_metrics
+
         self.logger = get_logger()
         self.logger.info(f'Initializing {self.__class__.__name__}...')
         self.llm_schema = light_metrics.init()
@@ -39,6 +41,8 @@ class LangkitSampleEvaluator(OperatorABC):
             )
 
     def _score_func(self, sample):
+        from langkit import extract
+
         df = pd.DataFrame({'prompt': [sample]})
         df['response'] = ''  
         enhanced_df = extract(df, schema=self.llm_schema)
