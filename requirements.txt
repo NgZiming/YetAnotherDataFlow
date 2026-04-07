@@ -48,3 +48,6 @@ google-genai
 boto3
 google-cloud-aiplatform>=1.55
 google-cloud-bigquery
+
+# nanobot serving
+nanobot-ai>=0.1.5
