@@ -15,7 +15,7 @@ CLINanobotServing - 基于 nanobot Python SDK 的轻量级 Serving 类
     from dataflow.serving import CLINanobotServing
 
     serving = CLINanobotServing(
-        model="vllm//data/share/models/Qwen3.5-122B-A10B/",
+        model="/data/share/models/Qwen3.5-122B-A10B/",
         max_workers=4,
     )
     responses = serving.generate_from_input(["问题 1", "问题 2"])
@@ -58,6 +58,8 @@ class CLINanobotServing(LLMServingABC):
         workspace: str = "~/.nanobot/workspace",
         model: Optional[str] = None,
         provider: str = "vllm",
+        api_base: str = "http://localhost:8000/v1",
+        api_key: str = "EMPTY",
         max_workers: int = 4,
         timeout: int = 300,
         max_retries: int = 3,
@@ -82,8 +84,10 @@ class CLINanobotServing(LLMServingABC):
 
         self.config_path = Path(config_path).expanduser()
         self.workspace = Path(workspace).expanduser()
-        self.model = model or "vllm//data/share/models/Qwen3.5-122B-A10B/"
+        self.model = model or "/data/share/models/Qwen3.5-122B-A10B/"
         self.provider = provider
+        self.api_base = api_base
+        self.api_key = api_key
         self.max_workers = max_workers
         self.timeout = timeout
         self.max_retries = max_retries
@@ -92,9 +96,9 @@ class CLINanobotServing(LLMServingABC):
         ]
         self._initialized = False
 
-        # 自动创建配置
-        if auto_create_config and not self.config_path.exists():
-            self._create_config()
+        # 自动创建/更新配置
+        if auto_create_config:
+            self._create_config(force=True)  # 总是更新配置文件
 
         # 链接外部技能目录
         self._link_extra_skills()
@@ -174,7 +178,7 @@ class CLINanobotServing(LLMServingABC):
                 f"技能链接完成：{linked_count} 个新链接，{skipped_count} 个已存在"
             )
 
-    def _create_config(self) -> None:
+    def _create_config(self, force: bool = False) -> None:
         """创建配置文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -196,8 +200,8 @@ class CLINanobotServing(LLMServingABC):
             },
             "providers": {
                 self.provider: {
-                    "apiKey": "",
-                    "apiBase": "",
+                    "apiKey": self.api_key,
+                    "apiBase": self.api_base,
                 }
             },
             "tools": {
@@ -226,11 +230,18 @@ class CLINanobotServing(LLMServingABC):
         self.logger.info(f"Nanobot 配置已创建：{self.config_path}")
         self.logger.info(f"  Workspace: {self.workspace}")
         self.logger.info(f"  Model: {self.model}")
+        self.logger.info(f"  API Key: {self.api_key}")
+        self.logger.info(f"  API Base: {self.api_base}")
 
     def _load_nanobot(self) -> None:
         """加载 nanobot 实例"""
         try:
             from nanobot import Nanobot
+
+            # 调试：打印实际使用的配置路径
+            self.logger.info(
+                f"加载 Nanobot: config_path={self.config_path}, workspace={self.workspace}"
+            )
 
             self.bot = Nanobot.from_config(
                 config_path=str(self.config_path),
