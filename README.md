@@ -629,7 +629,7 @@ pipeline.compile()
 pipeline.forward(max_parallelism=4)  # Concurrent execution
 ```
 
-### Serving Usage Example
+### 2.2 Serving Usage Example
 
 ```python
 # OpenClaw CLI integration
@@ -641,6 +641,70 @@ serving = create_openclaw_serving(
     max_workers=4,
 )
 responses = serving.generate_from_input(["Question 1", "Question 2"])
+```
+
+### 2.3 NanobotServing - Lightweight Nanobot SDK Integration
+
+```python
+from dataflow.serving import NanobotServing
+
+# Create NanobotServing
+serving = NanobotServing(
+    model_name="nanobot-model",
+    max_workers=4,
+    # Optional: API configuration
+    api_key="your-api-key",
+    base_url="https://api.nanobot.example.com",
+)
+
+# Generate responses
+responses = serving.generate_from_input(
+    ["Prompt 1", "Prompt 2"],
+    temperature=0.7,
+    max_tokens=1024,
+)
+```
+
+### 2.4 CLI Request with Retry and Progress
+
+```python
+from dataflow.serving import CLIOpenClawServing
+
+serving = CLIOpenClawServing(
+    agent_id="main",
+    timeout=600,
+    max_workers=4,
+    # Retry configuration
+    retry_times=3,
+    retry_delay=5,  # seconds
+    # Progress display
+    show_progress=True,
+)
+
+responses = serving.generate_from_input(["Question 1", "Question 2"])
+```
+
+### 2.5 Cache Configuration
+
+```python
+from dataflow.utils.storage import S3DataSource, S3Storage
+
+# Configure cache size (default: 10GB)
+data_source = S3DataSource(
+    endpoint="https://s3.example.com",
+    ak="xxx",
+    sk="xxx",
+    s3_paths=["s3://bucket/data/"],
+    format_type="jsonl",
+    cache_dir="/data/cache",
+    cache_max_size_gb=50.0,  # 50GB cache
+)
+
+storage = S3Storage(
+    data_source=data_source,
+    id_key="id",
+    cache_max_size_gb=50.0,  # Same as DataSource
+)
 ```
 
 ---

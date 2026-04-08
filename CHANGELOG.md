@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6] - 2026-04-08
+
+### Added
+
+- **NanobotServing** (`5fe27e4`)
+  - 新增 `NanobotServing` - 基于 nanobot Python SDK 的轻量级 Serving 类
+  - 新增 `CLINanobotServing` 测试及 API 配置支持
+
+- **CLI 请求增强** (`4502473`)
+  - 添加 CLI 请求重试机制
+  - 添加 tqdm 进度显示
+
+- **缓存配置优化** (`e696b26`, `524e002`)
+  - `S3DataSource` 和 `S3Storage` 的 `cache_max_size_gb` 改为可配置参数
+
+### Changed
+
+- **缓存架构重构** (`ac516d2`)
+  - 重构 `LRUCacheManager` 缓存架构
+  - 将缓存逻辑从 `DataParser` 层移至 `Storage/DataSource` 层
+
+- **命名统一** (`55a1b50`, `a8d4fe4`)
+  - `S3Storage` 的 `temp_dir` 参数改为 `cache_dir`，统一命名
+  - `nanobot_serving` 重命名为 `cli_nanobot_serving` 以对齐命名规范
+  - 重构 `Serving` 类命名并添加 agent 健康检查
+
+### Fixed
+
+- **缓存大小配置** (`722f1a5`, `66b96e4`)
+  - 修复 cache size 配置问题
+  - 修复类型注解问题
+
+- **依赖冲突** (`ccfb7af`)
+  - 解决 langkit 依赖冲突问题
+
+- **临时目录支持** (`40ca1ae`)
+  - 为 `DataParser` 添加自定义临时目录支持
+
+---
+
 ## [1.0.5] - 2026-04-07
 
 ### Fixed
