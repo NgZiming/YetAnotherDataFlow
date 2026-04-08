@@ -3,6 +3,8 @@ SDKNanobotServing - 基于 nanobot Python SDK 的轻量级 Serving 类
 
 替代 CLIOpenClawServing，纯 Python 实现，无 CLI 依赖。
 
+注意： 请设置环境变量 NANOBOT_MAX_CONCURRENT_REQUESTS ，来提高并发
+
 特点:
 - 纯 Python 调用，无 subprocess 开销
 - 自动创建配置文件，无需 CLI
