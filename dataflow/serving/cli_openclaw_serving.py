@@ -88,6 +88,27 @@ def _list_existing_agents() -> set[str]:
         return set()
 
 
+def _is_agent_locked(agent_id: str) -> bool:
+    """检查 agent 是否有任何 session 被锁定。
+
+    Session lock 文件格式：{session_id}.jsonl.lock
+
+    Args:
+        agent_id: Agent 标识符
+
+    Returns:
+        True 如果检测到任何 session lock 文件，False 否则
+    """
+    try:
+        ws = _workspace_dir(agent_id)
+        # 检查是否存在任何 .jsonl.lock 文件
+        for lock_file in ws.glob("*.jsonl.lock"):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def create_agent(agent_id: str, model: str) -> None:
     """
     创建新的 agent。
@@ -327,7 +348,7 @@ def _execute_query_once(
 
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            # capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
@@ -448,18 +469,46 @@ class CLIOpenClawServing(LLMServingABC):
                     f"Agent {self.agent_id} 不存在，请设置 model 参数或手动创建"
                 )
 
-    def _setup_worker_agents(self) -> None:
-        """为每个 worker 预先创建独立的 agent。"""
-        if self._worker_agents:
-            return
+    def _setup_and_check_worker_agents(self, initial_setup: bool = False) -> None:
+        """设置或检查所有 worker agents 的健康状态，重建不可用的。
 
+        Args:
+            initial_setup: 如果是 True，只在初始化时设置，不检查现有 agent
+        """
         existing = _list_existing_agents()
-        self._worker_agents = []
+        new_worker_agents = []
 
         for i in range(self.max_workers):
             worker_agent_id = f"{self.agent_id}-worker-{i}"
+            needs_creation = False
+            needs_rebuild = False
+
+            # 检查 agent 是否存在
             if worker_agent_id.lower() not in existing:
+                needs_creation = True
+            elif initial_setup:
+                # 初始设置时，如果存在就跳过
+                new_worker_agents.append(worker_agent_id)
+                continue
+            else:
+                # 检查 agent 是否被锁定（通过检查 lock 文件）
+                if _is_agent_locked(worker_agent_id):
+                    self.logger.warning(
+                        f"Worker agent {worker_agent_id} 检测到 lock 文件，正在重建..."
+                    )
+                    needs_rebuild = True
+
+            # 如果需要创建或重建
+            if needs_creation or needs_rebuild:
+                if needs_rebuild:
+                    # 删除并重建 agent
+                    subprocess.run(
+                        ["openclaw", "agents", "delete", "--force", worker_agent_id],
+                        check=False,
+                    )
+
                 if self.create_if_missing and self.model:
+                    self.logger.info(f"正在创建 worker agent: {worker_agent_id}")
                     create_agent(worker_agent_id, self.model)
 
                     # 等待 agent 注册成功
@@ -477,7 +526,12 @@ class CLIOpenClawServing(LLMServingABC):
                     raise RuntimeError(
                         f"Worker agent {worker_agent_id} 不存在，请设置 model 参数"
                     )
-            self._worker_agents.append(worker_agent_id)
+
+            new_worker_agents.append(worker_agent_id)
+
+        self._worker_agents = new_worker_agents
+        if not initial_setup:
+            self.logger.info(f"Worker agents 检查完成：{self._worker_agents}")
 
     def start_serving(self) -> None:
         """启动服务（确保 agent 存在）。"""
@@ -485,7 +539,7 @@ class CLIOpenClawServing(LLMServingABC):
             return
 
         self._ensure_agent()
-        self._setup_worker_agents()
+        self._setup_and_check_worker_agents(initial_setup=True)
         self._initialized = True
 
     def generate_from_input(
@@ -510,6 +564,9 @@ class CLIOpenClawServing(LLMServingABC):
         """
         if not self._initialized:
             self.start_serving()
+
+        # 在每次生成前检查并重建不可用的 worker agents
+        self._setup_and_check_worker_agents(initial_setup=False)
 
         if not user_inputs:
             return []
