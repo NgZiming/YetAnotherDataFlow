@@ -89,6 +89,7 @@ class SDKNanobotServing(LLMServingABC):
         self.api_base = api_base
         self.api_key = api_key
         self.max_workers = max_workers
+
         self.timeout = timeout
         self.max_retries = max_retries
         self.extra_skills_dirs = [
@@ -367,7 +368,7 @@ class SDKNanobotServing(LLMServingABC):
         total = len(user_inputs)
         results: List[str] = [""] * total
 
-        # 限制并发数
+        # 限制并发数（使用 max_workers）
         semaphore = asyncio.Semaphore(self.max_workers)
 
         async def limited_task(i: int, query: str, files: Dict) -> str:
