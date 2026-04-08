@@ -6,17 +6,12 @@ Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Union, Generator
+from typing import Any, Generator
 
-import io
 import json
-import os
-import shutil
-import tempfile
 
 import pandas as pd
 
-from botocore.response import StreamingBody
 from dataflow.logger import get_logger
 
 logger = get_logger()
@@ -58,7 +53,9 @@ class DataParser(ABC):
     """数据解析器抽象基类。
 
     负责将 DataFrame 序列化为 bytes，或将 bytes 反序列化为 DataFrame。
-    Storage 实现通过此接口处理不同文件格式，无需关心具体格式细节。
+    Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
+
+    缓存管理已移至 Storage 层（如 S3Storage），解析器只关心文件内容。
 
     支持的格式：
     - JSON: JsonParser
@@ -68,26 +65,38 @@ class DataParser(ABC):
     - Pickle: PickleParser
     """
 
-    # 默认临时目录，可被子类覆盖
-    DEFAULT_TEMP_DIR = tempfile.gettempdir()  # 系统默认临时目录（通常是 /tmp）
-
-    @classmethod
-    def set_temp_dir(cls, temp_dir: str) -> None:
-        """设置临时文件创建目录。
+    @abstractmethod
+    def parse_to_dataframe(
+        self,
+        file_path: str,
+        chunk_size: int = 1000,
+    ) -> Generator[dict, None, None]:
+        """将文件解析为逐行记录。
 
         Args:
-            temp_dir: 临时目录路径（不能为 None）
-        """
-        cls.DEFAULT_TEMP_DIR = temp_dir
+            file_path: 文件路径（本地或缓存后的文件）
+            chunk_size: 每批读取的行数（某些格式支持）
 
-    @classmethod
-    def _get_temp_dir(cls) -> str:
-        """获取临时目录路径。
+        Yields:
+            逐行返回 dict 记录
 
-        Returns:
-            临时目录路径，默认为系统默认临时目录
+        Raises:
+            ValueError: 解析失败时抛出
         """
-        return cls.DEFAULT_TEMP_DIR
+        pass
+
+    @abstractmethod
+    def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
+        """将 DataFrame 序列化到文件。
+
+        Args:
+            df: 要序列化的 DataFrame
+            dst: 目标文件路径
+
+        Raises:
+            ValueError: 序列化失败时抛出
+        """
+        pass
 
     @staticmethod
     def _clean_data_for_serialization(data: Any) -> Any:
@@ -111,59 +120,6 @@ class DataParser(ABC):
         else:
             return clean_surrogates(data)
 
-    @abstractmethod
-    def parse_to_dataframe(
-        self,
-        data: Union[io.BytesIO, StreamingBody],
-        chunk_size: int = 1000,
-    ) -> Generator[dict, None, None]:
-        """将 file-like 对象或文件路径解析为逐行记录。
-
-        Args:
-            data: file-like object 或文件路径 (str)
-            chunk_size: 每批读取的行数
-
-        Yields:
-            逐行返回 dict 记录
-
-        Raises:
-            ValueError: 解析失败时抛出
-        """
-        pass
-
-    @abstractmethod
-    def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
-        """将 DataFrame 序列化到文件。
-
-        Args:
-            df: 要序列化的 DataFrame
-            dst: 目标文件路径
-
-        Raises:
-            ValueError: 序列化失败时抛出
-        """
-        pass
-
-    def _create_temp_file(
-        self, suffix: str = ""
-    ) -> tuple[str, tempfile._TemporaryFileWrapper]:
-        """创建临时文件。
-
-        Args:
-            suffix: 文件后缀名
-
-        Returns:
-            (file_path, file_obj) 元组
-        """
-        temp_dir = self._get_temp_dir()
-        if temp_dir:
-            # 确保目录存在
-            os.makedirs(temp_dir, exist_ok=True)
-            tmp = tempfile.NamedTemporaryFile(dir=temp_dir, delete=False, suffix=suffix)
-        else:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        return tmp.name, tmp
-
 
 class JsonParser(DataParser):
     """JSON 格式解析器。
@@ -175,13 +131,13 @@ class JsonParser(DataParser):
 
     def parse_to_dataframe(
         self,
-        data: Union[io.BytesIO, StreamingBody],
+        file_path: str,
         chunk_size: int = 1000,
     ) -> Generator[dict, None, None]:
-        """将 JSON file-like 对象解析为逐行记录。
+        """将 JSON 文件解析为逐行记录。
 
         Args:
-            data: BytesIO 或 StreamingBody 对象
+            file_path: JSON 文件路径
             chunk_size: 每批读取的行数
 
         Yields:
@@ -190,20 +146,8 @@ class JsonParser(DataParser):
         Raises:
             ValueError: JSON 解析失败时抛出
         """
-        # file-like 对象：先拷贝到临时文件
-        file_path, tmp = self._create_temp_file(suffix=".json")
-        try:
-            shutil.copyfileobj(data, tmp)
-            tmp.close()  # 关闭临时文件
-
-            for row in pd.read_json(file_path).to_dict("records"):
-                yield row
-        except Exception as e:
-            logger.error(f"❌ JSON 解析失败：{e}")
-            raise ValueError(f"JSON 解析失败：{e}")
-        finally:
-            if os.path.exists(file_path):
-                os.unlink(file_path)
+        for row in pd.read_json(file_path).to_dict("records"):
+            yield row
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSON 文件。
@@ -234,17 +178,15 @@ class JsonlParser(DataParser):
     - 序列化：orient="records", lines=True
     """
 
-    total_read_file = 0
-
     def parse_to_dataframe(
         self,
-        data: Union[io.BytesIO, StreamingBody],
+        file_path: str,
         chunk_size: int = 1000,
     ) -> Generator[dict, None, None]:
-        """将 JSONL file-like 对象解析为逐行记录。
+        """将 JSONL 文件解析为逐行记录。
 
         Args:
-            data: BytesIO 或 StreamingBody 对象
+            file_path: JSONL 文件路径
             chunk_size: 每批读取的行数
 
         Yields:
@@ -253,26 +195,14 @@ class JsonlParser(DataParser):
         Raises:
             ValueError: JSONL 解析失败时抛出
         """
-        self.total_read_file += 1
-        # file-like 对象：先拷贝到临时文件
-        file_path, tmp = self._create_temp_file(suffix=f".{self.total_read_file}")
-        try:
-            shutil.copyfileobj(data, tmp)
-            tmp.close()  # 关闭临时文件
-
-            with open(file_path) as f:
-                for line in f:
-                    try:
-                        d = json.loads(line)
-                        yield d
-                    except Exception as e:
-                        logger.warning(f"skip json line: {line[:100]}")
-        except Exception as e:
-            logger.error(f"❌ JSONL 解析失败：{e}")
-            raise ValueError(f"JSONL 解析失败：{e}")
-        finally:
-            if os.path.exists(file_path):
-                os.unlink(file_path)
+        # JSONL 可以逐行 stream 读取
+        with open(file_path) as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                    yield d
+                except Exception:
+                    logger.exception(f"skip json line: {line[:100]}")
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSONL 文件。
@@ -303,13 +233,13 @@ class CsvParser(DataParser):
 
     def parse_to_dataframe(
         self,
-        data: Union[io.BytesIO, StreamingBody],
+        file_path: str,
         chunk_size: int = 1000,
     ) -> Generator[dict, None, None]:
-        """将 CSV file-like 对象解析为逐行记录。
+        """将 CSV 文件解析为逐行记录。
 
         Args:
-            data: BytesIO 或 StreamingBody 对象
+            file_path: CSV 文件路径
             chunk_size: 每批读取的行数
 
         Yields:
@@ -318,22 +248,10 @@ class CsvParser(DataParser):
         Raises:
             ValueError: CSV 解析失败时抛出
         """
-        # file-like 对象：先拷贝到临时文件
-        file_path, tmp = self._create_temp_file(suffix=".csv")
-        try:
-            shutil.copyfileobj(data, tmp)
-            tmp.close()  # 关闭临时文件
-
-            for chunk in pd.read_csv(file_path, chunksize=chunk_size):
-                chunk: pd.DataFrame
-                for _, row in chunk.iterrows():
-                    yield row.to_dict()
-        except Exception as e:
-            logger.error(f"❌ CSV 解析失败：{e}")
-            raise ValueError(f"CSV 解析失败：{e}")
-        finally:
-            if os.path.exists(file_path):
-                os.unlink(file_path)
+        for chunk in pd.read_csv(file_path, chunksize=chunk_size):
+            chunk: pd.DataFrame
+            for _, row in chunk.iterrows():
+                yield row.to_dict()
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 CSV 文件。
@@ -366,13 +284,13 @@ class ParquetParser(DataParser):
 
     def parse_to_dataframe(
         self,
-        data: Union[io.BytesIO, StreamingBody],
+        file_path: str,
         chunk_size: int = 1000,
     ) -> Generator[dict, None, None]:
-        """将 Parquet file-like 对象解析为逐行记录。
+        """将 Parquet 文件解析为逐行记录。
 
         Args:
-            data: BytesIO 或 StreamingBody 对象
+            file_path: Parquet 文件路径
             chunk_size: 每批读取的行数
 
         Yields:
@@ -381,20 +299,8 @@ class ParquetParser(DataParser):
         Raises:
             ValueError: Parquet 解析失败时抛出
         """
-        # file-like 对象：先拷贝到临时文件
-        file_path, tmp = self._create_temp_file(suffix=".parquet")
-        try:
-            shutil.copyfileobj(data, tmp)
-            tmp.close()  # 关闭临时文件
-
-            for row in pd.read_parquet(file_path).to_dict("records"):
-                yield row
-        except Exception as e:
-            logger.error(f"❌ Parquet 解析失败：{e}")
-            raise ValueError(f"Parquet 解析失败：{e}")
-        finally:
-            if os.path.exists(file_path):
-                os.unlink(file_path)
+        for row in pd.read_parquet(file_path).to_dict("records"):
+            yield row
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 Parquet 文件。
@@ -426,14 +332,14 @@ class PickleParser(DataParser):
 
     def parse_to_dataframe(
         self,
-        data: Union[io.BytesIO, StreamingBody],
+        file_path: str,
         chunk_size: int = 1000,
     ) -> Generator[dict, None, None]:
-        """将 Pickle file-like 对象解析为逐行记录。
+        """将 Pickle 文件解析为逐行记录。
 
         Args:
-            data: BytesIO 或 StreamingBody 对象
-            chunk_size: 每批读取的行数
+            file_path: Pickle 文件路径
+            chunk_size: 每批读取的行数（Pickle 不支持分块，此参数保留）
 
         Yields:
             逐行返回 dict 记录
@@ -444,22 +350,10 @@ class PickleParser(DataParser):
         Warning:
             Pickle 格式存在安全风险，仅用于受信任的数据源。
         """
-        # file-like 对象：先拷贝到临时文件
-        file_path, tmp = self._create_temp_file(suffix=".pkl")
-        try:
-            shutil.copyfileobj(data, tmp)
-            tmp.close()  # 关闭临时文件
-
-            # Pickle 不支持 chunksize，需要全部加载
-            df = pd.read_pickle(file_path)
-            for _, row in df.iterrows():
-                yield row.to_dict()
-        except Exception as e:
-            logger.error(f"❌ Pickle 解析失败：{e}")
-            raise ValueError(f"Pickle 解析失败：{e}")
-        finally:
-            if os.path.exists(file_path):
-                os.unlink(file_path)
+        # Pickle 不支持 chunksize，需要全部加载
+        df = pd.read_pickle(file_path)
+        for _, row in df.iterrows():
+            yield row.to_dict()
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 Pickle 文件。

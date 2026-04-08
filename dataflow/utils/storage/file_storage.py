@@ -61,7 +61,6 @@ class FileStorage(PartitionableStorage):
         cache_path: str = "./cache",
         cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
         id_synthesizer: Optional["IdSynthesizer"] = None,
-        temp_dir: Optional[str] = None,
     ):
         """
         初始化 FileStorage。
@@ -83,7 +82,6 @@ class FileStorage(PartitionableStorage):
             id_key: 用于合并多步骤数据的唯一键字段名
             cache_path: 缓存目录
             cache_type: 文件格式
-            temp_dir: 临时文件目录，None 表示使用系统默认临时目录
         """
         self.logger = get_logger()
         self.cache_path = cache_path
@@ -91,10 +89,6 @@ class FileStorage(PartitionableStorage):
         self.id_key = id_key
         # 默认使用 UUID 合成器
         self.id_synthesizer = id_synthesizer or UuidIdSynthesizer(prefix="row")
-
-        # 设置临时文件目录（如果提供）
-        if temp_dir is not None:
-            DataParser.set_temp_dir(temp_dir)
 
         # 获取对应的解析器
         self._parser: DataParser = get_parser(cache_type)
@@ -312,17 +306,14 @@ class FileStorage(PartitionableStorage):
 
         for operator_step in dependent_steps:
             kept_keys.append(set())
-            # 读取指定步骤的文件
-            f = open(self._get_cache_file_path(operator_step), "rb")
-            try:
-                df_temp = self._parser.parse_to_dataframe(f)
-                for d in df_temp:
-                    if d[self.id_key] not in ds:
-                        ds[d[self.id_key]] = {}
-                    ds[d[self.id_key]].update(d)  # 合并记录
-                    kept_keys[-1].add(d[self.id_key])  # 记录 id_key
-            finally:
-                f.close()
+            # 读取指定步骤的文件（本地文件，不需要缓存）
+            file_path = self._get_cache_file_path(operator_step)
+            # 解析器只需要文件路径
+            for d in self._parser.parse_to_dataframe(file_path):
+                if d[self.id_key] not in ds:
+                    ds[d[self.id_key]] = {}
+                ds[d[self.id_key]].update(d)  # 合并记录
+                kept_keys[-1].add(d[self.id_key])  # 记录 id_key
 
         # 取所有步骤的 id_key 交集
         all_keys = kept_keys[0]

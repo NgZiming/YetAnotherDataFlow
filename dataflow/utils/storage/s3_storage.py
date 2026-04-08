@@ -18,10 +18,11 @@ import copy
 import json
 import os
 import tempfile
+import shutil
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Literal, Generator
+from typing import Any, Optional, Literal
 
 import pandas as pd
 
@@ -38,6 +39,7 @@ from .iface import (
     UuidIdSynthesizer,
 )
 from .data_parser import get_parser, DataParser
+from .data_cache import LRUCacheManager
 
 from dataflow.utils.s3_plugin import (
     exists_s3_object,
@@ -113,9 +115,18 @@ class S3Storage(PartitionableStorage):
 
         # 设置临时文件目录（如果提供）
         if temp_dir is not None:
-            DataParser.set_temp_dir(temp_dir)
+            self._temp_dir = temp_dir
+        else:
+            self._temp_dir = tempfile.gettempdir()
 
-        # 获取对应的解析器
+        # 初始化 LRU 缓存管理器（在 S3Storage 层）
+        self.cache_mgr = LRUCacheManager(
+            cache_dir=self._temp_dir,
+            max_size_gb=100.0,
+            enable_cache=True,
+        )
+
+        # 获取对应的解析器（不传 source_path）
         self._parser: DataParser = get_parser(cache_type)
 
         # 数据源（必选）
@@ -353,12 +364,21 @@ class S3Storage(PartitionableStorage):
             kept_keys.append(set())
             # 读取指定步骤的文件
             file_path = self._get_cache_file_path(operator_step)
-            content = self._read_file_bytes(file_path)
-            for d in self._parser.parse_to_dataframe(content):
-                if d[self.id_key] not in ds:
-                    ds[d[self.id_key]] = {}
-                ds[d[self.id_key]].update(d)  # 合并记录
-                kept_keys[-1].add(d[self.id_key])  # 记录 id_key
+
+            # 缓存逻辑：在 S3Storage 层处理
+            def download_fn(dest):
+                content = self._read_file_bytes(file_path)
+                with open(dest, "wb") as f:
+                    shutil.copyfileobj(content, f)
+
+            # 使用缓存管理器
+            with self.cache_mgr.use(file_path, download_fn) as cache_path:
+                # 解析器只需要文件路径
+                for d in self._parser.parse_to_dataframe(cache_path):
+                    if d[self.id_key] not in ds:
+                        ds[d[self.id_key]] = {}
+                    ds[d[self.id_key]].update(d)  # 合并记录
+                    kept_keys[-1].add(d[self.id_key])  # 记录 id_key
 
         # 取所有步骤的 id_key 交集
         all_keys = kept_keys[0]
