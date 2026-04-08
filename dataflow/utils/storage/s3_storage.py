@@ -122,7 +122,7 @@ class S3Storage(PartitionableStorage):
         # 初始化 LRU 缓存管理器（在 S3Storage 层）
         self.cache_mgr = LRUCacheManager(
             cache_dir=self._temp_dir,
-            max_size_gb=100.0,
+            max_size_gb=300.0,
             enable_cache=True,
         )
 
