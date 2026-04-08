@@ -256,7 +256,7 @@ def load_session_new_messages(
 def _execute_query_once(
     agent_id: str,
     user_query: str,
-    timeout: int,
+    timeout: Optional[int],
     logger: Any,
     input_files_data: Dict,
 ) -> str:
@@ -266,7 +266,7 @@ def _execute_query_once(
     Args:
         agent_id: Agent 标识符
         user_query: 用户查询内容
-        timeout: 超时时间（秒）
+        timeout: 超时时间（秒），None 表示不设置超时
         logger: 日志对象
         input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
 
@@ -333,7 +333,22 @@ def _execute_query_once(
             check=False,
         )
         if new_result.returncode != 0:
-            raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
+            # 检查是否因为 session 被锁导致失败
+            error_msg = new_result.stderr
+            if "locked" in error_msg.lower() or "lock" in error_msg.lower():
+                logger.warning(f"检测到 session 被锁，尝试清理 lock 文件...")
+                deleted = _cleanup_agent_locks(agent_id, logger)
+                logger.info(f"已删除 {deleted} 个 lock 文件，将重试 /new 命令")
+                # 重试一次 /new
+                new_result = subprocess.run(
+                    new_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            if new_result.returncode != 0:
+                raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
         if len(new_file_paths) > 0:
             user_query += f"\n下面是任务相关的文件：\n{new_file_paths}"
@@ -352,7 +367,7 @@ def _execute_query_once(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=timeout,  # None 表示不设置超时
             check=False,
         )
         if result.returncode != 0:
@@ -433,7 +448,7 @@ class CLIOpenClawServing(LLMServingABC):
         self,
         agent_id: str = "main",
         model: Optional[str] = None,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
         create_if_missing: bool = True,
         max_workers: int = 4,
         max_retries: int = 3,
@@ -444,7 +459,7 @@ class CLIOpenClawServing(LLMServingABC):
         Args:
             agent_id: Agent 标识符，默认 "main"
             model: 模型名称，如果 agent 不存在且 create_if_missing=True 则用于创建
-            timeout: 单次查询超时时间（秒），默认 300
+            timeout: 单次查询超时时间（秒），None 表示不设置超时，默认 None
             create_if_missing: 如果 agent 不存在是否自动创建，默认 True
             max_workers: 并发 worker 数量，默认 4
             max_retries: 请求失败时的最大重试次数，默认 3
