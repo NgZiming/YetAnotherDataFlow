@@ -114,6 +114,7 @@ class S3DataSource(DataSource):
         s3_paths: list[str],
         format_type: str = "jsonl",
         cache_dir: Optional[str] = None,
+        cache_max_size_gb: float = 300.0,
     ):
         """
         Args:
@@ -123,6 +124,7 @@ class S3DataSource(DataSource):
             s3_path: S3 路径（可以是文件或目录）
             format_type: 文件格式
             cache_dir: 缓存目录，None 表示使用默认临时目录
+            cache_max_size_gb: 缓存最大大小（GB），默认 300GB
         """
         self.endpoint = endpoint
         self.ak = ak
@@ -135,7 +137,7 @@ class S3DataSource(DataSource):
 
         self.cache_mgr = LRUCacheManager(
             cache_dir=cache_dir,
-            max_size_gb=300.0,
+            max_size_gb=cache_max_size_gb,
             enable_cache=True,
         )
 
