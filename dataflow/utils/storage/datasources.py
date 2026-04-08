@@ -135,7 +135,7 @@ class S3DataSource(DataSource):
 
         self.cache_mgr = LRUCacheManager(
             cache_dir=cache_dir,
-            max_size_gb=100.0,
+            max_size_gb=300.0,
             enable_cache=True,
         )
 
