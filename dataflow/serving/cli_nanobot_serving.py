@@ -1,5 +1,5 @@
 """
-CLINanobotServing - 基于 nanobot Python SDK 的轻量级 Serving 类
+SDKNanobotServing - 基于 nanobot Python SDK 的轻量级 Serving 类
 
 替代 CLIOpenClawServing，纯 Python 实现，无 CLI 依赖。
 
@@ -12,9 +12,9 @@ CLINanobotServing - 基于 nanobot Python SDK 的轻量级 Serving 类
 - 支持外部技能目录（通过符号链接）
 
 使用示例:
-    from dataflow.serving import CLINanobotServing
+    from dataflow.serving import SDKNanobotServing
 
-    serving = CLINanobotServing(
+    serving = SDKNanobotServing(
         model="/data/share/models/Qwen3.5-122B-A10B/",
         max_workers=4,
     )
@@ -39,7 +39,7 @@ from dataflow.logger import get_logger
 from dataflow.utils.generate_binary_files import generate_file
 
 
-class CLINanobotServing(LLMServingABC):
+class SDKNanobotServing(LLMServingABC):
     """
     基于 nanobot Python SDK 的轻量级 Serving 类。
 
@@ -67,7 +67,7 @@ class CLINanobotServing(LLMServingABC):
         extra_skills_dirs: Optional[List[str]] = None,
     ):
         """
-        初始化 CLINanobotServing。
+        初始化 SDKNanobotServing。
 
         Args:
             config_path: 配置文件路径
@@ -413,8 +413,8 @@ class CLINanobotServing(LLMServingABC):
 
         Args:
             user_inputs: 用户输入列表
-            system_prompt: 系统提示词（CLI 模式下不使用）
-            json_schema: JSON schema（CLI 模式下不使用）
+            system_prompt: 系统提示词（SDK 模式下不使用）
+            json_schema: JSON schema（SDK 模式下不使用）
             input_files_data: 与 user_inputs 长度相同，每个元素是对应 query 的文件内容数据
 
         Returns:
@@ -427,7 +427,7 @@ class CLINanobotServing(LLMServingABC):
 
     def generate_embedding_from_input(self, texts: List[str]) -> List[List[float]]:
         """生成嵌入向量（nanobot 不支持，返回空向量）"""
-        self.logger.warning("CLINanobotServing 不支持 embedding，返回空向量")
+        self.logger.warning("SDKNanobotServing 不支持 embedding，返回空向量")
         return [[] for _ in texts]
 
     def start_serving(self) -> None:
@@ -439,7 +439,7 @@ class CLINanobotServing(LLMServingABC):
             self._load_nanobot()
 
         self._initialized = True
-        self.logger.info("CLINanobotServing 已启动")
+        self.logger.info("SDKNanobotServing 已启动")
 
     def cleanup(self) -> None:
         """清理资源"""
@@ -454,7 +454,7 @@ class CLINanobotServing(LLMServingABC):
             except Exception as e:
                 self.logger.error(f"清理临时目录失败：{e}")
 
-        self.logger.info("CLINanobotServing 已清理")
+        self.logger.info("SDKNanobotServing 已清理")
 
 
 def create_nanobot_serving(
@@ -465,9 +465,9 @@ def create_nanobot_serving(
     max_workers: int = 4,
     max_retries: int = 3,
     **kwargs,
-) -> CLINanobotServing:
+) -> SDKNanobotServing:
     """
-    创建 CLINanobotServing 实例的工厂函数。
+    创建 SDKNanobotServing 实例的工厂函数。
 
     Args:
         config_path: 配置文件路径
@@ -479,9 +479,9 @@ def create_nanobot_serving(
         **kwargs: 其他参数（timeout, auto_create_config, extra_skills_dirs）
 
     Returns:
-        CLINanobotServing 实例
+        SDKNanobotServing 实例
     """
-    return CLINanobotServing(
+    return SDKNanobotServing(
         config_path=config_path,
         workspace=workspace,
         model=model,
