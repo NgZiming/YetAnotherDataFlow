@@ -1,16 +1,7 @@
 import json
 import os
 import tempfile
-
-"""
-数据源实现模块。
-
-提供 DataSource 的具体实现：
-- FileDataSource: 本地文件数据源
-- S3DataSource: S3 对象存储数据源
-- HuggingFaceDataSource: HuggingFace datasets 数据源
-- ModelScopeDataSource: ModelScope 数据源
-"""
+import shutil
 
 from pathlib import Path
 from typing import Generator, Optional
@@ -19,6 +10,7 @@ from tqdm import tqdm
 
 from .iface import DataSource, DataSourceInfo
 from .data_parser import get_parser
+from .data_cache import LRUCacheManager
 from ..s3_plugin import (
     get_s3_client,
     get_s3_object_size,
@@ -81,14 +73,13 @@ class FileDataSource(DataSource):
         sampled_count = 0
 
         for p in self.paths:
-            with open(p, "rb") as f:
-                for row in parser.parse_to_dataframe(f, chunk_size=sample_rows):
-                    sampled_bytes += len(
-                        (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
-                    )
-                    sampled_count += 1
-                    if sampled_count >= sample_rows:
-                        break
+            for row in parser.parse_to_dataframe(p, chunk_size=sample_rows):
+                sampled_bytes += len(
+                    (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+                )
+                sampled_count += 1
+                if sampled_count >= sample_rows:
+                    break
             if sampled_count >= sample_rows:
                 break
 
@@ -105,8 +96,8 @@ class FileDataSource(DataSource):
         try:
             for path in self.paths:
                 pbar.set_postfix(file=Path(path).name[:30])
-                with open(path, "rb") as f:
-                    yield from parser.parse_to_dataframe(f, chunk_size=chunk_size)
+                # 本地文件，直接解析，无缓存
+                yield from parser.parse_to_dataframe(path, chunk_size=chunk_size)
                 pbar.update(1)
         finally:
             pbar.close()
@@ -122,6 +113,7 @@ class S3DataSource(DataSource):
         sk: str,
         s3_paths: list[str],
         format_type: str = "jsonl",
+        cache_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -130,12 +122,22 @@ class S3DataSource(DataSource):
             sk: Secret Access Key
             s3_path: S3 路径（可以是文件或目录）
             format_type: 文件格式
+            cache_dir: 缓存目录，None 表示使用默认临时目录
         """
         self.endpoint = endpoint
         self.ak = ak
         self.sk = sk
         self.format_type = format_type
         self.s3_paths = self._ensure_files(s3_paths)
+
+        if cache_dir is None:
+            cache_dir = tempfile.gettempdir()
+
+        self.cache_mgr = LRUCacheManager(
+            cache_dir=cache_dir,
+            max_size_gb=100.0,
+            enable_cache=True,
+        )
 
     def _ensure_files(self, s3_paths: list[str]) -> list[str]:
         """懒加载文件列表"""
@@ -202,19 +204,23 @@ class S3DataSource(DataSource):
                     os.unlink(tmp_path)
             return total_rows
 
-        # 其他格式：采样解析
+        # 其他格式：采样解析（使用缓存）
         sampled_bytes, sampled_count = 0, 0
-        content = read_s3_bytes(client, self.s3_paths[0])
 
-        for row in get_parser(self.format_type).parse_to_dataframe(
-            content, chunk_size=100
-        ):
-            sampled_bytes += len(
-                (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
-            )
-            sampled_count += 1
-            if sampled_count >= 100:
-                break
+        def download_fn(dest):
+            content = read_s3_bytes(client, self.s3_paths[0])
+            with open(dest, "wb") as f:
+                shutil.copyfileobj(content, f)
+
+        parser = get_parser(self.format_type)
+        with self.cache_mgr.use(self.s3_paths[0], download_fn) as cache_path:
+            for row in parser.parse_to_dataframe(cache_path, chunk_size=100):
+                sampled_bytes += len(
+                    (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+                )
+                sampled_count += 1
+                if sampled_count >= 100:
+                    break
 
         avg = sampled_bytes / sampled_count if sampled_count else 200
         return max(1, int(total_size / avg))
@@ -226,8 +232,19 @@ class S3DataSource(DataSource):
         try:
             for path in self.s3_paths:
                 pbar.set_postfix(file=Path(path).name[:30])
-                content = read_s3_bytes(client, path)
-                yield from parser.parse_to_dataframe(content, chunk_size)
+
+                # 缓存逻辑：在 DataSource 层处理
+                def download_fn(dest):
+                    content = read_s3_bytes(client, path)
+                    with open(dest, "wb") as f:
+                        shutil.copyfileobj(content, f)
+
+                # 使用缓存管理器
+                with self.cache_mgr.use(path, download_fn) as cache_path:
+                    yield from parser.parse_to_dataframe(
+                        cache_path, chunk_size=chunk_size
+                    )
+
                 pbar.update(1)
         finally:
             pbar.close()
