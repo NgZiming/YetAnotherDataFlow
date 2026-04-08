@@ -35,7 +35,7 @@ def test_s3_datasource_with_cache():
                 f.write(json.dumps({"id": i, "name": f"s3_item_{i}"}) + "\n")
 
         cache_mgr = LRUCacheManager(
-            cache_dir=cache_dir,
+            cache_dir=str(cache_dir),
             max_size_gb=1.0,
             enable_cache=True,
         )
