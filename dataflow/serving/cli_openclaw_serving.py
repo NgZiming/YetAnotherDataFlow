@@ -337,7 +337,15 @@ def _execute_query_once(
             error_msg = new_result.stderr
             if "locked" in error_msg.lower() or "lock" in error_msg.lower():
                 logger.warning(f"检测到 session 被锁，尝试清理 lock 文件...")
-                deleted = _cleanup_agent_locks(agent_id, logger)
+                # 清理 lock 文件
+                ws = _workspace_dir(agent_id)
+                deleted = 0
+                for lock_file in ws.glob("*.jsonl.lock"):
+                    try:
+                        lock_file.unlink()
+                        deleted += 1
+                    except Exception as e:
+                        logger.error(f"删除 lock 文件失败 {lock_file}: {e}")
                 logger.info(f"已删除 {deleted} 个 lock 文件，将重试 /new 命令")
                 # 重试一次 /new
                 new_result = subprocess.run(
