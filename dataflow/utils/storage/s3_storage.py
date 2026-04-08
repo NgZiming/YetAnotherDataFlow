@@ -77,7 +77,7 @@ class S3Storage(PartitionableStorage):
         sk: str,
         cache_type: Literal["json", "jsonl", "csv", "parquet", "pickle"] = "jsonl",
         id_synthesizer: Optional["IdSynthesizer"] = None,
-        temp_dir: Optional[str] = None,
+        cache_dir: Optional[str] = None,
         cache_max_size_gb: float = 300.0,
     ):
         """
@@ -103,7 +103,7 @@ class S3Storage(PartitionableStorage):
             ak: Access Key ID
             sk: Secret Access Key
             cache_type: 文件格式
-            temp_dir: 临时文件目录，None 表示使用系统默认临时目录
+            cache_dir: 缓存目录，None 表示使用系统默认临时目录
             cache_max_size_gb: 缓存最大大小（GB），默认 300GB
         """
         self.logger = get_logger()
@@ -115,15 +115,15 @@ class S3Storage(PartitionableStorage):
         # 默认使用 UUID 合成器
         self.id_synthesizer = id_synthesizer or UuidIdSynthesizer(prefix="row")
 
-        # 设置临时文件目录（如果提供）
-        if temp_dir is not None:
-            self._temp_dir = temp_dir
+        # 设置缓存目录（如果提供）
+        if cache_dir is not None:
+            self._cache_dir = cache_dir
         else:
-            self._temp_dir = tempfile.gettempdir()
+            self._cache_dir = tempfile.gettempdir()
 
         # 初始化 LRU 缓存管理器（在 S3Storage 层）
         self.cache_mgr = LRUCacheManager(
-            cache_dir=self._temp_dir,
+            cache_dir=self._cache_dir,
             max_size_gb=cache_max_size_gb,
             enable_cache=True,
         )
