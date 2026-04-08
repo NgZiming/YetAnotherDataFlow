@@ -321,6 +321,7 @@ def _execute_query_once(
             "agent",
             "--agent",
             agent_id,
+            "--local",
             "-m",
             "/new",
         ]
@@ -336,25 +337,27 @@ def _execute_query_once(
 
         if len(new_file_paths) > 0:
             user_query += f"\n下面是任务相关的文件：\n{new_file_paths}"
-        # 执行用户查询
+        # 执行用户查询（使用 --local 绕过网关配对）
         cmd = [
             "openclaw",
             "agent",
             "--agent",
             agent_id,
+            "--local",
             "-m",
             user_query,
         ]
 
         result = subprocess.run(
             cmd,
-            # capture_output=True,
+            capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
         )
         if result.returncode != 0:
             raise Exception(result.stderr)
+        logger.info(f"请求结束： {result.stdout[:50]}...")
     except subprocess.TimeoutExpired:
         raise
     except Exception:
@@ -479,7 +482,7 @@ class CLIOpenClawServing(LLMServingABC):
         new_worker_agents = []
 
         for i in range(self.max_workers):
-            worker_agent_id = f"{self.agent_id}-worker-{i}"
+            worker_agent_id = f"{self.agent_id}-worker-{i:04}"
             needs_creation = False
             needs_rebuild = False
 
