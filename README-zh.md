@@ -629,6 +629,70 @@ serving = create_openclaw_serving(
 responses = serving.generate_from_input(["问题 1", "问题 2"])
 ```
 
+### NanobotServing - 轻量级 Nanobot SDK 集成
+
+```python
+from dataflow.serving import NanobotServing
+
+# 创建 NanobotServing
+serving = NanobotServing(
+    model_name="nanobot-model",
+    max_workers=4,
+    # 可选：API 配置
+    api_key="your-api-key",
+    base_url="https://api.nanobot.example.com",
+)
+
+# 生成响应
+responses = serving.generate_from_input(
+    ["Prompt 1", "Prompt 2"],
+    temperature=0.7,
+    max_tokens=1024,
+)
+```
+
+### CLI 请求重试和进度显示
+
+```python
+from dataflow.serving import CLIOpenClawServing
+
+serving = CLIOpenClawServing(
+    agent_id="main",
+    timeout=600,
+    max_workers=4,
+    # 重试配置
+    retry_times=3,
+    retry_delay=5,  # 秒
+    # 进度显示
+    show_progress=True,
+)
+
+responses = serving.generate_from_input(["问题 1", "问题 2"])
+```
+
+### 缓存配置
+
+```python
+from dataflow.utils.storage import S3DataSource, S3Storage
+
+# 配置缓存大小（默认：10GB）
+data_source = S3DataSource(
+    endpoint="https://s3.example.com",
+    ak="xxx",
+    sk="xxx",
+    s3_paths=["s3://bucket/data/"],
+    format_type="jsonl",
+    cache_dir="/data/cache",
+    cache_max_size_gb=50.0,  # 50GB 缓存
+)
+
+storage = S3Storage(
+    data_source=data_source,
+    id_key="id",
+    cache_max_size_gb=50.0,  # 与 DataSource 保持一致
+)
+```
+
 ---
 
 ## 7. 新增算子使用教程 (v1.0.3)
