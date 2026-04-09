@@ -121,13 +121,7 @@ class S3Storage(PartitionableStorage):
         else:
             self._cache_dir = tempfile.gettempdir()
 
-        # 初始化 LRU 缓存管理器（在 S3Storage 层）
-        self.cache_mgr = LRUCacheManager(
-            cache_dir=self._cache_dir,
-            max_size_gb=cache_max_size_gb,
-            enable_cache=True,
-        )
-
+        self._cache_max_size_gb = cache_max_size_gb
         # 获取对应的解析器（不传 source_path）
         self._parser: DataParser = get_parser(cache_type)
 
@@ -373,8 +367,13 @@ class S3Storage(PartitionableStorage):
                 with open(dest, "wb") as f:
                     shutil.copyfileobj(content, f)
 
+            cache_mgr = LRUCacheManager(
+                cache_dir=self._cache_dir,
+                max_size_gb=self._cache_max_size_gb,
+                enable_cache=True,
+            )
             # 使用缓存管理器
-            with self.cache_mgr.use(file_path, download_fn) as cache_path:
+            with cache_mgr.use(file_path, download_fn) as cache_path:
                 # 解析器只需要文件路径
                 for d in self._parser.parse_to_dataframe(cache_path):
                     if d[self.id_key] not in ds:
