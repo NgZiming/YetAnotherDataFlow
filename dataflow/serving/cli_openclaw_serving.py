@@ -92,6 +92,7 @@ def _is_agent_locked(agent_id: str) -> bool:
     """检查 agent 是否有任何 session 被锁定。
 
     Session lock 文件格式：{session_id}.jsonl.lock
+    位置：agent 的 sessions/ 目录下
 
     Args:
         agent_id: Agent 标识符
@@ -100,10 +101,12 @@ def _is_agent_locked(agent_id: str) -> bool:
         True 如果检测到任何 session lock 文件，False 否则
     """
     try:
-        ws = _workspace_dir(agent_id)
-        # 检查是否存在任何 .jsonl.lock 文件
-        for lock_file in ws.glob("*.jsonl.lock"):
-            return True
+        agent_dir = _agent_store_dir(agent_id)
+        sessions_dir = agent_dir / "sessions"
+        # 检查 sessions 目录下是否存在任何 .jsonl.lock 文件
+        if sessions_dir.exists():
+            for lock_file in sessions_dir.glob("*.jsonl.lock"):
+                return True
         return False
     except Exception:
         return False
@@ -337,15 +340,17 @@ def _execute_query_once(
             error_msg = new_result.stderr
             if "locked" in error_msg.lower() or "lock" in error_msg.lower():
                 logger.warning(f"检测到 session 被锁，尝试清理 lock 文件...")
-                # 清理 lock 文件
-                ws = _workspace_dir(agent_id)
+                # 清理 lock 文件（在 sessions/ 目录下）
+                agent_dir = _agent_store_dir(agent_id)
+                sessions_dir = agent_dir / "sessions"
                 deleted = 0
-                for lock_file in ws.glob("*.jsonl.lock"):
-                    try:
-                        lock_file.unlink()
-                        deleted += 1
-                    except Exception as e:
-                        logger.error(f"删除 lock 文件失败 {lock_file}: {e}")
+                if sessions_dir.exists():
+                    for lock_file in sessions_dir.glob("*.jsonl.lock"):
+                        try:
+                            lock_file.unlink()
+                            deleted += 1
+                        except Exception as e:
+                            logger.error(f"删除 lock 文件失败 {lock_file}: {e}")
                 logger.info(f"已删除 {deleted} 个 lock 文件，将重试 /new 命令")
                 # 重试一次 /new
                 new_result = subprocess.run(
