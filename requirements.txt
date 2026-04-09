@@ -15,6 +15,7 @@ nltk
 colorama
 # gradio>5
 json5
+json-repair
 tiktoken
 pyarrow #==20.0.0 # larger than this will bug on python 3.10
 cookiecutter # auto template gen from CLI

@@ -2,6 +2,7 @@ import json
 import re
 
 import pandas as pd
+from json_repair import repair_json
 
 from dataflow import get_logger
 from dataflow.core import OperatorABC
@@ -203,11 +204,18 @@ class JsonParseFilter(OperatorABC):
                 .removesuffix("```")
             )
 
-            # 尝试解析 JSON
+            # 尝试修复并解析 JSON
             try:
-                d = json.loads(json_string)
-            except (json.JSONDecodeError, ValueError) as e:
-                self.logger.debug(f"Invalid JSON: {e}")
+                d = repair_json(json_string, return_objects=True)
+                # repair_json 几乎不抛异常，需要检查返回值有效性
+                if not isinstance(d, dict):
+                    self.logger.debug(
+                        f"repair_json returned non-dict: {type(d).__name__}"
+                    )
+                    invalid_json_count += 1
+                    continue
+            except (TypeError, ValueError) as e:
+                self.logger.debug(f"repair_json failed: {e}")
                 invalid_json_count += 1
                 continue
 
