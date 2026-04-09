@@ -1188,7 +1188,9 @@ class PartitionPipelineParallelRun(PipelineABC):
                 # ===== 提交 workload 到线程池 =====
                 submitted_count = 0
                 max_concurrent = max_parallelism - len(futures)
-                for wl in ready_nodes[:max_concurrent]:
+                for wl in ready_nodes:
+                    if submitted_count >= max_concurrent:
+                        break
                     node = self.op_nodes_list[wl.step]
                     # 提交前再次检查 LLM Serving（防止并发竞争）
                     if (
