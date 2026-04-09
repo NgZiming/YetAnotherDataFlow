@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6.post1] - 2026-04-09
+
+### Fixed
+
+- **Session lock 文件路径修复** (`c70136f`, `909c5fe`)
+  - 修正 session lock 文件检测位置（lock 文件实际位于 `agent/sessions/` 目录下，而非 workspace 根目录）
+  - 修复 `_is_agent_locked()` 使用正确的 `sessions/` 子目录路径
+  - 修复 `/new` 失败时的 lock 文件清理逻辑
+  - 将未定义的 `_cleanup_agent_locks` 函数调用替换为内联逻辑
+
+- **Thread safety** (`f7b4a01`)
+  - 修复 S3Storage 的线程安全问题
+
+---
+
 ## [1.0.6] - 2026-04-08
 
 ### Added
