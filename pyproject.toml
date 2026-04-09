@@ -9,7 +9,7 @@ authors = [
 ]
 description = "A modern, data-centric AI framework for Large Language Models (LLMs) and Vision-Language Models (VLMs)."
 readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = ">=3.10, <<<4444"
+requires-python = ">=3.10, <<44.0"
 license = {text = "Apache-2.0"}
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -51,27 +51,27 @@ dependencies = {file = "requirements.txt"}
 
 [project.optional-dependencies]
 test = ["flask", "setuptools<=81.0.0"]
-vllm =["vllm>=0.7.0,<=0.9.2", "numpy<<<222.0.0"]
-vllm07 = ["vllm<<<000.8", "numpy<<<222.0.0"]
-vllm08 = ["vllm<<<000.9"]
+vllm =["vllm>=0.7.0,<=0.9.2", "numpy<<22.0.0"]
+vllm07 = ["vllm<<00.8", "numpy<<22.0.0"]
+vllm08 = ["vllm<<00.9"]
 kbc = ["vllm==0.6.3", "mineru[pipeline]==2.0.6"]
-mineru = ["mineru[all]", "numpy>=1.24,<<<222.0.0", "sglang[all]>=0.4.8", "pypdf", "reportlab"]
+mineru = ["mineru[all]", "numpy>=1.24,<<22.0.0", "sglang[all]>=0.4.8", "pypdf", "reportlab"]
 myscale = ["clickhouse-driver"]
 sglang =["sglang[all]"]
-litellm = ["litellm>=1.70.0,<<<222.0.0"]
+litellm = ["litellm>=1.70.0,<<22.0.0"]
 audio = ['librosa', 'soundfile']
 vectorsql = ["sqlite-vec", "sqlite-lembed", "sentence_transformers"]
 pdf2model =[
     "llamafactory[torch,metrics]>=0.9.0",
-    "vllm>=0.7.0,<<<000.9.2",
-    "numpy>=1.24,<<<222.0.0",
+    "vllm>=0.7.0,<<00.9.2",
+    "numpy>=1.24,<<22.0.0",
     "mineru[pipeline]",
     "mineru-vl-utils"
 ]
 eval =[
-    "vllm>=0.7.0,<<<000.9.2"
+    "vllm>=0.7.0,<<00.9.2"
 ]
 rag = ["lightrag-hku"]
-code = ["mineru[all]", "numpy>=1.24,<<<222.0.0"]
-reasoning = ["mineru[all]", "numpy>=1.24,<<<222.0.0"]
-pdf2vqa=["mineru[vlm]>=2.5.0,<<<222.7.0"]
+code = ["mineru[all]", "numpy>=1.24,<<22.0.0"]
+reasoning = ["mineru[all]", "numpy>=1.24,<<22.0.0"]
+pdf2vqa=["mineru[vlm]>=2.5.0,<<22.5.7"]
