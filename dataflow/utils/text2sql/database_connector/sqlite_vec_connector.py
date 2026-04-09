@@ -30,7 +30,7 @@ class SQLiteVecConnector(DatabaseConnectorABC):
         except ImportError:
             raise ImportError(
                 "The 'vectorsql' optional dependencies are required but not installed.\n"
-                "Please run: pip install 'open-dataflow[vectorsql]'"
+                "Please run: pip install 'ya-dataflow[vectorsql]'"
             )
 
     def _ensure_lembed_available(self):
@@ -42,7 +42,7 @@ class SQLiteVecConnector(DatabaseConnectorABC):
         except ImportError:
             raise ImportError(
                 "sqlite_lembed is required for vector SQL execution. "
-                "Please run: pip install 'open-dataflow[vectorsql]'"
+                "Please run: pip install 'ya-dataflow[vectorsql]'"
             )
 
     def connect(self, connection_info: Dict) -> sqlite3.Connection:

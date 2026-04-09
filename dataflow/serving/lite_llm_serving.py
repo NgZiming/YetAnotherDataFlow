@@ -79,7 +79,7 @@ class LiteLLMServing(LLMServingABC):
         except ImportError:
             raise ImportError(
                 "litellm is not installed. Please install it with: "
-                "pip install open-dataflow[litellm] or pip install litellm"
+                "pip install ya-dataflow[litellm] or pip install litellm"
             )
         
         self.serving_type = serving_type

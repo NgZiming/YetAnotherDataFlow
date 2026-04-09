@@ -1,1059 +1,193 @@
-[English](README.md) | 简体中文
+# ya-dataflow
+
+**ya-dataflow** 是一个现代化的、以数据为中心的 AI 框架，旨在编排面向大语言模型 (LLM) 和视觉语言模型 (VLM) 的复杂、大规模工作流。
+
+它提供了一个统一、模块化且高度可扩展的架构，用于管理 AI 数据处理的全生命周期—从原始数据的摄取、复杂的多模态推理，到高吞吐量的轨迹合成以及大规模评估。
 
 ---
 
-DataFlow 是个好项目，但是我的工作来得太快了，我没时间等它实现我需要的功能。
+## 🌟 核心理念：以数据为中心 (Data-Centric AI)
 
-等我适配好了我的环境，交付了我自己的项目，发现距离 v1.0.8 已经太远了，没有合回去的可能性。所以自己建了一个 repo。
-
-主要差异：
-1. 支持 S3
-2. 并发数分片运行，依赖分析
-3. 读写分离
-4. openclaw serving
-5. **Docker 镜像支持** - 可构建包含 OpenClaw 的 DataFlow 镜像
-
-欢迎大家使用。
-
-## 🐳 Docker 镜像构建
-
-本项目提供 Dockerfile，可构建包含 OpenClaw 的 DataFlow 镜像：
-
-```bash
-# 构建镜像
-docker build -t dataflow:latest .
-
-# 运行容器
-docker run -it --rm dataflow:latest
-```
-
-**镜像特点：**
-- Python 3.12 + Miniconda 环境管理
-- Node.js 24 + OpenClaw CLI
-- DataFlow 核心代码和算子
-- 优化的 `.dockerignore` 排除非运行时文件
-
-**使用示例：**
-
-```bash
-# 进入容器后，可直接使用 dataflow 命令
-dataflow -v
-
-# 运行 Pipeline
-python my_pipeline.py
-```
-
-详细配置见 [Dockerfile](Dockerfile) 和 [.dockerignore](.dockerignore)。
-
-# DataFlow Pipeline 新手教程
-
-> 本教程将带你从零开始，使用 DataFlow 构建一个完整的 AI 数据处理 Pipeline。
-
-## 📚 目录
-
-1. [环境准备](#1-环境准备)
-2. [第一个 Pipeline：文本翻译](#2-第一个-pipeline 文本翻译)
-3. [多步骤 Pipeline](#3-多步骤-pipeline)
-4. [S3 数据源支持](#4-s3 数据源支持)
-5. [常见问题](#5-常见问题)
+在大模型时代，瓶颈不再仅仅是模型容量，而是喂养模型的**数据流水线**的质量与规模。**ya-dataflow** 的设计初衷就是解决这一问题：通过将数据视为“一等公民”，提供一个强大的引擎，将原始、非结构化的数据转化为用于训练、微调和评估的高质量、结构化数据集。
 
 ---
 
-## 1. 环境准备
+## ✨ 核心能力
 
-### 1.1 安装 DataFlow
+### 🏗️ 模块化算子架构 (Modular Operator Architecture)
+`ya-dataflow` 的核心是高度可扩展的算子设计。无论是简单的文本清洗步骤，复杂的 RAG 检索，还是复杂的 VLM 推理过程，都可以被实现为一个标准的 `Operator`。这使得构建复杂的流水线变得像搭积木一样简单。
 
-```bash
-# 创建虚拟环境
-conda create -n dataflow python=3.12
-conda activate dataflow
+### 🚀 可扩展的流水线执行 (Scalable Pipeline Execution)
+针对海量工作负载设计，`ya-dataflow` 支持先进的执行策略，如 `PartitionPipelineParallelRun`。它能够在分布式环境中实现高吞吐量的并行处理，足以应对数十亿 Token 或数百万多模态资产的处理需求。
 
-# 安装 DataFlow
-pip install open-dataflow
-```
+### 🧪 高保真合成数据生成 (High-Fidelity Synthetic Data Generation)
+利用强大的二进制和结构化文件生成系统，`ya-dataflow` 可以合成多样化的数据集—包括 JSON、XML、Markdown、HTML 以及复杂的二进制格式（如 PDF、XLSX 和 PPTX）—为构建稳健的测试和训练环境提供支持。
 
-### 1.2 验证安装
-
-```bash
-dataflow -v
-```
-
-应该看到类似输出：
-```
-open-dataflow codebase version: 1.0.0
-```
+### 🤖 智能体生态集成 (Agentic Ecosystem Integration)
+与 **OpenClaw** 和 **Nanobot** 生态系统深度集成。通过 `CLIOpenClawServing` 和 `NanobotServing`，您的数据流水线可以转化为可被自主智能体动态调用和编排的智能能力。
 
 ---
 
-## 2. 第一个 Pipeline：文本翻译
+## 🚀 Why ya-dataflow? (高级特性)
 
-### 2.1 准备数据
+不同于仅处理简单任务的工具，`ya-dataflow` 是为**生产级、大规模 AI 数据工程**而生的。
 
-创建一个 `input.jsonl` 文件：
+### 💎 企业级数据管理
+- **云原生存储**：原生、无缝支持 **S3** 及其他主流云存储。
+- **读写分离**：通过解耦 `DataSource` 与 `Storage` 层，实现极高的灵活性与控制力。
+- **智能缓存机制**：内置先进的缓存管理 (`CacheStorage`)，极大优化 I/O 并加速重复任务。
 
-```json
-{"id": 1, "raw_content": "Hello, world!"}
-{"id": 2, "raw_content": "DataFlow is awesome!"}
-{"id": 3, "raw_content": "Machine learning is fun"}
+### 💎 生产级可靠性
+- **断点续传 (Checkpointing)**：内置完备的进度管理。即使是运行数天的超大规模任务，中断后也能从上次位置快速恢复。
+- **细粒度并行化**：超越了简单的任务并行，通过**分片级并行 (Partition-level parallelism)**，支持将数据集拆分为极细粒度的单元进行高吞吐处理。
+
+### 💎 智能体联动能力
+- **OpenClaw 深度集成**：通过 `CLIOpenClawServing` 桥接智能体推理与重型数据流水线。
+- **Nanobot 就绪**：集成 `NanobotServing`，可在 Nanobot SDK 生态系统中实现轻量级、高性能的服务化能力。
+
+---
+
+## 🚀 Getting Started
+
+### 1. 安装
+
+安装核心框架：
+```bash
+pip install ya-dataflow
 ```
 
-### 2.2 编写 Pipeline
+根据具体场景安装扩展包：
+```bash
+# 用于 RAG 工作流
+pip install ya-dataflow[rag]
 
-创建 `translate_pipeline.py`：
+# 用于多模态 (VLM) 和 PDF 处理
+pip install ya-dataflow[pdf2vqa]
+
+# 用于 LLM 服务与大规模评估
+pip install ya-dataflow[vllm,eval]
+
+# 用于代码与数学推理任务
+pip install ya-dataflow[code,reasoning]
+```
+
+### 2. 基础用法 (Python API)
+
+在生产环境中，您通过继承 `PartitionPipelineParallelRun` 并实现 `forward` 方法来定义流水线，从而编排您的算子。
 
 ```python
-from dataflow.pipeline import PipelineABC
-from dataflow.operators.core_text import PromptedGenerator
-from dataflow.serving import APILLMServing_request
-from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
-
-
-class TranslatePipeline(PipelineABC):
-    def __init__(self):
-        # 1. 创建进度存储（PipelineABC 需要）
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        # 2. 创建 DataSource（支持多个路径）
-        self.data_source = FileDataSource(
-            paths=["./input.jsonl", "./input_dir/"],  # 文件和目录混合
-            format_type="jsonl",
-        )
-
-        # 3. 创建 Storage（必须指定 id_key）
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",  # 必须指定！用于唯一标识每一行
-            cache_path="./cache",
-            cache_type="jsonl",
-        )
-
-        # 4. 创建 LLM Serving
-        self.llm = APILLMServing_request(
-            api_url="http://localhost:8000/v1/chat/completions",
-            model_name="qwen-7b",
-            max_workers=4,
-        )
-
-        # 5. 创建翻译算子
-        self.translate_op = PromptedGenerator(
-            llm_serving=self.llm,
-            system_prompt="请将以下内容翻译成中文：",
-        )
-
-    def forward(self):
-        # 使用 storage.step() 自动管理分片和步骤
-        self.translate_op.run(
-            self.storage.step(),
-            input_key="raw_content",
-            output_key="translation",
-        )
-
-
-if __name__ == "__main__":
-    # 创建 Pipeline
-    pipeline = TranslatePipeline()
-
-    # 编译（初始化）
-    pipeline.compile()
-
-    # 执行
-    pipeline.forward()
-
-    print("✅ 翻译完成！结果保存在 ./cache 目录")
-```
-
-### 2.3 运行 Pipeline
-
-```bash
-python translate_pipeline.py
-```
-
-### 2.4 查看结果
-
-```bash
-cat cache/partition_1.jsonl
-```
-
-输出示例：
-```json
-{"id": 1, "raw_content": "Hello, world!", "translation": "你好，世界！"}
-{"id": 2, "raw_content": "DataFlow is awesome!", "translation": "DataFlow 太棒了！"}
-{"id": 3, "raw_content": "Machine learning is fun", "translation": "机器学习很有趣"}
-```
-
----
-
-## 3. 多步骤 Pipeline
-
-### 3.1 场景：翻译 + 润色 + 摘要
-
-```python
-from dataflow.pipeline import PipelineABC
-from dataflow.operators.core_text import PromptedGenerator
-from dataflow.serving import APILLMServing_request
-from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
-
-
-class MultiStepPipeline(PipelineABC):
-    def __init__(self):
-        # 1. 创建进度存储
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        # 2. 创建 DataSource
-        self.data_source = FileDataSource(
-            paths=["./input.jsonl"],
-            format_type="jsonl",
-        )
-
-        # 3. 创建 Storage
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl",
-        )
-
-        # 4. 创建 LLM Serving
-        self.llm = APILLMServing_request(
-            api_url="http://localhost:8000/v1/chat/completions",
-            model_name="qwen-7b",
-            max_workers=4,
-        )
-
-        # 5. 创建算子
-        self.translate_op = PromptedGenerator(
-            llm_serving=self.llm,
-            system_prompt="请将以下内容翻译成中文：",
-        )
-
-        self.polish_op = PromptedGenerator(
-            llm_serving=self.llm,
-            system_prompt="请润色以下中文文本，使其更自然流畅：",
-        )
-
-        self.summary_op = PromptedGenerator(
-            llm_serving=self.llm,
-            system_prompt="请为以下文本生成一个简短摘要：",
-        )
-
-    def forward(self):
-        # 步骤 0: 翻译
-        self.translate_op.run(
-            self.storage.step(),
-            input_key="raw_content",
-            output_key="translation",
-        )
-
-        # 步骤 1: 润色（自动依赖步骤 0）
-        self.polish_op.run(
-            self.storage.step(),
-            input_key="translation",
-            output_key="polished",
-        )
-
-        # 步骤 2: 摘要（自动依赖步骤 1）
-        self.summary_op.run(
-            self.storage.step(),
-            input_key="polished",
-            output_key="summary",
-        )
-
-
-if __name__ == "__main__":
-    pipeline = MultiStepPipeline()
-    pipeline.compile()
-    pipeline.forward()
-```
-
----
-
-## 4. S3 数据源支持
-
-### 4.1 从 S3 读取数据
-
-```python
-from dataflow.utils.storage import S3DataSource, S3Storage, FileCacheStorage
-from dataflow.operators.core_text import PromptedGenerator
-from dataflow.serving import APILLMServing_request
-from dataflow.pipeline import PipelineABC
-
-
-class S3Pipeline(PipelineABC):
-    def __init__(self):
-        # 1. 创建进度存储
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        # 2. 创建 S3 DataSource
-        self.data_source = S3DataSource(
-            endpoint="https://s3.example.com",
-            ak="YOUR_ACCESS_KEY",
-            sk="YOUR_SECRET_KEY",
-            s3_paths=["s3://your-bucket/input/"],  # 支持目录
-            format_type="jsonl"
-        )
-
-        # 3. 创建 S3 Storage
-        self.storage = S3Storage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl"
-        )
-
-        # 4. 创建 LLM Serving
-        self.llm = APILLMServing_request(
-            api_url="http://localhost:8000/v1/chat/completions",
-            model_name="qwen-7b",
-            max_workers=4,
-        )
-
-        # 5. 创建算子
-        self.process_op = PromptedGenerator(
-            llm_serving=self.llm,
-            system_prompt="请处理以下内容：",
-        )
-
-    def forward(self):
-        # 使用 storage.step() 处理数据
-        self.process_op.run(
-            self.storage.step(),
-            input_key="raw_content",
-            output_key="result",
-        )
-```
-
----
-
-## 5. 常见问题
-
-### Q1: 如何处理超大文件（>100GB）？
-
-使用 `PartitionPipelineParallelRun` 进行并行分片处理：
-
-```python
-from dataflow.utils.storage import S3DataSource, S3Storage, FileCacheStorage
 from dataflow.pipeline import PartitionPipelineParallelRun
+from dataflow.operators.core_text import TextCleaningOperator
+from dataflow.utils.storage import FileDataSource, FileStorage, FileCacheStorage
+from dataflow.serving.api_llm_serving_request import APILLMServing_request
 
-
-class LargeFilePipeline(PartitionPipelineParallelRun):
-    def __init__(self, partitions: int):
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        # 传入分片数量
-        super().__init__(progress_storage, partitions)
-
-        self.data_source = S3DataSource(
-            endpoint="https://s3.example.com",
-            ak="xxx", sk="xxx",
-            s3_paths=["s3://bucket/huge_file.jsonl"],
-            format_type="jsonl"
-        )
-
-        self.storage = S3Storage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl"
-        )
+class MyProductionPipeline(PartitionPipelineParallelRun):
+    def __init__(self, source: FileDataSource, storage: FileStorage, llm_serving: APILLMServing_request):
+        # 1. 初始化 CacheStorage (关键：不能为空)
+        cache_storage = FileCacheStorage(cache_path="./cache")
+        
+        # 2. 初始化基类并传入 cache_storage 与明确的分片数
+        super().__init__(cache_storage=cache_storage, partitions=10)
+        
+        self.storage = storage
+        self.llm_serving = llm_serving
+        
+        # 定义算子
+        self.clean_op = TextCleaningOperator(self.llm_serving)
+        self.refine_op = SomeRefineOperator(self.llm_serving)
 
     def forward(self):
-        pass
-
-
-pipeline = LargeFilePipeline(1000)
-pipeline.compile()
-pipeline.forward(max_parallelism=10)  # 10 个并发
-```
-
-### Q2: 如何断点续传？
-
-```python
-# PipelineABC 支持断点续传
-pipeline.forward(resume_from_last=True)  # 从上次中断处继续
-```
-
-### Q3: DataSource 和 Storage 可以是不同的格式吗？
-
-**可以！** DataSource 和 Storage 可以独立选择格式和存储类型：
-
-```python
-# 示例：从 S3 JSONL 读取，写入本地 Parquet
-from dataflow.utils.storage import S3DataSource, FileStorage, FileCacheStorage
-from dataflow.pipeline import PipelineABC
-
-
-class ConvertPipeline(PipelineABC):
-    def __init__(self):
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        # DataSource: S3 JSONL
-        self.data_source = S3DataSource(
-            endpoint="https://s3.example.com",
-            ak="xxx", sk="xxx",
-            s3_paths=["s3://bucket/input.jsonl"],
-            format_type="jsonl"
+        # 步骤 1: 清洗原始文本
+        # .step() 获取当前分片的数据
+        self.clean_op.run(
+            self.storage.step(),
+            input_key="raw_text",
+            output_key="cleaned_text"
         )
 
-        # Storage: 本地 Parquet
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./output",
-            cache_type="parquet"  # 输出格式可以是 Parquet
+        # 步骤 2: 基于清洗后的文本进行精炼 (依赖: cleaned_text)
+        self.refine_op.run(
+            self.storage.step(),
+            input_key="raw_text",
+            output_key="final_result",
+            input_prev_1="cleaned_text" 
         )
 
-    def forward(self):
-        pass
-```
+# 使用示例
+source = FileDataSource(paths=["./input.jsonl"])
+storage = FileStorage(data_source=source, id_key="id", cache_path="./cache")
+llm = APILLMServing_request(api_url="...", model_name="...")
 
-**注意**：同一个 DataSource 的所有文件必须是**相同格式**。
-
-### Q4: 如何自定义 Operator？
-
-```python
-from dataflow.operators import OperatorABC
-
-
-class MyCustomOperator(OperatorABC):
-    def run(self, storage, **kwargs):
-        df = storage.read()
-
-        # 自定义处理逻辑
-        df['new_column'] = df['old_column'].apply(self.process)
-
-        storage.write(df)
-
-    def process(self, value):
-        # 你的处理逻辑
-        return value.upper()
-
-
-# 使用
-my_op = MyCustomOperator()
-my_op.run(storage, input_key='text', output_key='upper_text')
-```
-
-### Q5: `id_key` 的作用是什么？
-
-`id_key` 用于唯一标识每一行数据，支持：
-- **断点续传**：跳过已处理的数据
-- **去重**：避免重复处理
-- **增量更新**：只处理新增/修改的数据
-
-```python
-# 如果数据没有 id 字段，可以使用其他唯一字段
-self.storage = FileStorage(
-    data_source=self.data_source,
-    id_key="url",  # 使用 url 作为唯一标识
-    cache_path="./cache",
-    cache_type="jsonl",
-)
-```
-
-# DataFlow 重构设计总结
-
-> AI 生成内容
-
-> 本文档是对当前版本与官方 v1.0.10 的设计差异总结，适合作为 README.md 的补充阅读。
-
----
-
-## 核心改进概览
-
-| 模块         | 官方 v1.0.10            | 当前版本                    | 核心优势                 |
-| ------------ | ----------------------- | --------------------------- | ------------------------ |
-| **Storage**  | 单文件 (1184 行)，无 S3 | 模块化 (~5000+ 行)，支持 S3 | 数据面/控制面分离        |
-| **Pipeline** | 697 行，无并行          | 1225 行，Spark 风格         | 原生支持并行分片         |
-| **Serving**  | 基础实现                | 增强版 + OpenClaw           | 支持重试/多模态/OpenClaw |
-| **数据规模** | 内存一次性加载          | 流式处理                    | 支持 TB 级别数据         |
-
----
-
-## 1. Storage 模块
-
-[参考文档](dataflow/utils/storage/README.md)
-
-### 1.1 对比优势
-
-| 特性                      | 官方 v1.0.10     | 当前版本              |
-| ------------------------- | ---------------- | --------------------- |
-| 架构                      | 单文件，职责混合 | 模块化，职责分离      |
-| 数据面/控制面             | 未分离           | 明确分离              |
-| DataSource                | 无               | 支持 S3/HF/MS/本地    |
-| MediaStorage/CacheStorage | 无               | 针对复杂存储环境抽象  |
-| 分片处理                  | 无               | 原生支持              |
-| 多步骤合并                | 无               | load_partition 取交集 |
-
-### 1.2 为什么要这样改动？
-
-| 改动                           | 原因                                                           |
-| ------------------------------ | -------------------------------------------------------------- |
-| DataSource 流式读取            | 真实场景有千万行/TB 级别数据，避免内存爆炸                     |
-| DataSource 抽象                | 解决复杂环境的读写权限，企业里上下游数据保存位置和读写控制严格 |
-| MediaStorage/CacheStorage 抽象 | 企业内存储环境复杂，需要统一管理媒体文件和缓存                 |
-| 支持 S3                        | 官方还没有支持 S3，需要提前适配                                |
-| 数据面/控制面分离              | 个人工程品味，融合 dataflow 原有设计的改进                     |
-
----
-
-## 2. Serving 模块
-
-### 2.1 对比优势
-
-| 特性              | 官方 v1.0.10 | 当前版本           |
-| ----------------- | ------------ | ------------------ |
-| MediaStorage 集成 | 无           | 支持               |
-| CLI 集成          | 无           | CLIOpenClawServing |
-| API Key 校验      | 强制         | 可选               |
-
-### 2.2 为什么要这样改动？
-
-| 改动                              | 原因                                   |
-| --------------------------------- | -------------------------------------- |
-| APIVLMServing_openai 增加重试机制 | 提高 API 调用的稳定性                  |
-| 集成 MediaStorage                 | 支持从 Storage 读取媒体文件，统一管理  |
-| 新增 CLIOpenClawServing           | 通过 OpenClaw CLI 调用 Agent，支持并发 |
-| API Key 校验改为可选              | 某些场景下不需要 API Key               |
-| 增加 max_completion_tokens        | 控制生成长度                           |
-
----
-
-## 3. Pipeline 模块
-
-### 3.1 对比优势
-
-| 特性               | 官方 v1.0.10 | 当前版本                     |
-| ------------------ | ------------ | ---------------------------- |
-| Workload 类        | 无           | 新增                         |
-| 并行分片执行       | 手动处理     | PartitionPipelineParallelRun |
-| 依赖管理           | 无           | 完整管理                     |
-| execute_workload() | 无           | 单独方法                     |
-| 断点续传           | 简单         | 完整支持                     |
-
-### 3.2 为什么要这样改动？
-
-| 改动                            | 原因                                                                                                                  |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 引入 Workload 类                | 从 Spark 中吸取的经验，更清晰地表示工作负载状态                                                                       |
-| PartitionPipelineParallelRun 类 | 企业环境里同时部署了很多模型和购买了很多 api 服务，通过依赖分析识别不依赖彼此的请求，跨过原本约束尽快应对数据交付压力 |
-| 完整的依赖管理                  | 支持复杂的多步骤 Pipeline，自动处理依赖关系                                                                           |
-
----
-
-## 4. 实际效果
-
-- **数据规模**：支持千万行级别、TB 级别数据
-- **内存占用**：流式处理，内存占用恒定，与数据量无关
-- **并行度**：分片级并发 + 算子级并发，最大化并行度
-- **断点续传**：完整支持，故障恢复更可靠
-- **API 稳定性**：重试机制提高成功率
-- **OpenClaw 集成**：通过 CLI 调用 Agent，支持并发
-- **S3 支持**：提前适配官方尚未支持的功能
-
----
-
-## 5. 兼容性说明
-
-### Operator 不受影响
-
-**现有 Operator 代码无需修改！** Storage 模块的改动完全在控制面（Pipeline）和数据面（Storage）内部完成，Operator 的 `run()` 接口保持不变：
-
-```python
-# Operator 代码不受影响
-class MyOperator(OperatorABC):
-    def run(self, storage: StorageABC, **kwargs):
-        df = storage.read()      # 接口不变
-        # ... 处理逻辑 ...
-        storage.write(df)        # 接口不变
-```
-
-### 不兼容的变更（仅影响 Pipeline 作者）
-1. Storage 初始化需要传入 `data_source` 而非 `first_entry_file_name`
-2. API 变更：`get_keys_from_dataframe` → `get_keys`
-3. 分片流程：必须先调用 `split_input()` 才能 `read()`
-
-### 向后兼容
-1. `_partitions` 默认值为 1，保持向后兼容
-2. 基本读写接口 (`read`, `write`) 保持不变
-
----
-
-## 6. 快速参考
-
-### Storage 使用示例
-
-```python
-# 1. 创建 DataSource
-source = S3DataSource(endpoint, ak, sk, s3_paths, format_type="jsonl")
-
-# 2. 创建 Storage
-storage = FileStorage(data_source=source, cache_path="./cache")
-
-# 3. 分片（必须首先调用）
-storage.split_input(num_partitions=10)
-
-# 4. 处理步骤 0
-storage.batch_step = 0
-storage.operator_step = 0
-df = storage.read()  # 直接读 files[0]
-
-# 5. 处理步骤 >0
-storage.operator_step = 1
-storage.load_partition(dependent_steps=[0])
-df = storage.read()  # 返回 load_partition 的结果
-```
-
-### Pipeline 使用示例
-
-```python
-# 并行分片执行
-pipeline = PartitionPipelineParallelRun(cache_storage, partitions=10)
+pipeline = MyProductionPipeline(source, storage, llm)
 pipeline.compile()
-pipeline.forward(max_parallelism=4)  # 并发执行
+pipeline.run()
 ```
 
-### Serving 使用示例
+### 3. 高级进阶：大规模 S3 任务与断点续传
 
 ```python
-# OpenClaw CLI 集成
-from dataflow.serving import create_openclaw_serving
+from dataflow.pipeline import PartitionPipelineParallelRun
+from dataflow.utils.storage import S3DataSource, S3Storage, S3CacheStorage
 
-serving = create_openclaw_serving(
-    agent_id="main",
-    model="custom/Qwen3.5-122B-A10B",
-    max_workers=4,
-)
-responses = serving.generate_from_input(["问题 1", "问题 2"])
-```
-
-### NanobotServing - 轻量级 Nanobot SDK 集成
-
-```python
-from dataflow.serving import NanobotServing
-
-# 创建 NanobotServing
-serving = NanobotServing(
-    model_name="nanobot-model",
-    max_workers=4,
-    # 可选：API 配置
-    api_key="your-api-key",
-    base_url="https://api.nanobot.example.com",
-)
-
-# 生成响应
-responses = serving.generate_from_input(
-    ["Prompt 1", "Prompt 2"],
-    temperature=0.7,
-    max_tokens=1024,
-)
-```
-
-### CLI 请求重试和进度显示
-
-```python
-from dataflow.serving import CLIOpenClawServing
-
-serving = CLIOpenClawServing(
-    agent_id="main",
-    timeout=600,
-    max_workers=4,
-    # 重试配置
-    retry_times=3,
-    retry_delay=5,  # 秒
-    # 进度显示
-    show_progress=True,
-)
-
-responses = serving.generate_from_input(["问题 1", "问题 2"])
-```
-
-### 缓存配置
-
-```python
-from dataflow.utils.storage import S3DataSource, S3Storage
-
-# 配置缓存大小（默认：10GB）
-data_source = S3DataSource(
+# 配置大规模 S3 任务并开启断点续传
+source = S3DataSource(
     endpoint="https://s3.example.com",
-    ak="xxx",
-    sk="xxx",
-    s3_paths=["s3://bucket/data/"],
-    format_type="jsonl",
-    cache_dir="/data/cache",
-    cache_max_size_gb=50.0,  # 50GB 缓存
+    ak="YOUR_AK", sk="YOUR_SK",
+    s3_paths=["s3://my-bucket/massive-dataset/"],
 )
 
 storage = S3Storage(
-    data_source=data_source,
-    id_key="id",
-    cache_max_size_gb=50.0,  # 与 DataSource 保持一致
+    data_source=source,
+    id_key="task_id",
+    cache_path="./local_cache",
+    cache_type="jsonl"
 )
+
+# 通过 CacheStorage 实现断点续传
+progress_storage = S3CacheStorage(
+    endpoint="https://s3.example.com",
+    ak="YOUR_AK", sk="YOUR_SK",
+    cache_file="s3://my-bucket/checkpoints/pipeline_v1.json"
+)
+
+pipeline = PartitionPipelineParallelRun(
+    steps=[...],
+    data_source=source,
+    storage=storage,
+    cache_storage=progress_storage,
+    partitions=1000, # 支持数千个分片
+    max_parallelism=32
+)
+
+# 运行并自动恢复中断的任务
+pipeline.run(resume_from_last=True)
 ```
 
 ---
 
-## 7. 新增算子使用教程 (v1.0.3)
+## 📂 项目结构
 
-### 7.1 JsonParseFilter - JSON 解析和验证
-
-用于解析 LLM 返回的 JSON 字符串，并验证字段是否符合预期。
-
-```python
-from dataflow.pipeline import PipelineABC
-from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
-from dataflow.operators.core import JsonParseFilter
-
-
-class JsonParsePipeline(PipelineABC):
-    def __init__(self):
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        self.data_source = FileDataSource(paths=["./input.jsonl"], format_type="jsonl")
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl",
-        )
-
-        # 创建 JSON 解析算子
-        self.json_parser = JsonParseFilter(
-            required_fields=["filename", "format"],  # 必填字段
-            field_types={"filename": "str", "rows": "int"},  # 类型检查
-            field_ranges={"rows": (1, 1000)},  # 数值范围检查
-        )
-
-    def forward(self):
-        # 解析 JSON 字符串列，结果存入新列
-        self.json_parser.run(
-            self.storage.step(),
-            input_key="llm_output",  # 包含 JSON 字符串的列
-            output_key="parsed_data",  # 解析后的字典存入此列
-        )
+```text
+dataflow/
+├── core/               # 核心引擎、注册表与基础抽象
+├── operators/          # 丰富的内置算子库
+│   ├── core_text/      # 文本处理、清洗与提取
+│   ├── core_vision/    # VLM 与图像推理
+│   ├── code/           # 代码合成与执行
+│   ├── reasoning/      # 数学与逻辑推理
+│   └── ...             # 专项领域 (RAG, PDF2VQA 等)
+├── pipeline/           # 流水线编排与执行逻辑
+├── serving/            # LLM/VLM 服务集成 (vLLM, OpenAI 等)
+├── utils/              # 存储、注册表及各类工具函数
+└── ...
 ```
 
-### 7.2 NestExtractOperator - 嵌套 JSON 提取
+## 🤝 Contributing
 
-从嵌套 JSON 结构中提取字段到扁平列。
+`ya-dataflow` 是一个不断进化的生态系统。我们热忱欢迎社区的贡献，以共同扩展算子库并提升性能。请访问主仓库查看贡献指南。
 
-```python
-from dataflow.operators.core import NestExtractOperator
+[GitHub Repository](https://github.com/NgZing/YetAnotherDataFlow)
 
+## 📄 License
 
-class ExtractPipeline(PipelineABC):
-    def __init__(self):
-        # ... 初始化 Storage ...
-        # 创建嵌套提取算子
-        extract_op = NestExtractOperator(
-            # 输入列（包含 JSON）
-            input_data_name_key="user_json.user_name",
-            input_data_age_key="user_json.user_age",
-            input_tags_name_key="user_json.user_tags",
-            output_data_name_key="user_name",  # 从 user_json.name 提取
-            output_data_age_key="user_age",  # 从 user_json.age 提取
-            output_tags_name_key="user_tags",  # 从 user_json.tags 提取
-        )
-
-        # 支持复杂路径：点号和数组索引
-        extract_op_with_path = NestExtractOperator(
-            input_user_name_key="data.name",
-            input_user_email_key="data.email",
-            input_first_tag_key="data.tags[0]",
-            input_nested_value_key="data.nested",
-            output_user_name_key="name",  # data.name
-            output_user_email_key="email",  # data.email
-            output_first_tag_key="tags",  # data.tags[0]
-            output_nested_value_key="nested",  # data.nested.value
-        )
-        pass
-
-    def forward(self):
-        extract_op.run(
-            self.storage.step(),
-        )
-```
-
-### 7.3 FileContextGenerator + FormatStrPromptedAgenticGenerator - 二进制文件生成
-
-生成测试用的二进制文件（表格/文档/PPT/代码等）。
-
-```python
-from dataflow.pipeline import PipelineABC
-from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
-from dataflow.operators.agentic import FileContextGenerator
-from dataflow.operators.agentic import FormatStrPromptedAgenticGenerator
-from dataflow.serving import CLIOpenClawServing
-from dataflow.prompts.core_text import FormatStrPrompt
-
-
-class BinaryFileGenerationPipeline(PipelineABC):
-    def __init__(self):
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl",
-        )
-
-        # OpenClaw CLI Serving
-        self.llm = CLIOpenClawServing(
-            agent_id="main",
-            model="custom/Qwen3.5-122B-A10B",
-            max_workers=4,
-        )
-
-        # 文件内容生成算子
-        self.file_generator = FileContextGenerator(llm_serving=self.llm)
-
-        # 基于模板的生成算子
-        self.content_generator = FormatStrPromptedAgenticGenerator(
-            llm_serving=self.llm,
-            prompt_template=FormatStrPrompt,
-            system_prompt="You are a helpful assistant.",
-        )
-
-    def forward(self):
-        # 步骤 0: 根据任务生成文件内容
-        self.file_generator.run(
-            self.storage.step(),
-            input_files_key="file_paths",  # 文件路径列表列
-            input_question_key="task_description",  # 任务描述列
-            output_key="file_contents",  # 输出：{filename: content_data}
-        )
-
-        # 步骤 1: 使用文件内容生成其他数据
-        self.content_generator.run(
-            self.storage.step(),
-            input_files_data_key="file_contents",  # 传入文件内容数据
-            input_task_key="task_description",
-            output_key="additional_content",
-        )
-```
-
-**支持的文件格式：**
-
-| 类别   | 格式                       | 说明                         |
-| ------ | -------------------------- | ---------------------------- |
-| 表格   | CSV, XLSX, XLS             | 电子表格数据                 |
-| 文档   | PDF, DOCX, DOC, MD         | 报告、文档                   |
-| 演示   | PPTX, PPT                  | 演示文稿                     |
-| 结构化 | JSON, XML, HTML, YAML, YML | 配置文件、数据交换           |
-| 文本   | TXT, LOG                   | 纯文本、日志                 |
-| 代码   | PY, JS, TS                 | Python/JavaScript/TypeScript |
-
-### 7.4 完整示例：生成测试数据集
-
-```python
-# tasks.jsonl 内容示例：
-# {"id": 1, "file_paths": ["/workspace/sales_data.xlsx"], "task_description": "生成 2026 年第一季度销售数据"}
-# {"id": 2, "file_paths": ["/workspace/report.pdf"], "task_description": "生成项目进度报告"}
-
-from dataflow.pipeline import PipelineABC
-from dataflow.utils.storage import FileStorage, FileDataSource, FileCacheStorage
-from dataflow.operators.agentic import FileContextGenerator
-from dataflow.serving import CLIOpenClawServing
-
-
-class TestDataGenerationPipeline(PipelineABC):
-    def __init__(self):
-        progress_storage = FileCacheStorage(cache_path="./cache")
-        super().__init__(progress_storage)
-
-        self.data_source = FileDataSource(paths=["./tasks.jsonl"], format_type="jsonl")
-        self.storage = FileStorage(
-            data_source=self.data_source,
-            id_key="id",
-            cache_path="./cache",
-            cache_type="jsonl",
-        )
-
-        self.llm = CLIOpenClawServing(
-            agent_id="main",
-            model="custom/Qwen3.5-122B-A10B",
-            max_workers=4,
-        )
-
-        self.file_generator = FileContextGenerator(llm_serving=self.llm)
-
-    def forward(self):
-        self.file_generator.run(
-            self.storage.step(),
-            input_files_key="file_paths",
-            input_question_key="task_description",
-            output_key="file_contents",
-        )
-
-
-if __name__ == "__main__":
-    pipeline = TestDataGenerationPipeline()
-    pipeline.compile()
-    pipeline.forward()
-    print("✅ 测试文件生成完成！")
-```
-
----
-
-## 版本历史
-
-### [1.0.4] - 2026-04-03
-
-#### Added
-
-- **Pipeline 分片跳过优化**
-  - `Pipeline.compile()`: 检查 progress 中的 `total_shards`，已分片则跳过 `split_input()`
-  - 新增 `is_partitioned` 属性到 `PartitionableStorage` 接口
-  - 支持任务重启时跳过已完成分片，避免重复处理
-
-- **Storage 接口优化**
-  - 移除 `batch_size` 属性（分片时动态计算）
-  - `get_keys()` 从 DataSource 读取字段名
-
-#### Changed
-
-- **Docker 镜像优化**
-  - 代码拷贝路径改为 `/opt/dataflow`
-  - 更新 `.dockerignore` 排除非运行时文件
-    - `dataflow/example/` - 示例数据
-    - `dataflow/cli_funcs/` - CLI 功能
-    - `dataflow/webui/` - Web UI
-    - `static/` - 静态资源
-
-- **本地安装支持**
-  - Dockerfile 改为安装本地文件夹而非远程 git
-  - 移除包含敏感信息的远程 git URL
-
-#### Removed
-
-- **BatchedPipeline 相关代码**
-  - 删除 `BatchedPipelineABC`, `StreamBatchedPipelineABC` 类
-  - 删除 `BatchedFileStorage`, `StreamBatchedFileStorage` 类
-  - 删除测试文件 `test/test_batched_pipeline.py`, `test/test_batched_stream_pipeline.py`
-  - 删除模板文件 `my_pipeline.py`
-
-#### Fixed
-
-- **Pipeline 进度初始化**
-  - `progress["partitions"]` 列表长度改为 `self._partitions`
-  - `_build_operator_nodes_graph()` 移到 progress 创建之前
-
-- **Pipeline 类名获取**
-  - `pipeline_class` 改为 `type(self).__bases__[0].__name__`
-  - 确保获取基类名 (`PipelineABC` 或 `PartitionPipelineParallelRun`)
-
-- **依赖修复**
-  - `requirements.txt` 新增依赖
-
----
-
-### [1.0.3] - 2026-04-02
-
-#### Added
-
-- **核心算子模块**
-  - `JsonParseFilter`: JSON 解析和验证算子，支持字段类型检查、正则匹配、数值范围验证
-  - `NestExtractOperator`: 嵌套 JSON 提取算子，支持点号路径和数组索引语法
-  - `FormatStrPromptedAgenticGenerator`: 基于模板提示的 Agent 生成算子，支持传递文件内容数据
-  - `FileContextGenerator`: 文件内容合成算子，根据文件路径和问题生成表格/文档/PPT/代码等内容
-
-- **二进制文件生成系统**
-  - `generate_binary_files.py`: 支持 11 种格式的测试文件生成
-  - `CLIOpenClawServing` 增强：支持在 LLM 调用前注入二进制文件内容数据
-  - 5 类 Prompt 模板：table/document/presentation/structured/text/code
-
-- **依赖更新**
-  - 新增 `openpyxl`, `python-pptx`, `reportlab`, `docx`
-
-#### Fixed
-
-- 文件验证和路径处理修复
-- Pipeline 输入检查增强
-
-### [1.0.2] - 2026-04-01
-
-#### Fixed
-
-- **Pipeline 输入键检查增强**
-  - `PipelineABC._check_input_keys`: 添加空 `input_key_first_part` 检查
-  - `PartitionPipelineParallelRun`: 跳过以 `.` 开头的 `key_para_name`
-
-- **OpenClaw CLI Serving 超时处理**
-  - timeout 从硬编码 30 秒改为使用传入的 `timeout` 参数
-  - 超时异常从返回空字符串改为抛出异常
-
-- **Storage schema 包含 id_key**
-  - `FileStorage.get_schema` 和 `S3Storage.get_schema` 返回的 schema 包含 `id_key`
-
-- **文件句柄泄漏修复**
-  - `FileStorage._load_data_for_pruning`: 添加 try-finally 确保文件正确关闭
-
-### [1.0.1] - 2026-03-31
-
-#### Added
-
-- **IdSynthesizer 抽象类**
-  - 新增 `IdSynthesizer` 抽象基类，支持缺失 `id_key` 的自动合成
-  - 实现 `UuidIdSynthesizer`（默认）和 `CounterIdSynthesizer`
-
-- **OpenClaw CLI Serving 重构**
-  - 改用预先创建的 worker agents，避免重复创建失败
-  - 每次请求前执行 `/new` 创建新 session
-
-- **Pipeline 并行检查优化**
-  - `_check_completed_workloads` 改为多线程并行检查
-
-#### Changed
-
-- **Session 文件等待增强**
-  - `load_session` 改为抛异常，不再返回 `None`
-  - `_resolve_transcript_path` 超时从 15 秒延长到 60 秒
-
-- **Worker agent 注册等待**
-  - 创建 worker agent 后轮询检查是否注册成功
-
-### [1.0.0] - 2026-03-30
-
-#### Added
-
-- **Storage 模块架构重构**
-  - 重构为 6 个模块化文件
-  - 数据面/控制面分离设计
-  - DataSource 抽象类，支持本地文件、S3、HuggingFace、ModelScope
-
-- **智能行数估算**
-  - Parquet 格式 O(1) 复杂度读取 metadata
-  - S3 Parquet 仅下载 footer (~64KB)
-
-- **PartitionPipelineParallelRun** - 支持大规模数据并行处理
-
-- **数据格式支持扩展**
-  - Parquet、Pickle、JSON
-
-- **S3 性能优化**
-  - S3 Range 请求：Parquet 文件仅下载 footer
-
-#### Changed
-
-- **Pipeline 接口简化**
-  - 使用 `storage.step()` 自动管理分片和步骤
-  - 自动分片和依赖管理
-
-#### Documentation
-
-- 新增 `TUTORIAL.md` (中文) 和 `TUTORIAL-en.md` (英文)
-- 更新 `README.md` 和 `README-zh.md`
-
----
-
-<div align="center">
-
-**有问题？查看 [GitHub Issues](https://github.com/OpenDCAI/DataFlow/issues) 或加入 [社区](#11-community--support)**
-
-</div>
+本项目采用 **Apache-2.0** 协议开源。

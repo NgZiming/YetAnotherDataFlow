@@ -23,7 +23,7 @@ app = typer.Typer(
     )
 color_init(autoreset=True)
 
-PYPI_API = "https://pypi.org/pypi/open-dataflow/json"
+PYPI_API = "https://pypi.org/pypi/ya-dataflow/json"
 ADAPTER_FILES = {"adapter_config.json", "adapter_model.bin", "adapter_model.safetensors"}
 BASE_MODEL_FILES = {"config.json", "pytorch_model.bin", "model.safetensors", "tokenizer.json", "tokenizer_config.json"}
 
@@ -35,7 +35,7 @@ def check_updates() -> None:
     except Exception:
         pass
     print("=" * cols)
-    _echo(f"open-dataflow version: {__version__}", "cyan")
+    _echo(f"ya-dataflow version: {__version__}", "cyan")
     try:
         r = requests.get(PYPI_API, timeout=5)
         r.raise_for_status()
@@ -43,7 +43,7 @@ def check_updates() -> None:
         _echo(f"Local version : {__version__}", None)
         _echo(f"PyPI  version : {remote}", None)
         if remote and remote != __version__:
-            _echo(f"New version available: {remote} — Run 'pip install -U open-dataflow' to upgrade", "yellow")
+            _echo(f"New version available: {remote} — Run 'pip install -U ya-dataflow' to upgrade", "yellow")
         else:
             _echo("You are using the latest version.", "green")
     except Exception as e:
@@ -209,7 +209,7 @@ def main(
 ):
     """DataFlow CLI entrypoint."""
     if version:
-        _echo(f"open-dataflow {__version__}", "cyan")
+        _echo(f"ya-dataflow {__version__}", "cyan")
         # raise typer.Exit()
     # if check_updates_flag:
         check_updates()

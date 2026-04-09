@@ -4,6 +4,7 @@ from dataflow import get_logger
 from typing import Union, Any, Set
 
 from dataflow.utils.storage import DataFlowStorage
+from dataflow.utils.storage.data_parser import clean_surrogates
 from dataflow.core import OperatorABC
 from dataflow.serving.cli_openclaw_serving import CLIOpenClawServing
 from dataflow.core.prompt import prompt_restrict, PromptABC, DIYPromptABC
@@ -97,7 +98,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             input_files_data=input_files_data,
         )
 
-        dataframe[self.output_key] = generated_outputs
+        dataframe[self.output_key] = clean_surrogates(generated_outputs)
         dataframe[f".prompt.system.{self.output_key}"] = self.system_prompt
         dataframe[f".prompt.user.{self.output_key}"] = llm_inputs
 
@@ -114,7 +115,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "结合输入数据中的字段自动构造完整提示词并调用 CLIOpenClawServing 生成结果。\n\n"
                 "与 FormatStrPromptedGenerator 的区别：\n"
                 "- 只能使用 CLIOpenClawServing\n"
-                "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件内容数据\n\n"
+                "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件数据\n\n"
                 "输入参数：\n"
                 "- llm_serving：CLIOpenClawServing 服务对象\n"
                 "- prompt_template：提示词模板对象（StrFormatPrompt 或 DIYPromptABC）\n"

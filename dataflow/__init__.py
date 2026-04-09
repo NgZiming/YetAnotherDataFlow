@@ -12,4 +12,4 @@ __all__ = [
 
 
 def hello():
-    return "Hello from open-dataflow!"
+    return "Hello from ya-dataflow!"
