@@ -764,8 +764,10 @@ class CLIOpenClawServing(LLMServingABC):
         feedback = ""
         if "反馈:" in verify_output:
             feedback = verify_output.split("反馈:")[-1].strip()
-        elif "improvement" in verify_output or "建议" in verify_output:
-            feedback = verify_output
+        elif "反馈：" in verify_output:
+            feedback = verify_output.split("反馈：")[-1].strip()
+        else:
+            raise Exception("反馈找不到")
 
         return is_completed, feedback
 
