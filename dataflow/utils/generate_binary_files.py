@@ -250,10 +250,22 @@ def generate_ppt(content: Dict, output_path: Path):
 
 def generate_csv(content: Dict, output_path: Path):
     """生成 CSV 文件"""
+    # CSV 可能包含 sheets 数组（兼容 Excel 格式），也可能直接是 headers/rows
+    if "sheets" in content and len(content["sheets"]) > 0:
+        # 使用第一个 sheet 的数据
+        sheet = content["sheets"][0]
+        headers = sheet.get("headers", [])
+        rows = sheet.get("rows", [])
+    else:
+        # 直接访问 headers/rows（旧格式）
+        headers = content.get("headers", [])
+        rows = content.get("rows", [])
+
     with open(str(output_path), "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(content["headers"])
-        writer.writerows(content["rows"])
+        if headers:
+            writer.writerow(headers)
+        writer.writerows(rows)
 
 
 def generate_json(content: Dict, output_path: Path):
