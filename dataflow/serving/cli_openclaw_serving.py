@@ -606,9 +606,17 @@ class CLIOpenClawServing(LLMServingABC):
         completed = 0
         failed = 0
 
+        results: list[str] = [""] * total
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             for i, question in enumerate(user_inputs):
+                # 检查 question 是否为空
+                if not question or not question.strip():
+                    self.logger.warning(f"任务 {i}: user_inputs[{i}] 为空字符串，跳过")
+                    results[i] = ""
+                    continue
+
                 # 分配 worker agent（轮询）
                 worker_agent_id = self._worker_agents[i % len(self._worker_agents)]
                 # 传入对应的文件数据和 skill 数据
@@ -626,8 +634,6 @@ class CLIOpenClawServing(LLMServingABC):
                 futures[future] = i
 
                 self.logger.debug(f"已提交 {len(futures)} 个任务到线程池")
-
-            results: list[str] = [""] * total
 
             with tqdm(total=total, desc="处理请求", unit="task") as pbar:
                 for future in as_completed(futures):
@@ -770,6 +776,9 @@ class CLIOpenClawServing(LLMServingABC):
         elif "反馈：" in verify_output:
             feedback = verify_output.split("反馈：")[-1].strip()
         else:
+            self.logger.warning(
+                f"验证输出中未找到'反馈:'字段，完整输出：{verify_output[:200]}"
+            )
             raise Exception("反馈找不到")
 
         # 校验 feedback 不能为空
@@ -801,7 +810,14 @@ class CLIOpenClawServing(LLMServingABC):
         Returns:
             最终输出
         """
-        self.logger.info(f"开始任务执行：{task_description[:50]}...")
+        self.logger.info(
+            f"开始任务执行：task_description 长度={len(task_description) if task_description else 0}"
+        )
+        if not task_description or not task_description.strip():
+            self.logger.error(
+                f"task_description 为空！worker_agent_id={worker_agent_id}"
+            )
+            raise Exception("task_description 为空")
 
         round_num = 0
         feedback = ""
@@ -827,9 +843,15 @@ class CLIOpenClawServing(LLMServingABC):
                         # 构建本轮用户输入
                         if round_num == 1:
                             user_input = task_description
+                            self.logger.info(
+                                f"[轮次 {round_num}] user_input 来源：task_description (长度={len(task_description) if task_description else 0})"
+                            )
                         else:
                             # 后续轮次：只用 feedback，更像真人的回答
                             user_input = feedback
+                            self.logger.info(
+                                f"[轮次 {round_num}] user_input 来源：feedback (长度={len(feedback) if feedback else 0})"
+                            )
 
                         # 执行任务（发送查询到 session）
                         # 仅在首轮添加文件/skills 信息，后续轮次 session 已存在
