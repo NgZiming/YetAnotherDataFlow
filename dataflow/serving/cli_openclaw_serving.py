@@ -255,6 +255,7 @@ def _prepare_and_create_session(
     logger: Any,
     input_files_data: Dict,
     input_skills_data: List[str],
+    skill_base_dir: Optional[str] = None,
 ):
     """
     Session 上下文管理器：创建新 session 并准备文件/skills，退出时清理。
@@ -264,7 +265,8 @@ def _prepare_and_create_session(
         timeout: 超时时间（秒）
         logger: 日志对象
         input_files_data: 文件内容数据
-        input_skills_data: Skill 绝对路径列表
+        input_skills_data: Skill 名称列表（或绝对路径）
+        skill_base_dir: Skill 基础目录，用于解析相对路径的 skill 名称
 
     Yields:
         tuple: (new_file_paths, new_skill_paths) - 生成的文件和新拷贝的 skill 路径
@@ -328,12 +330,20 @@ def _prepare_and_create_session(
             )
             new_file_paths.append(str(new_path))
 
-        # 拷贝 skill 目录
+        # 拷贝 skill 目录（使用 skill_base_dir 解析路径）
         skills_dir.mkdir(parents=True, exist_ok=True)
-        for skill_path in input_skills_data:
-            src_path = Path(skill_path)
+        for skill_name in input_skills_data:
+            # 如果 skill_name 已经是绝对路径，直接使用；否则用 skill_base_dir 组合
+            if Path(skill_name).is_absolute():
+                src_path = Path(skill_name)
+            elif skill_base_dir:
+                src_path = Path(skill_base_dir) / skill_name
+            else:
+                src_path = Path(skill_name)
+
             if not src_path.exists() or not src_path.is_dir():
-                raise Exception(f"Skill 路径不存在：{skill_path}")
+                raise Exception(f"Skill 路径不存在：{src_path}")
+
             dst_path = skills_dir / src_path.name
             shutil.copytree(src_path, dst_path)
             new_skill_paths.append(str(dst_path))
@@ -388,6 +398,7 @@ class CLIOpenClawServing(LLMServingABC):
         create_if_missing: bool = True,
         max_workers: int = 4,
         max_retries: int = 3,
+        skill_base_dir: Optional[str] = None,
         # 验证用 LLM 参数
         verification_api_key: Optional[str] = None,
         verification_base_url: Optional[str] = None,
@@ -403,6 +414,7 @@ class CLIOpenClawServing(LLMServingABC):
             create_if_missing: 如果 agent 不存在是否自动创建，默认 True
             max_workers: 并发 worker 数量，默认 4
             max_retries: 请求失败时的最大重试次数，默认 3
+            skill_base_dir: Skill 基础目录，用于解析相对路径的 skill 名称
             verification_api_key: 验证用 API key，从 OPENAI_API_KEY 环境变量读取
             verification_base_url: 验证用 API base URL，从 OPENAI_BASE_URL 环境变量读取
             verification_client_params: 验证用 LLM 调用参数字典，支持：
@@ -425,6 +437,7 @@ class CLIOpenClawServing(LLMServingABC):
         self.create_if_missing = create_if_missing
         self.max_workers = max_workers
         self.max_retries = max_retries
+        self.skill_base_dir = skill_base_dir
 
         # 验证用 LLM 参数
         self.verification_client_params = {
@@ -752,6 +765,7 @@ class CLIOpenClawServing(LLMServingABC):
                     self.logger,
                     input_files_data,
                     input_skills_data,
+                    self.skill_base_dir,
                 ):
                     while round_num < max_rounds:
                         round_num += 1
