@@ -232,7 +232,9 @@ def _send_query_to_session(
         for line in transcript_path.read_text(encoding="utf-8").splitlines():
             if not line:
                 continue
-            messages.append(json.loads(line))
+            d = json.loads(line)
+            d["session_file"] = transcript_path.name
+            messages.append(d)
     messages = sorted(messages, key=lambda x: x["timestamp"])
 
     return messages
@@ -692,7 +694,8 @@ class CLIOpenClawServing(LLMServingABC):
 
         try:
             response = self._verification_client.chat.completions.create(
-                **self.verification_client_params
+                messages=[{"role": "user", "content": verification_prompt}],
+                **self.verification_client_params,
             )
             verify_output = response.choices[0].message.content
             return self._parse_verification_result(verify_output)
