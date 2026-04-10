@@ -323,6 +323,10 @@ def _prepare_and_create_session(
                     except Exception as e:
                         logger.error(f"清理目录失败 {item}: {e}")
 
+    # 执行前清理：确保 workspace 干净，不受之前失败任务的影响
+    logger.info(f"执行前清理 workspace: {workspace_dir}")
+    _cleanup()
+
     try:
         # 生成二进制文件
         assets_dir.mkdir(parents=True, exist_ok=True)
