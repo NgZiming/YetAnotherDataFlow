@@ -315,8 +315,8 @@ def _execute_query_once(
                 str(assets_dir),
             )
             new_file_paths.append(str(new_path))
-    except Exception as e:
-        logger.error(f"生成文件失败：{e}")
+    except Exception:
+        logger.exception("生成文件失败：")
         _cleanup()
         raise
 
@@ -331,8 +331,8 @@ def _execute_query_once(
             dst_path = skills_dir / src_path.name
             shutil.copytree(src_path, dst_path)
             new_skill_paths.append(str(dst_path))
-    except Exception as e:
-        logger.error(f"拷贝 skill 失败：{e}")
+    except Exception:
+        logger.exception("拷贝 skill 失败：")
         _cleanup()
         raise
 
