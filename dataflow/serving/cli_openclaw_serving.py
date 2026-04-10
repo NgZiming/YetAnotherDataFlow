@@ -302,7 +302,8 @@ def _prepare_and_create_session(
                 try:
                     shutil.rmtree(d)
                 except Exception as e:
-                    logger.error(f"清空 {d} 失败：{e}")
+                    logger.exception(f"清空 {d} 失败")
+                    raise
 
         # 清理 workspace 中除核心文件外的其他文件
         if workspace_dir.exists():
@@ -314,13 +315,15 @@ def _prepare_and_create_session(
                         item.unlink()
                         logger.debug(f"清理 workspace 文件：{item.name}")
                     except Exception as e:
-                        logger.error(f"清理文件失败 {item}: {e}")
+                        logger.exception(f"清理文件失败 {item}")
+                        raise
                 elif item.is_dir():
                     try:
                         shutil.rmtree(item)
                         logger.debug(f"清理 workspace 目录：{item.name}")
                     except Exception as e:
-                        logger.error(f"清理目录失败 {item}: {e}")
+                        logger.exception(f"清理目录失败 {item}")
+                        raise
 
     # 执行前清理：确保 workspace 干净，不受之前失败任务的影响
     logger.info(f"执行前清理 workspace: {workspace_dir}")
@@ -632,8 +635,8 @@ class CLIOpenClawServing(LLMServingABC):
                     try:
                         results[idx] = future.result()
                         completed += 1
-                    except Exception as e:
-                        self.logger.error(f"[任务 {idx + 1}/{total}] 失败：{e}")
+                    except Exception:
+                        self.logger.exception(f"[任务 {idx + 1}/{total}] 失败")
                         results[idx] = ""
                         failed += 1
                     pbar.update(1)
@@ -731,16 +734,15 @@ class CLIOpenClawServing(LLMServingABC):
                 else "验证完成，无输出"
             )
             return self._parse_verification_result(verify_output)
-        except requests.exceptions.ConnectTimeout as e:
-            self.logger.error(f"验证 LLM 连接超时：{e}")
-            return True, ""
-        except requests.exceptions.ReadTimeout as e:
-            self.logger.warning(f"验证 LLM 读取超时：{e}")
-            return True, ""
-        except Exception as e:
-            self.logger.error(f"验证 LLM 调用失败:{e}")
-            # 验证失败时默认认为完成，避免死循环
-            return True, ""
+        except requests.exceptions.ConnectTimeout:
+            self.logger.exception(f"验证 LLM 连接超时")
+            raise
+        except requests.exceptions.ReadTimeout:
+            self.logger.exception(f"验证 LLM 读取超时")
+            raise
+        except Exception:
+            self.logger.exception(f"验证 LLM 调用失败")
+            raise
 
     def _parse_verification_result(self, verify_output: str) -> tuple[bool, str]:
         """解析验证结果。
@@ -870,20 +872,23 @@ class CLIOpenClawServing(LLMServingABC):
                                 f"[轮次 {round_num}] 任务未完成，反馈：{feedback[:50]}..."
                             )
 
-                        if feedback:
-                            feedbacks.append(feedback)
+                        if not feedback:
+                            self.logger.warning(f"[轮次 {round_num}] 未收到反馈消息")
+                            raise Exception("未收到反馈消息")
+
+                        feedbacks.append(feedback)
 
                     # with 块结束时自动清理 workspace
                     break  # 任务成功完成，退出重试循环
 
-            except Exception as e:
+            except Exception:
                 if retry_attempt < self.max_retries - 1:
-                    self.logger.warning(
-                        f"任务执行失败，重试 {retry_attempt + 1}/{self.max_retries}: {e}"
+                    self.logger.exception(
+                        f"任务执行失败，重试 {retry_attempt + 1}/{self.max_retries}"
                     )
                     time.sleep(1.0)  # 等待 1 秒后重试
                 else:
-                    self.logger.error(f"任务重试 {self.max_retries} 次后仍失败：{e}")
+                    self.logger.exception(f"任务重试 {self.max_retries} 次后仍失败")
                     raise
 
         self.logger.info("任务执行结束，session 已清理")
