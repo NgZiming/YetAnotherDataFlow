@@ -228,7 +228,7 @@ class TestSmoke:
             max_workers=2,
             skill_base_dir="/root/clawhub/",
             verification_api_key="EMPTY",
-            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
+            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions",
         )
 
         task = TEST_DATA[0]
@@ -265,7 +265,7 @@ class TestSmoke:
             max_workers=4,
             skill_base_dir="/root/clawhub/",
             verification_api_key="EMPTY",
-            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
+            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions",
         )
 
         tasks = TEST_DATA[:4]
@@ -330,7 +330,7 @@ class TestSmoke:
             max_workers=2,
             skill_base_dir="/root/clawhub/",
             verification_api_key="EMPTY",
-            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
+            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions",
         )
 
         task = TEST_DATA[1]  # PDF 处理任务
@@ -369,7 +369,7 @@ class TestSmoke:
             max_workers=2,
             skill_base_dir="/root/clawhub/",
             verification_api_key="EMPTY",
-            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
+            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions",
         )
 
         task = TEST_DATA[6]  # 电池政策对比任务
@@ -408,7 +408,7 @@ class TestSmoke:
             max_workers=2,
             skill_base_dir="/root/clawhub/",
             verification_api_key="EMPTY",
-            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
+            verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/chat/completions",
             verification_client_params={
                 "model": "/data/share/models/Qwen3.5-122B-A10B/",
                 "max_tokens": 4096,
