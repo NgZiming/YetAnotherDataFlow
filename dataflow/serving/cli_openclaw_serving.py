@@ -683,7 +683,7 @@ class CLIOpenClawServing(LLMServingABC):
         else:
             verification_prompt = prompt_template.format(
                 task_description=task_description,
-                agent_output=agent_outputs,
+                agent_outputs=agent_outputs,
                 feedbacks=feedbacks,
             )
 
