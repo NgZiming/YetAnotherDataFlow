@@ -24,18 +24,17 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 from __future__ import annotations
 
 import json
+import requests
+import shutil
 import subprocess
 import time
-import shutil
-import os
-from contextlib import contextmanager
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from tqdm import tqdm
-from openai import OpenAI
 
 from dataflow.core import LLMServingABC
 from dataflow.logger import get_logger
@@ -466,20 +465,9 @@ class CLIOpenClawServing(LLMServingABC):
         if verification_client_params:
             self.verification_client_params.update(verification_client_params)
 
-        api_key = verification_api_key
-        base_url = verification_base_url
-
-        if api_key:
-            # 从 params 中读取 timeout
-            api_timeout = self.verification_client_params.get("timeout", 600)
-            self._verification_client = OpenAI(
-                api_key=api_key,
-                base_url=base_url if base_url else None,
-                timeout=api_timeout,
-            )
-        else:
-            self._verification_client = None
-            self.logger.warning("未设置 OPENAI_API_KEY，验证功能将不可用")
+        # 验证用 LLM API 配置（基于 requests）
+        self._verification_api_key = verification_api_key
+        self._verification_api_url = verification_base_url
 
         self._initialized = False
         self._worker_agents: List[str] = []
@@ -661,21 +649,23 @@ class CLIOpenClawServing(LLMServingABC):
     def _verify_with_external_llm(
         self,
         task_description: str,
-        agent_output: str,
+        feedbacks: list[str],
+        agent_outputs: list[str],
         prompt_template: Optional[str],
     ) -> tuple[bool, str]:
-        """使用外部 LLM 进行验证。
+        """使用外部 LLM 进行验证（基于 requests 直接调用 vllm API）。
 
         Args:
             task_description: 任务描述
-            agent_output: Agent 输出
+            feedbacks: 之前每一轮的反馈意见
+            agent_outputs: Agent 每一轮的输出
             prompt_template: 验证提示词模板
 
         Returns:
             (是否完成，反馈信息)
         """
-        if not self._verification_client:
-            self.logger.warning("验证用 OpenAI 客户端未初始化，跳过验证")
+        if not self._verification_api_url:
+            self.logger.warning("验证用 API URL 未设置，跳过验证")
             return True, ""  # 验证失败默认认为完成，避免死循环
 
         # 构建验证提示词
@@ -683,32 +673,70 @@ class CLIOpenClawServing(LLMServingABC):
             verification_prompt = (
                 f"请评估以下任务是否完成:\n\n"
                 f"任务:{task_description}\n\n"
-                f"Agent 输出:\n{agent_output}\n\n"
+                f"之前每一轮的反馈意见:\n{feedbacks}\n\n"
+                f"Agent每一轮的输出:\n{agent_outputs}\n\n"
                 f"请返回:\n判断:completed/incomplete\n反馈:(如果未完成，给出具体的改进建议)"
             )
         else:
             verification_prompt = prompt_template.format(
                 task_description=task_description,
-                agent_output=agent_output,
+                agent_output=agent_outputs,
+                feedbacks=feedbacks,
             )
 
         try:
             self.logger.info(
                 f"向 vllm 发起验证请求 (model={self.verification_client_params.get('model', 'default')}, "
                 f"prompt 长度={len(verification_prompt)}字符)"
-                f"prompt {verification_prompt:100}"
             )
-            response = self._verification_client.chat.completions.create(
-                messages=[{"role": "user", "content": verification_prompt}],
-                **self.verification_client_params,
+
+            # 构建请求 payload
+            model = self.verification_client_params.get("model", "default")
+            messages = [{"role": "user", "content": verification_prompt}]
+
+            payload = {
+                "model": model,
+                "messages": messages,
+            }
+            # 合并其他参数（temperature, top_p, max_tokens 等）
+            payload.update(self.verification_client_params)
+
+            headers = {
+                "Content-Type": "application/json",
+            }
+            if self._verification_api_key:
+                headers["Authorization"] = f"Bearer {self._verification_api_key}"
+
+            response = requests.post(
+                self._verification_api_url,
+                headers=headers,
+                json=payload,
+                timeout=self.verification_client_params.get("timeout", 600),
             )
-            verify_output = response.choices[0].message.content
+
+            if response.status_code != 200:
+                self.logger.error(
+                    f"验证请求失败：status={response.status_code}, body={response.text[:500]}"
+                )
+                return True, ""  # 失败时默认认为完成
+
+            result = response.json()
+            verify_output = (
+                result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
+
             self.logger.info(
                 f"验证完成，输出：{verify_output[:100]}..."
                 if verify_output
                 else "验证完成，无输出"
             )
             return self._parse_verification_result(verify_output)
+        except requests.exceptions.ConnectTimeout as e:
+            self.logger.error(f"验证 LLM 连接超时：{e}")
+            return True, ""
+        except requests.exceptions.ReadTimeout as e:
+            self.logger.warning(f"验证 LLM 读取超时：{e}")
+            return True, ""
         except Exception as e:
             self.logger.error(f"验证 LLM 调用失败:{e}")
             # 验证失败时默认认为完成，避免死循环
@@ -765,12 +793,13 @@ class CLIOpenClawServing(LLMServingABC):
         self.logger.info(f"开始任务执行：{task_description[:50]}...")
 
         round_num = 0
-        previous_output = ""
         feedback = ""
 
         # 对整个任务进行重试
         for retry_attempt in range(self.max_retries):
             try:
+                outputs = []
+                feedbacks = []
                 # 使用 contextmanager 管理整个验证循环的 session 生命周期
                 with _prepare_and_create_session(
                     worker_agent_id,
@@ -821,12 +850,15 @@ class CLIOpenClawServing(LLMServingABC):
                             self.logger.warning(f"[轮次 {round_num}] 未找到助手消息")
                             raise Exception("未找到助手消息")
 
+                        outputs.append(output)
+
                         # 验证阶段（max_rounds=1 时跳过）
                         if max_rounds > 1:
                             self.logger.info(f"[轮次 {round_num}] 进行验证...")
                             is_completed, feedback = self._verify_with_external_llm(
                                 task_description,
-                                output,
+                                feedbacks,
+                                outputs,
                                 prompt_template,
                             )
 
@@ -837,6 +869,9 @@ class CLIOpenClawServing(LLMServingABC):
                             self.logger.info(
                                 f"[轮次 {round_num}] 任务未完成，反馈：{feedback[:50]}..."
                             )
+
+                        if feedback:
+                            feedbacks.append(feedback)
 
                     # with 块结束时自动清理 workspace
                     break  # 任务成功完成，退出重试循环

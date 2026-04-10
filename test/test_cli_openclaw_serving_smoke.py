@@ -108,7 +108,7 @@ TEST_DATA = [
     {
         "task_id": "row-2047c5a8-3802-4d74-8286-4deeb0477ec3",
         "question": "我正在为一家名为'云图科技'的 SaaS 初创公司制定 Q3 的增长策略，目标是实现产品驱动增长 (PLG)。请首先利用首席营销官顾问技能，模拟在投入 50 万元营销预算下，采用 PLG 模型与 SLG 模型的 MRR 增长轨迹对比，并给出最优预算分配建议。接着，为了评估我们计划重点投放的 A 股科技板块（如代码 688111 的华大九天）的市场热度，请调用威科夫 A 股分析工具，分析该股当前的量价行为结构及趋势阶段，判断是否处于吸筹区间。最后，请将生成的'Q3 PLG 预算分配方案'和'华大九天市场分析报告'作为两项高优先级待办事项，添加到我的任务看板中，并标记为'进行中'状态，以便我本周跟进。",
-        "target_skills": ["cmo-advisor", "wyckof-a-share", "flowdo"],
+        "target_skills": ["cmo-advisor", "wyckoff-a-share", "flowdo"],
         "file_contents": {},
     },
     {
@@ -295,15 +295,16 @@ class TestSmoke:
                             content_list = m.get("message", {}).get("content", [])
                             content_parts = []
                             for item in content_list:
-                                if isinstance(item, dict) and item.get("type") == "text":
+                                if (
+                                    isinstance(item, dict)
+                                    and item.get("type") == "text"
+                                ):
                                     content_parts.append(item.get("text", ""))
                             output = "\n\n".join(content_parts)
                             break
                 except:
                     output = resp
-            print(
-                f"  {status} {task['task_id'][:20]}... ({len(output)} 字符)"
-            )
+            print(f"  {status} {task['task_id'][:20]}... ({len(output)} 字符)")
         # 展示最后一个 agent 的回复
         if result[-1]:
             try:
@@ -357,9 +358,7 @@ class TestSmoke:
                         break
             except:
                 output = result[0]
-        print(
-            f"\n[文件任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符"
-        )
+        print(f"\n[文件任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符")
         if output:
             print(f"\n完整回复:\n{output}")
 
@@ -398,9 +397,7 @@ class TestSmoke:
                         break
             except:
                 output = result[0]
-        print(
-            f"\n[政策对比任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符"
-        )
+        print(f"\n[政策对比任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符")
         if output:
             print(f"\n完整回复:\n{output}")
 
@@ -414,7 +411,7 @@ class TestSmoke:
             verification_base_url="http://app-ea48cac8b22348a483d104afbf5f2c65.ns-devsft-3460edd0.svc.cluster.local:8000/v1/",
             verification_client_params={
                 "model": "/data/share/models/Qwen3.5-122B-A10B/",
-                "max_completion_tokens": 4096,
+                "max_tokens": 4096,
                 "temperature": 0.3,
             },
         )
@@ -446,9 +443,7 @@ class TestSmoke:
                         break
             except:
                 output = result[0]
-        print(
-            f"\n[验证任务 {task['task_id'][:20]}...] 响应长度：{len(output)} 字符"
-        )
+        print(f"\n[验证任务 {task['task_id'][:20]}...] 响应长度：{len(output)} 字符")
         if output:
             print(f"\n完整回复:\n{output}")
 
