@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+import shutil
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -262,6 +263,7 @@ def _execute_query_once(
     timeout: Optional[int],
     logger: Any,
     input_files_data: Dict,
+    input_skills_data: List[str],
 ) -> str:
     """
     执行单个查询请求（单次尝试，不重试）。
@@ -272,6 +274,7 @@ def _execute_query_once(
         timeout: 超时时间（秒），None 表示不设置超时
         logger: 日志对象
         input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
+        input_skills_data: 该 query 对应的 skill 相对路径列表
 
     Returns:
         助手的回复文本
@@ -282,40 +285,56 @@ def _execute_query_once(
     # 记录 /new 之前的时间戳，只获取新 session 中的消息
     last_timestamp = time.time()
 
-    # 清理 assets 目录（失败或结束时也会清理）
+    # 清理 assets 和 skills 目录（失败或结束时也会清理）
     assets_dir = _workspace_dir(agent_id) / "assets"
+    skills_dir = _workspace_dir(agent_id) / "skills"
 
-    def _cleanup_assets():
-        """清空 assets 目录"""
-        if assets_dir.exists():
-            import shutil
-
-            try:
-                shutil.rmtree(assets_dir)
-            except Exception as e:
-                logger.error(f"清空 assets 目录失败：{e}")
+    def _cleanup():
+        """清空 assets 和 skills 目录"""
+        for d in [assets_dir, skills_dir]:
+            if d.exists():
+                try:
+                    shutil.rmtree(d)
+                except Exception as e:
+                    logger.error(f"清空 {d} 失败：{e}")
 
     new_file_paths: list[str] = []
+    new_skill_paths: list[str] = []
     # 在 /new 之前生成二进制文件
-    if input_files_data:
-        try:
-            # 统一使用 /workspace/assets/ 目录
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            for filename, content_data in input_files_data.items():
-                if not content_data or not isinstance(content_data, dict):
-                    continue
-                # 所有文件都放在 assets 目录下，忽略原始路径
-                new_path = assets_dir / Path(filename).name
-                # 传给 generate_file：只传文件名，output_dir 是 assets 目录
-                generate_file(
-                    {"filename": new_path.name, "content": content_data},
-                    str(assets_dir),
-                )
-                new_file_paths.append(str(new_path))
-        except Exception as e:
-            logger.error(f"生成文件失败：{e}")
-            _cleanup_assets()
-            raise
+    try:
+        # 统一使用 /workspace/assets/ 目录
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        for filename, content_data in input_files_data.items():
+            if not content_data or not isinstance(content_data, dict):
+                continue
+            # 所有文件都放在 assets 目录下，忽略原始路径
+            new_path = assets_dir / Path(filename).name
+            # 传给 generate_file：只传文件名，output_dir 是 assets 目录
+            generate_file(
+                {"filename": new_path.name, "content": content_data},
+                str(assets_dir),
+            )
+            new_file_paths.append(str(new_path))
+    except Exception as e:
+        logger.error(f"生成文件失败：{e}")
+        _cleanup()
+        raise
+
+    # 在 /new 之前拷贝 skill 目录
+    try:
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        for skill_path in input_skills_data:
+            src_path = Path(skill_path)
+            if not src_path.exists() or not src_path.is_dir():
+                raise Exception()
+
+            dst_path = skills_dir / src_path.name
+            shutil.copytree(src_path, dst_path)
+            new_skill_paths.append(str(dst_path))
+    except Exception as e:
+        logger.error(f"拷贝 skill 失败：{e}")
+        _cleanup()
+        raise
 
     try:
         # 先执行 /new 创建新 session
@@ -365,6 +384,8 @@ def _execute_query_once(
 
         if len(new_file_paths) > 0:
             user_query += f"\n下面是任务相关的文件：\n{new_file_paths}"
+        if len(new_skill_paths) > 0:
+            user_query += f"\n下面是可用的 skills：\n{new_skill_paths}"
         # 执行用户查询（使用 --local 绕过网关配对）
         cmd = [
             "openclaw",
@@ -391,8 +412,8 @@ def _execute_query_once(
     except Exception:
         raise
     finally:
-        # 清空 assets
-        _cleanup_assets()
+        # 清空 assets 和 skills
+        _cleanup()
 
     # 只读取新 session 中的消息
     messages = load_session_new_messages(agent_id, last_timestamp)
@@ -405,6 +426,7 @@ def _execute_single_query(
     timeout: int,
     logger: Any,
     input_files_data: Dict,
+    input_skills_data: List[str],
     max_retries: int = 3,
 ) -> str:
     """
@@ -416,21 +438,23 @@ def _execute_single_query(
         timeout: 超时时间（秒）
         logger: 日志对象
         input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
+        input_skills_data: 该 query 对应的 skill 相对路径列表
         max_retries: 最大重试次数，默认 3
 
     Returns:
         助手的回复文本，如果执行失败则返回空字符串
     """
-    last_error = None
-
     for attempt in range(max_retries + 1):
         try:
             return _execute_query_once(
-                agent_id, user_query, timeout, logger, input_files_data
+                agent_id,
+                user_query,
+                timeout,
+                logger,
+                input_files_data,
+                input_skills_data,
             )
         except Exception as e:
-            last_error = e
-
             if attempt < max_retries:
                 # 指数退避：1s, 2s, 4s...
                 backoff_time = 2**attempt
@@ -461,7 +485,7 @@ class CLIOpenClawServing(LLMServingABC):
         self,
         agent_id: str = "main",
         model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        timeout: int = 1200,
         create_if_missing: bool = True,
         max_workers: int = 4,
         max_retries: int = 3,
@@ -487,6 +511,10 @@ class CLIOpenClawServing(LLMServingABC):
         self.max_retries = max_retries
         self._initialized = False
         self._worker_agents: List[str] = []
+
+        self.logger.info(
+            f"CLIOpenClawServing 初始化：agent_id={agent_id}, model={self.model}"
+        )
 
     def _ensure_agent(self) -> None:
         """确保 agent 存在，不存在则创建。"""
@@ -576,19 +604,22 @@ class CLIOpenClawServing(LLMServingABC):
     def generate_from_input(
         self,
         user_inputs: List[str],
-        system_prompt: str,
-        json_schema: dict,
         input_files_data: List[Dict],
+        input_skills_data: List[List[str]],
     ) -> List[str]:
         """
         生成文本响应（并发执行，每个请求使用独立 worker agent）。
 
+        注意：
+        - input_files_data 和 input_skills_data 在 /new 之前处理
+        - 每个 worker agent 独立处理一个请求，session 完全隔离
+
         Args:
             user_inputs: 用户输入列表
-            system_prompt: 系统提示词（CLI 模式下不使用）
-            json_schema: JSON schema（CLI 模式下不使用）
             input_files_data: 与 user_inputs 长度相同，每个元素是对应 query 的文件内容数据
                              格式：{filename: content_data}
+            input_skills_data: 与 user_inputs 长度相同，每个元素是对应 query 的 skill 绝对路径列表
+                              格式：List[str]
 
         Returns:
             回复列表，长度与输入相同，失败位置为空字符串
@@ -600,13 +631,25 @@ class CLIOpenClawServing(LLMServingABC):
         self._setup_and_check_worker_agents(initial_setup=False)
 
         if not user_inputs:
+            self.logger.warning("user_inputs 为空，直接返回")
             return []
 
+        # 严格长度验证（必需参数，不允许为 None）
         if len(input_files_data) != len(user_inputs):
             raise ValueError(
                 f"input_files_data 长度 ({len(input_files_data)}) "
                 f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
             )
+
+        if len(input_skills_data) != len(user_inputs):
+            raise ValueError(
+                f"input_skills_data 长度 ({len(input_skills_data)}) "
+                f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
+            )
+
+        self.logger.info(
+            f"开始处理 {len(user_inputs)} 个请求，使用 {len(self._worker_agents)} 个 worker agents"
+        )
 
         total = len(user_inputs)
         completed = 0
@@ -617,7 +660,7 @@ class CLIOpenClawServing(LLMServingABC):
             for i, question in enumerate(user_inputs):
                 # 分配 worker agent（轮询）
                 worker_agent_id = self._worker_agents[i % len(self._worker_agents)]
-                # 传入对应的文件数据
+                # 传入对应的文件数据和 skill 数据
                 future = executor.submit(
                     _execute_single_query,
                     worker_agent_id,
@@ -625,9 +668,12 @@ class CLIOpenClawServing(LLMServingABC):
                     self.timeout,
                     self.logger,
                     input_files_data[i],
+                    input_skills_data[i],
                     self.max_retries,
                 )
                 futures[future] = i
+
+                self.logger.debug(f"已提交 {len(futures)} 个任务到线程池")
 
             results: list[str] = [""] * total
 
@@ -643,6 +689,7 @@ class CLIOpenClawServing(LLMServingABC):
                         failed += 1
                     pbar.update(1)
 
+        self.logger.info(f"处理完成：成功 {completed}, 失败 {failed}, 总计 {total}")
         return results
 
     def generate_embedding_from_input(self, texts: List[str]) -> List[List[float]]:

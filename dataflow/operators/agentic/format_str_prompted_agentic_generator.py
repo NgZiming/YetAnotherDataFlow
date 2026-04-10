@@ -1,20 +1,18 @@
-import pandas as pd
-from dataflow.utils.registry import OPERATOR_REGISTRY
-from dataflow import get_logger
-from typing import Union, Any, Set
+import os
 
+from typing import Union, Any, Optional
+
+from dataflow import get_logger
+from dataflow.core import OperatorABC
+from dataflow.core.prompt import prompt_restrict, DIYPromptABC
+from dataflow.prompts.core_text import FormatStrPrompt
+from dataflow.serving.cli_openclaw_serving import CLIOpenClawServing
+from dataflow.utils.registry import OPERATOR_REGISTRY
 from dataflow.utils.storage import DataFlowStorage
 from dataflow.utils.storage.data_parser import clean_surrogates
-from dataflow.core import OperatorABC
-from dataflow.serving.cli_openclaw_serving import CLIOpenClawServing
-from dataflow.core.prompt import prompt_restrict, PromptABC, DIYPromptABC
-
-from dataflow.prompts.core_text import FormatStrPrompt
 
 
-@prompt_restrict(
-    FormatStrPrompt,
-)
+@prompt_restrict(FormatStrPrompt)
 @OPERATOR_REGISTRY.register()
 class FormatStrPromptedAgenticGenerator(OperatorABC):
     """
@@ -23,20 +21,27 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
     与 FormatStrPromptedGenerator 的区别：
     - 只能使用 CLIOpenClawServing
     - 支持 input_files_data_key 参数，用于传递文件内容数据
+    - 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills
     """
 
     def __init__(
         self,
         llm_serving: CLIOpenClawServing,
-        system_prompt: str = "You are a helpful agent.",
-        prompt_template: Union[FormatStrPrompt, DIYPromptABC] = FormatStrPrompt,
-        json_schema: dict = None,
+        prompt_template: Union[FormatStrPrompt, DIYPromptABC],
+        input_skills_dir: Optional[str] = None,
     ):
+        """
+        初始化生成器。
+
+        Args:
+            llm_serving: CLIOpenClawServing 服务对象
+            prompt_template: 提示词模板对象
+            input_skills_dir: skill 路径的前缀目录（可选）
+        """
         self.logger = get_logger()
         self.llm_serving = llm_serving
-        self.system_prompt = system_prompt
         self.prompt_template = prompt_template
-        self.json_schema = json_schema
+        self.input_skills_dir = input_skills_dir
         if prompt_template is None:
             raise ValueError("prompt_template cannot be None")
 
@@ -44,6 +49,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self,
         storage: DataFlowStorage,
         input_files_data_key: str,
+        input_skills_key: Optional[str] = None,
         output_key: str = "generated_content",
         **input_keys: Any,
     ):
@@ -52,9 +58,9 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
 
         Args:
             storage: DataFlowStorage 实例
+            input_files_data_key: FileContextGenerator 输出的 key，用于传递文件内容数据
+            input_skills_key: 存储 skill 路径列表的 DataFrame 列名（可选）
             output_key: 输出生成内容字段名
-            input_files_data_key: 可选，FileContextGenerator 输出的 key，
-                                 用于传递文件内容数据给 CLIOpenClawServing
             **input_keys: 输入字段映射字典
         """
         self.storage: DataFlowStorage = storage
@@ -62,6 +68,8 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self.logger.info("Running FormatStrPromptedAgenticGenerator...")
         self.input_keys = input_keys
         self.input_files_data_key = input_files_data_key
+        self.input_skills_key = input_skills_key
+        self.logger.info(f"input_skills_dir: {self.input_skills_dir}")
 
         need_fields = set(input_keys.keys())
         # Load the raw dataframe from the input file
@@ -90,16 +98,35 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             else:
                 input_files_data.append({})
 
+        # 准备 input_skills_data：拼接 skill 路径
+        input_skills_data = []
+        for idx, row in dataframe.iterrows():
+            if (
+                input_skills_key
+                and input_skills_key in row
+                and isinstance(row[input_skills_key], list)
+            ):
+                # 使用实例变量 input_skills_dir 拼接路径
+                skills = row[input_skills_key]
+                if self.input_skills_dir:
+                    skills = [os.path.join(self.input_skills_dir, s) for s in skills]
+                input_skills_data.append(skills)
+                self.logger.debug(f"Row {idx}: 准备 {len(skills)} 个 skills")
+            else:
+                input_skills_data.append([])
+
+        self.logger.info(
+            f"Prepared {len(input_skills_data)} skill lists for generation."
+        )
+
         # Generate content using the CLIOpenClawServing
         generated_outputs = self.llm_serving.generate_from_input(
             user_inputs=llm_inputs,
-            system_prompt=self.system_prompt,
-            json_schema=self.json_schema,
             input_files_data=input_files_data,
+            input_skills_data=input_skills_data,
         )
 
         dataframe[self.output_key] = clean_surrogates(generated_outputs)
-        dataframe[f".prompt.system.{self.output_key}"] = self.system_prompt
         dataframe[f".prompt.user.{self.output_key}"] = llm_inputs
 
         self.storage.write(dataframe)
@@ -115,13 +142,16 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "结合输入数据中的字段自动构造完整提示词并调用 CLIOpenClawServing 生成结果。\n\n"
                 "与 FormatStrPromptedGenerator 的区别：\n"
                 "- 只能使用 CLIOpenClawServing\n"
-                "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件数据\n\n"
+                "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件数据\n"
+                "- 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills\n\n"
                 "输入参数：\n"
                 "- llm_serving：CLIOpenClawServing 服务对象\n"
                 "- prompt_template：提示词模板对象（StrFormatPrompt 或 DIYPromptABC）\n"
                 "- input_keys：输入字段映射字典\n"
                 "- output_key：输出生成内容字段名\n"
-                "- input_files_data_key：FileContextGenerator 的输出 key，用于读取合成的文件数据\n\n"
+                "- input_files_data_key：FileContextGenerator 的输出 key，用于读取合成的文件数据\n"
+                "- input_skills_key：DataFrame 列名，包含 skill 路径列表\n"
+                "- input_skills_dir：skill 路径的前缀目录\n\n"
                 "输出参数：\n"
                 "- 包含生成结果的新 DataFrame\n"
                 "- 返回输出字段名，以便后续算子引用\n\n"
