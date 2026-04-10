@@ -4,6 +4,7 @@ cli_openclaw_serving 冒烟测试
 使用真实测试数据验证核心功能，包含完整的 file_contents 数据。
 """
 
+import json
 import pytest
 from dataflow.serving import create_openclaw_serving
 
@@ -239,8 +240,23 @@ class TestSmoke:
 
         assert len(result) == 1
         assert result[0] != ""
-        print(f"\n[任务 {task['task_id'][:20]}...] 响应长度：{len(result[0])} 字符")
-        print(f"前 300 字符：{result[0][:300]}...")
+        # 解析 JSON 格式返回
+        data = json.loads(result[0])
+        messages = data.get("messages", [])
+        # 提取最后一条 assistant 消息
+        output = ""
+        for m in reversed(messages):
+            if m.get("message", {}).get("role") == "assistant":
+                content_list = m.get("message", {}).get("content", [])
+                content_parts = []
+                for item in content_list:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        content_parts.append(item.get("text", ""))
+                output = "\n\n".join(content_parts)
+                break
+        print(f"\n[任务 {task['task_id'][:20]}...] 响应长度：{len(output)} 字符")
+        if output:
+            print(f"\n完整回复:\n{output}")
 
     def test_concurrent_multi_skill_tasks(self):
         """测试多任务并发（涉及多个技能协作）"""
@@ -268,9 +284,43 @@ class TestSmoke:
         print(f"\n[并发测试] 成功 {success_count} / {len(result)}")
         for i, (task, resp) in enumerate(zip(tasks, result)):
             status = "✓" if resp else "✗"
+            # 解析 JSON
+            output = ""
+            if resp:
+                try:
+                    data = json.loads(resp)
+                    messages = data.get("messages", [])
+                    for m in reversed(messages):
+                        if m.get("message", {}).get("role") == "assistant":
+                            content_list = m.get("message", {}).get("content", [])
+                            content_parts = []
+                            for item in content_list:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    content_parts.append(item.get("text", ""))
+                            output = "\n\n".join(content_parts)
+                            break
+                except:
+                    output = resp
             print(
-                f"  {status} {task['task_id'][:20]}... ({len(resp) if resp else 0} 字符)"
+                f"  {status} {task['task_id'][:20]}... ({len(output)} 字符)"
             )
+        # 展示最后一个 agent 的回复
+        if result[-1]:
+            try:
+                data = json.loads(result[-1])
+                messages = data.get("messages", [])
+                for m in reversed(messages):
+                    if m.get("message", {}).get("role") == "assistant":
+                        content_list = m.get("message", {}).get("content", [])
+                        content_parts = []
+                        for item in content_list:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                content_parts.append(item.get("text", ""))
+                        output = "\n\n".join(content_parts)
+                        break
+                print(f"\n最后一个 agent 回复:\n{output}")
+            except:
+                pass
 
     def test_with_file_assets(self):
         """测试带文件资产的任务（PDF OCR + 水印）"""
@@ -290,9 +340,28 @@ class TestSmoke:
         )
 
         assert len(result) == 1
+        # 解析 JSON
+        output = ""
+        if result[0]:
+            try:
+                data = json.loads(result[0])
+                messages = data.get("messages", [])
+                for m in reversed(messages):
+                    if m.get("message", {}).get("role") == "assistant":
+                        content_list = m.get("message", {}).get("content", [])
+                        content_parts = []
+                        for item in content_list:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                content_parts.append(item.get("text", ""))
+                        output = "\n\n".join(content_parts)
+                        break
+            except:
+                output = result[0]
         print(
-            f"\n[文件任务 {task['task_id'][:20]}...] 响应：{len(result[0]) if result[0] else 0} 字符"
+            f"\n[文件任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符"
         )
+        if output:
+            print(f"\n完整回复:\n{output}")
 
     def test_with_file_assets_battery_policy(self):
         """测试带文件资产的任务（电池政策对比分析）"""
@@ -312,9 +381,28 @@ class TestSmoke:
         )
 
         assert len(result) == 1
+        # 解析 JSON
+        output = ""
+        if result[0]:
+            try:
+                data = json.loads(result[0])
+                messages = data.get("messages", [])
+                for m in reversed(messages):
+                    if m.get("message", {}).get("role") == "assistant":
+                        content_list = m.get("message", {}).get("content", [])
+                        content_parts = []
+                        for item in content_list:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                content_parts.append(item.get("text", ""))
+                        output = "\n\n".join(content_parts)
+                        break
+            except:
+                output = result[0]
         print(
-            f"\n[政策对比任务 {task['task_id'][:20]}...] 响应：{len(result[0]) if result[0] else 0} 字符"
+            f"\n[政策对比任务 {task['task_id'][:20]}...] 响应：{len(output)} 字符"
         )
+        if output:
+            print(f"\n完整回复:\n{output}")
 
     def test_with_verification(self):
         """测试带验证循环的复杂任务"""
@@ -341,9 +429,28 @@ class TestSmoke:
         )
 
         assert len(result) == 1
+        # 解析 JSON
+        output = ""
+        if result[0]:
+            try:
+                data = json.loads(result[0])
+                messages = data.get("messages", [])
+                for m in reversed(messages):
+                    if m.get("message", {}).get("role") == "assistant":
+                        content_list = m.get("message", {}).get("content", [])
+                        content_parts = []
+                        for item in content_list:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                content_parts.append(item.get("text", ""))
+                        output = "\n\n".join(content_parts)
+                        break
+            except:
+                output = result[0]
         print(
-            f"\n[验证任务 {task['task_id'][:20]}...] 响应长度：{len(result[0]) if result[0] else 0} 字符"
+            f"\n[验证任务 {task['task_id'][:20]}...] 响应长度：{len(output)} 字符"
         )
+        if output:
+            print(f"\n完整回复:\n{output}")
 
 
 if __name__ == "__main__":

@@ -214,6 +214,10 @@ def _send_query_to_session(
         if skill_paths:
             query += f"\n下面是可用的 skills:\n{skill_paths}"
 
+    logger.info(
+        f"向 agent {agent_id} 发送查询 (长度={len(query)}字符): {query[:100]}..."
+    )
+
     # 执行查询 (OpenClaw 会自动使用当前 session)
     cmd = ["openclaw", "agent", "--agent", agent_id, "--local", "-m", query]
 
@@ -504,7 +508,6 @@ class CLIOpenClawServing(LLMServingABC):
         for i in range(self.max_workers):
             worker_agent_id = f"{self.agent_id}-worker-{i:04}"
             needs_creation = False
-            needs_rebuild = False
 
             # 检查 agent 是否存在
             if worker_agent_id.lower() not in existing:
@@ -514,15 +517,8 @@ class CLIOpenClawServing(LLMServingABC):
                 new_worker_agents.append(worker_agent_id)
                 continue
 
-            # 如果需要创建或重建
-            if needs_creation or needs_rebuild:
-                if needs_rebuild:
-                    # 删除并重建 agent
-                    subprocess.run(
-                        ["openclaw", "agents", "delete", "--force", worker_agent_id],
-                        check=False,
-                    )
-
+            # 如果需要创建
+            if needs_creation:
                 if self.create_if_missing and self.model:
                     self.logger.info(f"正在创建 worker agent: {worker_agent_id}")
                     create_agent(worker_agent_id, self.model)
@@ -693,11 +689,21 @@ class CLIOpenClawServing(LLMServingABC):
             )
 
         try:
+            self.logger.info(
+                f"向 vllm 发起验证请求 (model={self.verification_client_params.get('model', 'default')}, "
+                f"prompt 长度={len(verification_prompt)}字符)"
+                f"prompt {verification_prompt:100}"
+            )
             response = self._verification_client.chat.completions.create(
                 messages=[{"role": "user", "content": verification_prompt}],
                 **self.verification_client_params,
             )
             verify_output = response.choices[0].message.content
+            self.logger.info(
+                f"验证完成，输出：{verify_output[:100]}..."
+                if verify_output
+                else "验证完成，无输出"
+            )
             return self._parse_verification_result(verify_output)
         except Exception as e:
             self.logger.error(f"验证 LLM 调用失败:{e}")
@@ -810,8 +816,6 @@ class CLIOpenClawServing(LLMServingABC):
                         if not output:
                             self.logger.warning(f"[轮次 {round_num}] 未找到助手消息")
                             raise Exception("未找到助手消息")
-
-                        previous_output = output
 
                         # 验证阶段（max_rounds=1 时跳过）
                         if max_rounds > 1:
