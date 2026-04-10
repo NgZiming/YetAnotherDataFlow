@@ -22,6 +22,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
     - 只能使用 CLIOpenClawServing
     - 支持 input_files_data_key 参数，用于传递文件内容数据
     - 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills
+    - 支持 verification_prompt_template 参数，用于任务验证循环
     """
 
     def __init__(
@@ -29,6 +30,9 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         llm_serving: CLIOpenClawServing,
         prompt_template: Union[FormatStrPrompt, DIYPromptABC],
         input_skills_dir: Optional[str] = None,
+        verification_prompt_template: Optional[str] = None,
+        enable_verification: bool = False,
+        max_verification_rounds: int = 5,
     ):
         """
         初始化生成器。
@@ -37,11 +41,17 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             llm_serving: CLIOpenClawServing 服务对象
             prompt_template: 提示词模板对象
             input_skills_dir: skill 路径的前缀目录（可选）
+            verification_prompt_template: 验证提示词模板（可选），用于任务验证循环
+            enable_verification: 是否启用自动验证循环，默认 False
+            max_verification_rounds: 最大验证轮数，默认 5
         """
         self.logger = get_logger()
         self.llm_serving = llm_serving
         self.prompt_template = prompt_template
         self.input_skills_dir = input_skills_dir
+        self.verification_prompt_template = verification_prompt_template
+        self.enable_verification = enable_verification
+        self.max_verification_rounds = max_verification_rounds
         if prompt_template is None:
             raise ValueError("prompt_template cannot be None")
 
@@ -124,6 +134,9 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             user_inputs=llm_inputs,
             input_files_data=input_files_data,
             input_skills_data=input_skills_data,
+            enable_verification=self.enable_verification,
+            verification_prompt_template=self.verification_prompt_template,
+            max_verification_rounds=self.max_verification_rounds,
         )
 
         dataframe[self.output_key] = clean_surrogates(generated_outputs)
@@ -143,7 +156,8 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "与 FormatStrPromptedGenerator 的区别：\n"
                 "- 只能使用 CLIOpenClawServing\n"
                 "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件数据\n"
-                "- 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills\n\n"
+                "- 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills\n"
+                "- 支持 verification_prompt_template 参数，用于任务验证循环\n\n"
                 "输入参数：\n"
                 "- llm_serving：CLIOpenClawServing 服务对象\n"
                 "- prompt_template：提示词模板对象（StrFormatPrompt 或 DIYPromptABC）\n"
@@ -151,7 +165,10 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "- output_key：输出生成内容字段名\n"
                 "- input_files_data_key：FileContextGenerator 的输出 key，用于读取合成的文件数据\n"
                 "- input_skills_key：DataFrame 列名，包含 skill 路径列表\n"
-                "- input_skills_dir：skill 路径的前缀目录\n\n"
+                "- input_skills_dir：skill 路径的前缀目录\n"
+                "- verification_prompt_template：验证提示词模板（可选）\n"
+                "- enable_verification：是否启用自动验证循环\n"
+                "- max_verification_rounds：最大验证轮数\n\n"
                 "输出参数：\n"
                 "- 包含生成结果的新 DataFrame\n"
                 "- 返回输出字段名，以便后续算子引用\n\n"

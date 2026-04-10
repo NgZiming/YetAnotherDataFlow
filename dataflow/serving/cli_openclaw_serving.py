@@ -27,12 +27,15 @@ import json
 import subprocess
 import time
 import shutil
+import os
+from contextlib import contextmanager
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from tqdm import tqdm
+from openai import OpenAI
 
 from dataflow.core import LLMServingABC
 from dataflow.logger import get_logger
@@ -89,30 +92,6 @@ def _list_existing_agents() -> set[str]:
         return set()
 
 
-def _is_agent_locked(agent_id: str) -> bool:
-    """检查 agent 是否有任何 session 被锁定。
-
-    Session lock 文件格式：{session_id}.jsonl.lock
-    位置：agent 的 sessions/ 目录下
-
-    Args:
-        agent_id: Agent 标识符
-
-    Returns:
-        True 如果检测到任何 session lock 文件，False 否则
-    """
-    try:
-        agent_dir = _agent_store_dir(agent_id)
-        sessions_dir = agent_dir / "sessions"
-        # 检查 sessions 目录下是否存在任何 .jsonl.lock 文件
-        if sessions_dir.exists():
-            for lock_file in sessions_dir.glob("*.jsonl.lock"):
-                return True
-        return False
-    except Exception:
-        return False
-
-
 def create_agent(agent_id: str, model: str) -> None:
     """
     创建新的 agent。
@@ -153,19 +132,15 @@ def create_agent(agent_id: str, model: str) -> None:
 # ============================================================================
 
 
-def _resolve_transcript_path(agent_id: str) -> Path:
+def _resolve_transcript_paths(agent_id: str) -> List[Path]:
     """
-    解析新生成的 session 文件路径。
-
-    通过两种方式查找：
-    1. 优先通过 sessions.json 索引查找最新的 session
-    2. fallback 到查找最新修改的 .jsonl/.ndjson 文件
+    解析 sessions 文件夹下所有的 jsonl 文件路径。
 
     Args:
         agent_id: Agent 标识符
 
     Returns:
-        Session 文件路径
+        所有 jsonl 文件路径列表（按修改时间排序，最新的在前）
 
     Raises:
         FileNotFoundError: 超时后文件仍未找到
@@ -173,81 +148,92 @@ def _resolve_transcript_path(agent_id: str) -> Path:
     agent_dir = _agent_store_dir(agent_id)
     sessions_dir = agent_dir / "sessions"
 
-    # 持续等待直到找到 session 文件（最多 60 秒）
+    # 持续等待直到找到 session 文件 (最多 60 秒)
     start_time = time.time()
     timeout = 60  # 60 秒超时
 
     while time.time() - start_time < timeout:
-        # 策略 1: 通过 sessions.json 索引查找
-        sessions_json = sessions_dir / "sessions.json"
-        if sessions_json.exists():
-            try:
-                payload = json.loads(sessions_json.read_text(encoding="utf-8"))
-                if isinstance(payload, dict):
-                    newest_entry = None
-                    newest_ts = -1
-                    for entry in payload.values():
-                        if not isinstance(entry, dict) or "sessionId" not in entry:
-                            continue
-                        ts = entry.get("updatedAt", 0)
-                        if isinstance(ts, (int, float)) and ts > newest_ts:
-                            newest_ts = ts
-                            newest_entry = entry
-                    if newest_entry:
-                        sid = newest_entry["sessionId"]
-                        for candidate in (
-                            sessions_dir / f"{sid}.jsonl",
-                            sessions_dir / f"{sid}.ndjson",
-                        ):
-                            if candidate.exists():
-                                return candidate
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        # 策略 2: 查找最新修改的 .jsonl/.ndjson 文件
         if sessions_dir.exists():
-            candidates = list(sessions_dir.rglob("*.jsonl")) + list(
-                sessions_dir.rglob("*.ndjson")
-            )
+            candidates = list(sessions_dir.rglob("*.jsonl"))
             if candidates:
-                return max(candidates, key=lambda p: p.stat().st_mtime)
+                # 按修改时间排序，最新的在前
+                return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
 
-        time.sleep(1.0)
+        time.sleep(5.0)
 
     raise FileNotFoundError(f"Agent {agent_id} 的 session 文件在 {timeout} 秒内未生成")
 
 
-def load_session_new_messages(
-    agent_id: str, last_timestamp: Optional[float] = None
-) -> List[Dict[str, Any]]:
+def _send_query_to_session(
+    agent_id: str,
+    user_query: str,
+    timeout: int,
+    logger: Any,
+    add_assets_info: bool = True,
+) -> list[dict]:
     """
-    加载 session 文件中指定时间之后的新消息。
+    发送查询到当前 session(OpenClaw 会自动维护 session 上下文)。
+
+    注意：此函数假设文件和 skills 已经通过 _prepare_and_create_session 准备好，
+    或者在当前 session 中已经存在。
 
     Args:
         agent_id: Agent 标识符
-        last_timestamp: 上次读取的时间戳（秒），只返回此时间之后的消息
+        user_query: 用户查询内容
+        timeout: 超时时间 (秒)
+        logger: 日志对象
+        add_assets_info: 是否添加文件/skills 信息到 prompt，默认 True(仅初次请求需要)
 
     Returns:
-        新消息列表
+        所有消息列表 (按时间戳排序)
 
     Raises:
-        FileNotFoundError: session 文件不存在
-        json.JSONDecodeError: 解析 session 文件失败
+        Exception: 执行失败时抛出异常
     """
-    transcript_path = _resolve_transcript_path(agent_id)
+    # 添加文件/技能路径到 prompt(如果存在)
+    query = user_query
+    if add_assets_info:
+        assets_dir = _workspace_dir(agent_id) / "assets"
+        skills_dir = _workspace_dir(agent_id) / "skills"
 
+        file_paths = []
+        skill_paths = []
+
+        if assets_dir.exists():
+            for f in assets_dir.iterdir():
+                if f.is_file():
+                    file_paths.append(str(f))
+
+        if skills_dir.exists():
+            for s in skills_dir.iterdir():
+                if s.is_dir():
+                    skill_paths.append(str(s))
+
+        if file_paths:
+            query += f"\n下面是任务相关的文件:\n{file_paths}"
+        if skill_paths:
+            query += f"\n下面是可用的 skills:\n{skill_paths}"
+
+    # 执行查询 (OpenClaw 会自动使用当前 session)
+    cmd = ["openclaw", "agent", "--agent", agent_id, "--local", "-m", query]
+
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout, check=False
+    )
+    if result.returncode != 0:
+        raise Exception(result.stderr)
+
+    logger.info(f"请求完成:{result.stdout[:50]}...")
+
+    # 解析输出 (提取所有消息)
+    transcript_paths = _resolve_transcript_paths(agent_id)
     messages = []
-    for line in transcript_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        msg = json.loads(line)
-        # 检查消息时间戳
-        msg_ts = msg.get("timestamp", 0)
-        if isinstance(msg_ts, (int, float)) and last_timestamp is not None:
-            if msg_ts <= last_timestamp:
+    for transcript_path in transcript_paths:
+        for line in transcript_path.read_text(encoding="utf-8").splitlines():
+            if not line:
                 continue
-        messages.append(msg)
+            messages.append(json.loads(line))
+    messages = sorted(messages, key=lambda x: x["timestamp"])
 
     return messages
 
@@ -257,40 +243,53 @@ def load_session_new_messages(
 # ============================================================================
 
 
-def _execute_query_once(
+# ============================================================================
+# Session 上下文管理
+# ============================================================================
+
+
+@contextmanager
+def _prepare_and_create_session(
     agent_id: str,
-    user_query: str,
-    timeout: Optional[int],
+    timeout: int,
     logger: Any,
     input_files_data: Dict,
     input_skills_data: List[str],
-) -> str:
+):
     """
-    执行单个查询请求（单次尝试，不重试）。
+    Session 上下文管理器：创建新 session 并准备文件/skills，退出时清理。
 
     Args:
         agent_id: Agent 标识符
-        user_query: 用户查询内容
-        timeout: 超时时间（秒），None 表示不设置超时
+        timeout: 超时时间（秒）
         logger: 日志对象
-        input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
-        input_skills_data: 该 query 对应的 skill 相对路径列表
+        input_files_data: 文件内容数据
+        input_skills_data: Skill 绝对路径列表
 
-    Returns:
-        助手的回复文本
-
-    Raises:
-        Exception: 执行失败时抛出异常
+    Yields:
+        tuple: (new_file_paths, new_skill_paths) - 生成的文件和新拷贝的 skill 路径
     """
-    # 记录 /new 之前的时间戳，只获取新 session 中的消息
-    last_timestamp = time.time()
+    workspace_dir = _workspace_dir(agent_id)
+    assets_dir = workspace_dir / "assets"
+    skills_dir = workspace_dir / "skills"
 
-    # 清理 assets 和 skills 目录（失败或结束时也会清理）
-    assets_dir = _workspace_dir(agent_id) / "assets"
-    skills_dir = _workspace_dir(agent_id) / "skills"
+    new_file_paths: list[str] = []
+    new_skill_paths: list[str] = []
+
+    # 核心配置文件列表
+    core_files = {
+        "AGENTS.md",
+        "BOOTSTRAP.md",
+        "HEARTBEAT.md",
+        "IDENTITY.md",
+        "SOUL.md",
+        "TOOLS.md",
+        "USER.md",
+    }
 
     def _cleanup():
-        """清空 assets 和 skills 目录"""
+        """清空 assets、skills 目录，并清理 workspace 中非核心文件"""
+        # 清理 assets 和 skills 目录
         for d in [assets_dir, skills_dir]:
             if d.exists():
                 try:
@@ -298,46 +297,48 @@ def _execute_query_once(
                 except Exception as e:
                     logger.error(f"清空 {d} 失败：{e}")
 
-    new_file_paths: list[str] = []
-    new_skill_paths: list[str] = []
-    # 在 /new 之前生成二进制文件
+        # 清理 workspace 中除核心文件外的其他文件
+        if workspace_dir.exists():
+            for item in workspace_dir.iterdir():
+                if item.name in core_files:
+                    continue  # 保留核心文件
+                if item.is_file():
+                    try:
+                        item.unlink()
+                        logger.debug(f"清理 workspace 文件：{item.name}")
+                    except Exception as e:
+                        logger.error(f"清理文件失败 {item}: {e}")
+                elif item.is_dir():
+                    try:
+                        shutil.rmtree(item)
+                        logger.debug(f"清理 workspace 目录：{item.name}")
+                    except Exception as e:
+                        logger.error(f"清理目录失败 {item}: {e}")
+
     try:
-        # 统一使用 /workspace/assets/ 目录
+        # 生成二进制文件
         assets_dir.mkdir(parents=True, exist_ok=True)
         for filename, content_data in input_files_data.items():
             if not content_data or not isinstance(content_data, dict):
                 continue
-            # 所有文件都放在 assets 目录下，忽略原始路径
             new_path = assets_dir / Path(filename).name
-            # 传给 generate_file：只传文件名，output_dir 是 assets 目录
             generate_file(
                 {"filename": new_path.name, "content": content_data},
                 str(assets_dir),
             )
             new_file_paths.append(str(new_path))
-    except Exception:
-        logger.exception("生成文件失败：")
-        _cleanup()
-        raise
 
-    # 在 /new 之前拷贝 skill 目录
-    try:
+        # 拷贝 skill 目录
         skills_dir.mkdir(parents=True, exist_ok=True)
         for skill_path in input_skills_data:
             src_path = Path(skill_path)
             if not src_path.exists() or not src_path.is_dir():
-                raise Exception()
-
+                raise Exception(f"Skill 路径不存在：{skill_path}")
             dst_path = skills_dir / src_path.name
             shutil.copytree(src_path, dst_path)
             new_skill_paths.append(str(dst_path))
-    except Exception:
-        logger.exception("拷贝 skill 失败：")
-        _cleanup()
-        raise
 
-    try:
-        # 先执行 /new 创建新 session
+        # 执行 /new 创建新 session
         new_cmd = [
             "openclaw",
             "agent",
@@ -355,114 +356,12 @@ def _execute_query_once(
             check=False,
         )
         if new_result.returncode != 0:
-            # 检查是否因为 session 被锁导致失败
-            error_msg = new_result.stderr
-            if "locked" in error_msg.lower() or "lock" in error_msg.lower():
-                logger.warning(f"检测到 session 被锁，尝试清理 lock 文件...")
-                # 清理 lock 文件（在 sessions/ 目录下）
-                agent_dir = _agent_store_dir(agent_id)
-                sessions_dir = agent_dir / "sessions"
-                deleted = 0
-                if sessions_dir.exists():
-                    for lock_file in sessions_dir.glob("*.jsonl.lock"):
-                        try:
-                            lock_file.unlink()
-                            deleted += 1
-                        except Exception as e:
-                            logger.error(f"删除 lock 文件失败 {lock_file}: {e}")
-                logger.info(f"已删除 {deleted} 个 lock 文件，将重试 /new 命令")
-                # 重试一次 /new
-                new_result = subprocess.run(
-                    new_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    check=False,
-                )
-            if new_result.returncode != 0:
-                raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
+            raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
-        if len(new_file_paths) > 0:
-            user_query += f"\n下面是任务相关的文件：\n{new_file_paths}"
-        if len(new_skill_paths) > 0:
-            user_query += f"\n下面是可用的 skills：\n{new_skill_paths}"
-        # 执行用户查询（使用 --local 绕过网关配对）
-        cmd = [
-            "openclaw",
-            "agent",
-            "--agent",
-            agent_id,
-            "--local",
-            "-m",
-            user_query,
-        ]
+        yield new_file_paths, new_skill_paths
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,  # None 表示不设置超时
-            check=False,
-        )
-        if result.returncode != 0:
-            raise Exception(result.stderr)
-        logger.info(f"请求结束： {result.stdout[:50]}...")
-    except subprocess.TimeoutExpired:
-        raise
-    except Exception:
-        raise
     finally:
-        # 清空 assets 和 skills
         _cleanup()
-
-    # 只读取新 session 中的消息
-    messages = load_session_new_messages(agent_id, last_timestamp)
-    return json.dumps({"messages": messages}, ensure_ascii=False) if messages else ""
-
-
-def _execute_single_query(
-    agent_id: str,
-    user_query: str,
-    timeout: int,
-    logger: Any,
-    input_files_data: Dict,
-    input_skills_data: List[str],
-    max_retries: int = 3,
-) -> str:
-    """
-    执行单个查询请求（使用预先创建的 agent，带重试）。
-
-    Args:
-        agent_id: Agent 标识符
-        user_query: 用户查询内容
-        timeout: 超时时间（秒）
-        logger: 日志对象
-        input_files_data: 该 query 对应的文件内容数据（FileContextGenerator 输出）
-        input_skills_data: 该 query 对应的 skill 相对路径列表
-        max_retries: 最大重试次数，默认 3
-
-    Returns:
-        助手的回复文本，如果执行失败则返回空字符串
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return _execute_query_once(
-                agent_id,
-                user_query,
-                timeout,
-                logger,
-                input_files_data,
-                input_skills_data,
-            )
-        except Exception as e:
-            if attempt < max_retries:
-                # 指数退避：1s, 2s, 4s...
-                backoff_time = 2**attempt
-                time.sleep(backoff_time)
-            else:
-                logger.error(f"请求失败 (after {max_retries + 1} attempts): {e}")
-
-    return ""
 
 
 # ============================================================================
@@ -489,6 +388,10 @@ class CLIOpenClawServing(LLMServingABC):
         create_if_missing: bool = True,
         max_workers: int = 4,
         max_retries: int = 3,
+        # 验证用 LLM 参数
+        verification_api_key: Optional[str] = None,
+        verification_base_url: Optional[str] = None,
+        verification_client_params: Optional[Dict[str, Any]] = None,
     ):
         """
         初始化 CLIOpenClawServing。
@@ -500,6 +403,19 @@ class CLIOpenClawServing(LLMServingABC):
             create_if_missing: 如果 agent 不存在是否自动创建，默认 True
             max_workers: 并发 worker 数量，默认 4
             max_retries: 请求失败时的最大重试次数，默认 3
+            verification_api_key: 验证用 API key，从 OPENAI_API_KEY 环境变量读取
+            verification_base_url: 验证用 API base URL，从 OPENAI_BASE_URL 环境变量读取
+            verification_client_params: 验证用 LLM 调用参数字典，支持：
+                - model: 模型名称，默认 gpt-4o-mini
+                - max_completion_tokens: 最大生成 token，默认 16384
+                - read_timeout: 读取超时（秒），默认 600
+                - temperature: 默认 0.7
+                - top_p: 默认 0.8
+                - top_k: 默认 20
+                - min_p: 默认 0.0
+                - presence_penalty: 默认 1.5
+                - repetition_penalty: 默认 1.0
+                - chat_template_kwargs: 如 {"enable_thinking": false}
         """
         self.logger = get_logger()
 
@@ -509,6 +425,39 @@ class CLIOpenClawServing(LLMServingABC):
         self.create_if_missing = create_if_missing
         self.max_workers = max_workers
         self.max_retries = max_retries
+
+        # 验证用 LLM 参数
+        self.verification_client_params = {
+            "max_completion_tokens": 16384,
+            "timeout": 600,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+            },
+        }
+        if verification_client_params:
+            self.verification_client_params.update(verification_client_params)
+
+        api_key = verification_api_key
+        base_url = verification_base_url
+
+        if api_key:
+            # 从 params 中读取 timeout
+            api_timeout = self.verification_client_params.get("timeout", 600)
+            self._verification_client = OpenAI(
+                api_key=api_key,
+                base_url=base_url if base_url else None,
+                timeout=api_timeout,
+            )
+        else:
+            self._verification_client = None
+            self.logger.warning("未设置 OPENAI_API_KEY，验证功能将不可用")
+
         self._initialized = False
         self._worker_agents: List[str] = []
 
@@ -549,13 +498,6 @@ class CLIOpenClawServing(LLMServingABC):
                 # 初始设置时，如果存在就跳过
                 new_worker_agents.append(worker_agent_id)
                 continue
-            else:
-                # 检查 agent 是否被锁定（通过检查 lock 文件）
-                if _is_agent_locked(worker_agent_id):
-                    self.logger.warning(
-                        f"Worker agent {worker_agent_id} 检测到 lock 文件，正在重建..."
-                    )
-                    needs_rebuild = True
 
             # 如果需要创建或重建
             if needs_creation or needs_rebuild:
@@ -606,6 +548,9 @@ class CLIOpenClawServing(LLMServingABC):
         user_inputs: List[str],
         input_files_data: List[Dict],
         input_skills_data: List[List[str]],
+        enable_verification: bool = False,
+        verification_prompt_template: Optional[str] = None,
+        max_verification_rounds: int = 3,
     ) -> List[str]:
         """
         生成文本响应（并发执行，每个请求使用独立 worker agent）。
@@ -661,15 +606,16 @@ class CLIOpenClawServing(LLMServingABC):
                 # 分配 worker agent（轮询）
                 worker_agent_id = self._worker_agents[i % len(self._worker_agents)]
                 # 传入对应的文件数据和 skill 数据
+                # 统一执行路径
+                use_max_rounds = max_verification_rounds if enable_verification else 1
                 future = executor.submit(
-                    _execute_single_query,
+                    self._execute_single_task_with_verification,
                     worker_agent_id,
                     question,
-                    self.timeout,
-                    self.logger,
+                    verification_prompt_template,
+                    use_max_rounds,
                     input_files_data[i],
                     input_skills_data[i],
-                    self.max_retries,
                 )
                 futures[future] = i
 
@@ -696,6 +642,192 @@ class CLIOpenClawServing(LLMServingABC):
         """生成嵌入向量（CLI 模式不支持，返回空向量）。"""
         self.logger.warning("CLI 模式不支持 embedding，返回空向量")
         return [[] for _ in texts]
+
+    def _verify_with_external_llm(
+        self,
+        task_description: str,
+        agent_output: str,
+        prompt_template: Optional[str],
+    ) -> tuple[bool, str]:
+        """使用外部 LLM 进行验证。
+
+        Args:
+            task_description: 任务描述
+            agent_output: Agent 输出
+            prompt_template: 验证提示词模板
+
+        Returns:
+            (是否完成，反馈信息)
+        """
+        if not self._verification_client:
+            self.logger.warning("验证用 OpenAI 客户端未初始化，跳过验证")
+            return True, ""  # 验证失败默认认为完成，避免死循环
+
+        # 构建验证提示词
+        if not prompt_template:
+            verification_prompt = (
+                f"请评估以下任务是否完成:\n\n"
+                f"任务:{task_description}\n\n"
+                f"Agent 输出:\n{agent_output}\n\n"
+                f"请返回:\n判断:completed/incomplete\n反馈:(如果未完成，给出具体的改进建议)"
+            )
+        else:
+            verification_prompt = prompt_template.format(
+                task_description=task_description,
+                agent_output=agent_output,
+            )
+
+        try:
+            response = self._verification_client.chat.completions.create(
+                **self.verification_client_params
+            )
+            verify_output = response.choices[0].message.content
+            return self._parse_verification_result(verify_output)
+        except Exception as e:
+            self.logger.error(f"验证 LLM 调用失败:{e}")
+            # 验证失败时默认认为完成，避免死循环
+            return True, ""
+
+    def _parse_verification_result(self, verify_output: str) -> tuple[bool, str]:
+        """解析验证结果。
+
+        Args:
+            verify_output: LLM 验证输出
+
+        Returns:
+            (是否完成，反馈信息)
+        """
+        verify_output = verify_output.lower()
+
+        # 检查是否完成
+        is_completed = (
+            "completed" in verify_output and "incomplete" not in verify_output
+        )
+
+        # 提取反馈信息
+        feedback = ""
+        if "反馈:" in verify_output:
+            feedback = verify_output.split("反馈:")[-1].strip()
+        elif "improvement" in verify_output or "建议" in verify_output:
+            feedback = verify_output
+
+        return is_completed, feedback
+
+    def _execute_single_task_with_verification(
+        self,
+        worker_agent_id: str,
+        task_description: str,
+        prompt_template: Optional[str],
+        max_rounds: int,
+        input_files_data: Dict,
+        input_skills_data: List[str],
+    ) -> str:
+        """
+        执行单个任务，支持验证循环（带整个任务级别的重试）。
+
+        Args:
+            worker_agent_id: Worker Agent 标识符
+            task_description: 任务描述
+            prompt_template: 验证提示词模板
+            max_rounds: 最大执行轮数（>1 时启用验证循环）
+            input_files_data: 文件内容数据
+            input_skills_data: Skill 相对路径列表
+
+        Returns:
+            最终输出
+        """
+        self.logger.info(f"开始任务执行：{task_description[:50]}...")
+
+        round_num = 0
+        previous_output = ""
+        feedback = ""
+
+        # 对整个任务进行重试
+        for retry_attempt in range(self.max_retries):
+            try:
+                # 使用 contextmanager 管理整个验证循环的 session 生命周期
+                with _prepare_and_create_session(
+                    worker_agent_id,
+                    self.timeout,
+                    self.logger,
+                    input_files_data,
+                    input_skills_data,
+                ):
+                    while round_num < max_rounds:
+                        round_num += 1
+                        self.logger.info(f"[轮次 {round_num}/{max_rounds}] 执行任务...")
+
+                        # 构建本轮用户输入
+                        if round_num == 1:
+                            user_input = task_description
+                        else:
+                            # 后续轮次：只用 feedback，更像真人的回答
+                            user_input = feedback
+
+                        # 执行任务（发送查询到 session）
+                        # 仅在首轮添加文件/skills 信息，后续轮次 session 已存在
+                        messages = _send_query_to_session(
+                            worker_agent_id,
+                            user_input,
+                            self.timeout,
+                            self.logger,
+                            add_assets_info=(round_num == 1),
+                        )
+                        # 从消息列表中提取最后一条助手消息
+                        output: str = ""
+                        for m in reversed(messages):
+                            # 消息结构：m["message"]["role"] 和 m["message"]["content"]
+                            if m.get("message", {}).get("role", None) == "assistant":
+                                content_list = m.get("message", {}).get("content", [])
+                                # content 是列表，提取 text 类型的内容（忽略 thinking）
+                                content_parts = []
+                                for item in content_list:
+                                    if (
+                                        isinstance(item, dict)
+                                        and item.get("type") == "text"
+                                    ):
+                                        content_parts.append(item.get("text", ""))
+                                output = "\n\n".join(content_parts)
+                                break
+
+                        if not output:
+                            self.logger.warning(f"[轮次 {round_num}] 未找到助手消息")
+                            raise Exception("未找到助手消息")
+
+                        previous_output = output
+
+                        # 验证阶段（max_rounds=1 时跳过）
+                        if max_rounds > 1:
+                            self.logger.info(f"[轮次 {round_num}] 进行验证...")
+                            is_completed, feedback = self._verify_with_external_llm(
+                                task_description,
+                                output,
+                                prompt_template,
+                            )
+
+                            if is_completed:
+                                self.logger.info(f"[轮次 {round_num}] 任务完成！")
+                                break
+
+                            self.logger.info(
+                                f"[轮次 {round_num}] 任务未完成，反馈：{feedback[:50]}..."
+                            )
+
+                    # with 块结束时自动清理 workspace
+                    break  # 任务成功完成，退出重试循环
+
+            except Exception as e:
+                if retry_attempt < self.max_retries - 1:
+                    self.logger.warning(
+                        f"任务执行失败，重试 {retry_attempt + 1}/{self.max_retries}: {e}"
+                    )
+                    time.sleep(1.0)  # 等待 1 秒后重试
+                else:
+                    self.logger.error(f"任务重试 {self.max_retries} 次后仍失败：{e}")
+                    raise
+
+        self.logger.info("任务执行结束，session 已清理")
+        return json.dumps({"messages": messages}, ensure_ascii=False)
 
     def cleanup(self) -> None:
         """清理资源。"""
