@@ -752,6 +752,9 @@ class CLIOpenClawServing(LLMServingABC):
 
         Returns:
             (是否完成，反馈信息)
+
+        Raises:
+            Exception: 当反馈为空或格式不正确时抛出
         """
         verify_output = verify_output.lower()
 
@@ -768,6 +771,10 @@ class CLIOpenClawServing(LLMServingABC):
             feedback = verify_output.split("反馈：")[-1].strip()
         else:
             raise Exception("反馈找不到")
+
+        # 校验 feedback 不能为空
+        if not feedback:
+            raise Exception("验证反馈为空，LLM 未提供有效的改进建议")
 
         return is_completed, feedback
 
@@ -873,10 +880,6 @@ class CLIOpenClawServing(LLMServingABC):
                             self.logger.info(
                                 f"[轮次 {round_num}] 任务未完成，反馈：{feedback[:50]}..."
                             )
-
-                        if not feedback:
-                            self.logger.warning(f"[轮次 {round_num}] 未收到反馈消息")
-                            raise Exception("未收到反馈消息")
 
                         feedbacks.append(feedback)
 
