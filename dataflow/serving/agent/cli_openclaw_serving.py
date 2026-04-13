@@ -431,7 +431,7 @@ def _prepare_and_create_session(
         if new_result.returncode != 0:
             raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
-        yield new_file_paths, new_skill_paths
+        yield [Path(p).name for p in new_file_paths]  # 只返回文件名列表
 
     finally:
         _cleanup()
@@ -712,6 +712,8 @@ class CLIOpenClawServing(LLMServingABC):
         feedbacks: list[str],
         agent_outputs: list[str],
         prompt_template: Optional[str],
+        workspace_dir: Path,
+        initial_file_names: list[str],
     ) -> tuple[bool, str]:
         """使用外部 LLM 进行验证（基于 requests 直接调用 vllm API）。
 
@@ -720,6 +722,8 @@ class CLIOpenClawServing(LLMServingABC):
             feedbacks: 之前每一轮的反馈意见
             agent_outputs: Agent 每一轮的输出
             prompt_template: 验证提示词模板
+            workspace_dir: workspace 目录路径，用于检查新增文件
+            initial_file_names: 初始文件列表（排除这些文件，只返回新增的）
 
         Returns:
             (是否完成，反馈信息)
@@ -727,6 +731,14 @@ class CLIOpenClawServing(LLMServingABC):
         if not self._verification_api_url:
             self.logger.warning("验证用 API URL 未设置，跳过验证")
             return True, ""  # 验证失败默认认为完成，避免死循环
+
+        # 检查 workspace 中新增的文件内容
+        file_contents_str = ""
+        if workspace_dir:
+            file_contents_str = self._get_new_file_contents(
+                workspace_dir,
+                initial_file_names,
+            )
 
         # 构建验证提示词
         if not prompt_template:
@@ -742,6 +754,7 @@ class CLIOpenClawServing(LLMServingABC):
                 task_description=task_description,
                 agent_outputs=agent_outputs,
                 feedbacks=feedbacks,
+                file_contents=file_contents_str,
             )
 
         try:
@@ -800,6 +813,48 @@ class CLIOpenClawServing(LLMServingABC):
         except Exception:
             self.logger.exception(f"验证 LLM 调用失败")
             raise
+
+    def _get_new_file_contents(
+        self,
+        workspace_dir: Path,
+        initial_file_names: list[str],
+    ) -> str:
+        """检查 workspace/assets 目录中的文件，返回新增文件的内容和摘要。
+
+        Args:
+            workspace_dir: workspace 目录路径
+            initial_file_names: 初始文件列表（排除这些文件，只返回新增的）
+
+        Returns:
+            文件内容字符串（包含文件名和内容摘要）
+        """
+        assets_dir = Path(workspace_dir) / "assets"
+        if not assets_dir.exists():
+            return ""
+
+        # 转换为集合便于快速查找
+        initial_files_set = set(initial_file_names)
+
+        file_contents = []
+        for f in assets_dir.iterdir():
+            if f.is_file():
+                # 跳过初始就存在的文件
+                if f.name in initial_files_set:
+                    continue
+                try:
+                    # 尝试读取文件内容（限制大小，避免 token 爆炸）
+                    content = f.read_text(encoding="utf-8", errors="ignore")
+                    # 限制单个文件大小（最多 5000 字符）
+                    if len(content) > 5000:
+                        content = content[:5000] + "\n...（内容被截断）"
+                    file_contents.append(f"【{f.name}】\n{content}\n")
+                except Exception as e:
+                    self.logger.warning(f"读取文件 {f} 失败：{e}")
+
+        if not file_contents:
+            return ""
+
+        return "\n".join(file_contents)
 
     def _parse_verification_result(self, verify_output: str) -> tuple[bool, str]:
         """解析验证结果。
@@ -879,6 +934,7 @@ class CLIOpenClawServing(LLMServingABC):
                 outputs = []
                 feedbacks = []
                 # 使用 contextmanager 管理整个验证循环的 session 生命周期
+                # initial_file_names 是本轮生成的文件列表，用于验证时排除
                 with _prepare_and_create_session(
                     worker_agent_id,
                     self.timeout,
@@ -886,7 +942,7 @@ class CLIOpenClawServing(LLMServingABC):
                     input_files_data,
                     input_skills_data,
                     self.skill_base_dir,
-                ):
+                ) as initial_file_names:
                     injected_skills = _read_skills_info(
                         _workspace_dir(worker_agent_id) / "skills"
                     )
@@ -953,6 +1009,8 @@ class CLIOpenClawServing(LLMServingABC):
                                 feedbacks,
                                 outputs,
                                 prompt_template,
+                                _workspace_dir(worker_agent_id),
+                                initial_file_names,
                             )
 
                             if is_completed:
