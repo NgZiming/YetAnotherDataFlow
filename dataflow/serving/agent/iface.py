@@ -383,8 +383,8 @@ class AgentServingABC(ABC):
                     if len(content) > 5000:
                         content = content[:5000] + "\n...(内容被截断)"
                     file_contents.append(f"【{f.name}】\n{content}\n")
-                except Exception as e:
-                    self.logger.warning(f"读取文件 {f} 失败:{e}")
+                except Exception:
+                    self.logger.exception(f"读取文件 {f} 失败")
 
         return "\n".join(file_contents) if file_contents else ""
 
@@ -689,9 +689,11 @@ class AgentServingABC(ABC):
                         },
                     }
 
-            except Exception as e:
-                self.logger.error(
-                    f"[重试 {retry_attempt + 1}/{self.max_retries}] 任务失败:{e}"
+            except Exception:
+                import traceback
+
+                self.logger.exception(
+                    f"[重试 {retry_attempt + 1}/{self.max_retries}] 任务失败"
                 )
                 if retry_attempt < self.max_retries - 1:
                     continue
@@ -704,7 +706,7 @@ class AgentServingABC(ABC):
                     "is_completed": False,
                     "messages": messages,
                     "files_created": all_files_created,
-                    "errors": [str(e)],
+                    "errors": [traceback.format_exc()],
                     "metadata": {
                         "max_retries": self.max_retries,
                         "retry_attempt": retry_attempt,
