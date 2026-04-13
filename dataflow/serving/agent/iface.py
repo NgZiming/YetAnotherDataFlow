@@ -306,7 +306,10 @@ class AgentServingABC(ABC):
         return path_mapping
 
     def _replace_file_paths_in_text(
-        self, text: str, path_mapping: Dict[str, str]
+        self,
+        text: str,
+        path_mapping: Dict[str, str],
+        workspace_path: Optional[Path] = None,
     ) -> str:
         """
         在文本中替换文件路径。
@@ -314,19 +317,40 @@ class AgentServingABC(ABC):
         Args:
             text: 原始文本
             path_mapping: 路径映射 {原始路径:实际路径}
+            workspace_path: agent 的 workspace 路径(用于处理 /workspace/assets/ 到实际 workspace 的映射)
 
         Returns:
             替换后的文本
         """
-        if not path_mapping:
+        if not path_mapping and not workspace_path:
             return text
 
         result = text
-        # 按路径长度降序排序,避免部分匹配问题
-        for original_path, actual_path in sorted(
-            path_mapping.items(), key=lambda x: len(x[0]), reverse=True
-        ):
-            result = result.replace(original_path, actual_path)
+
+        # 先应用 path_mapping 中的替换
+        if path_mapping:
+            # 按路径长度降序排序,避免部分匹配问题
+            for original_path, actual_path in sorted(
+                path_mapping.items(), key=lambda x: len(x[0]), reverse=True
+            ):
+                result = result.replace(original_path, actual_path)
+
+        # 处理 /workspace/assets/ 到 agent workspace 的映射
+        # 如果文本中有 /workspace/assets/xxx 但不在 path_mapping 中,需要映射到实际 workspace
+        if workspace_path:
+            import re
+
+            # 查找所有 /workspace/assets/xxx 模式
+            workspace_assets_pattern = r'/workspace/assets/([^\s"\'>]+)'
+
+            def replace_workspace_assets(match):
+                filename = match.group(1)
+                # 构建实际路径
+                actual_path = str(workspace_path / "assets" / filename)
+                return actual_path
+
+            result = re.sub(workspace_assets_pattern, replace_workspace_assets, result)
+
         return result
 
     def _get_new_file_contents(
@@ -578,7 +602,9 @@ class AgentServingABC(ABC):
                     path_mapping = path_mapping or {}
                     # 替换 task_description 中的文件路径为实际路径
                     task_description = user_input = self._replace_file_paths_in_text(
-                        task_description, path_mapping
+                        task_description,
+                        path_mapping,
+                        workspace_path,
                     )
 
                     execution_start_time = datetime.now().strftime(
@@ -595,7 +621,9 @@ class AgentServingABC(ABC):
                             pass
                         else:
                             user_input = self._replace_file_paths_in_text(
-                                feedback, path_mapping
+                                feedback,
+                                path_mapping,
+                                workspace_path,
                             )
 
                         # 发送查询(子类返回格式化后的轨迹字典)
