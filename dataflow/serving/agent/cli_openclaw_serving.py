@@ -418,7 +418,7 @@ class CLIOpenClawServing(AgentServingABC):
         input_files_data: Dict,
         input_skills_data: List[str],
         task_id: Optional[str] = None,
-    ) -> Optional[List[str]]:
+    ) -> Dict[str, str]:
         """准备执行上下文（清理 workspace、生成文件、创建 session）。"""
         # 使用 task_id 作为 agent_id，确保与 workspace 对应
         if task_id:
@@ -431,9 +431,6 @@ class CLIOpenClawServing(AgentServingABC):
 
         assets_dir = workspace_path / "assets"
         skills_dir = workspace_path / "skills"
-
-        new_file_paths: list[str] = []
-        new_skill_paths: list[str] = []
 
         core_files = {
             "AGENTS.md",
@@ -477,36 +474,13 @@ class CLIOpenClawServing(AgentServingABC):
         self.logger.info(f"执行前清理 workspace: {workspace_path}")
         _cleanup()
 
-        # 生成文件到 assets 目录
-        if input_files_data:
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            for filename, content_data in input_files_data.items():
-                if not content_data or not isinstance(content_data, dict):
-                    continue
-                new_path = assets_dir / Path(filename).name
-                from dataflow.utils.generate_binary_files import generate_file
-
-                generate_file(
-                    {"filename": new_path.name, "content": content_data},
-                    str(assets_dir),
-                )
-                new_file_paths.append(str(new_path))
-
-        # 拷贝 skill 目录
-        if input_skills_data and self.skill_base_dir:
-            skills_dir.mkdir(parents=True, exist_ok=True)
-            for skill_name in input_skills_data:
-                if Path(skill_name).is_absolute():
-                    src_path = Path(skill_name)
-                else:
-                    src_path = Path(self.skill_base_dir) / skill_name
-
-                if not src_path.exists() or not src_path.is_dir():
-                    raise Exception(f"Skill 路径不存在：{src_path}")
-
-                dst_path = skills_dir / src_path.name
-                shutil.copytree(src_path, dst_path)
-                new_skill_paths.append(str(dst_path))
+        # 使用父类的 _prepare_files 方法生成文件和 skills
+        path_mapping = self._prepare_files(
+            workspace_path,
+            input_files_data,
+            input_skills_data,
+            self.skill_base_dir,
+        )
 
         # 执行 /new 创建新 session
         new_cmd = [
@@ -528,7 +502,7 @@ class CLIOpenClawServing(AgentServingABC):
         if new_result.returncode != 0:
             raise RuntimeError(f"/new 命令失败：{new_result.stderr}")
 
-        return [Path(p).name for p in new_file_paths]
+        return path_mapping
 
     def _cleanup_execution_context(
         self, workspace_path: Path, task_id: Optional[str] = None
@@ -542,9 +516,6 @@ class CLIOpenClawServing(AgentServingABC):
             if agent_id == "workspace":
                 agent_id = self.agent_id
 
-        assets_dir = workspace_path / "assets"
-        skills_dir = workspace_path / "skills"
-
         core_files = {
             "AGENTS.md",
             "BOOTSTRAP.md",
@@ -555,34 +526,21 @@ class CLIOpenClawServing(AgentServingABC):
             "USER.md",
         }
 
-        # 清空 assets、skills 目录，并清理 workspace 中非核心文件
-        for d in [assets_dir, skills_dir]:
-            if d.exists():
-                try:
-                    shutil.rmtree(d)
-                    self.logger.debug(f"清理目录：{d}")
-                except Exception as e:
-                    self.logger.exception(f"清空 {d} 失败")
-                    raise
-
+        # 清理 workspace 中所有非核心文件和目录
         if workspace_path.exists():
             for item in workspace_path.iterdir():
                 if item.name in core_files:
                     continue
-                if item.is_file():
-                    try:
+                try:
+                    if item.is_file():
                         item.unlink()
                         self.logger.debug(f"清理 workspace 文件：{item.name}")
-                    except Exception as e:
-                        self.logger.exception(f"清理文件失败 {item}")
-                        raise
-                elif item.is_dir():
-                    try:
+                    elif item.is_dir():
                         shutil.rmtree(item)
                         self.logger.debug(f"清理 workspace 目录：{item.name}")
-                    except Exception as e:
-                        self.logger.exception(f"清理目录失败 {item}")
-                        raise
+                except Exception as e:
+                    self.logger.exception(f"清理失败 {item}")
+                    raise
 
     def _send_query(
         self,
