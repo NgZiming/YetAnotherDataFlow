@@ -6,7 +6,7 @@ from dataflow import get_logger
 from dataflow.core import OperatorABC
 from dataflow.core.prompt import prompt_restrict, DIYPromptABC
 from dataflow.prompts.core_text import FormatStrPrompt
-from dataflow.serving.cli_openclaw_serving import CLIOpenClawServing
+from dataflow.serving.agent.cli_openclaw_serving import CLIOpenClawServing
 from dataflow.utils.registry import OPERATOR_REGISTRY
 from dataflow.utils.storage import DataFlowStorage
 from dataflow.utils.storage.data_parser import clean_surrogates
