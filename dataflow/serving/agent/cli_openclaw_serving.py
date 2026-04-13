@@ -365,16 +365,10 @@ class CLIOpenClawServing(AgentServingABC):
             task_id: 任务 ID（如 "task-0"）
 
         Returns:
-            worker agent ID
+            worker agent ID（与 task_id 一致，确保 workspace 匹配）
         """
-        # 将任务 ID 转换为 worker agent ID
-        # task-0 -> narita-worker-0000, task-1 -> narita-worker-0001
-        try:
-            task_num = int(task_id.split("-")[1])
-            worker_agent_id = f"{self.agent_id}-worker-{task_num:04d}"
-        except (IndexError, ValueError):
-            # 如果 task_id 格式不对，直接用 task_id 作为 agent_id
-            worker_agent_id = task_id
+        # 直接用 task_id 作为 agent_id，确保 workspace 路径和 agent 一致
+        worker_agent_id = task_id
 
         existing = _list_existing_agents()
 
@@ -415,6 +409,7 @@ class CLIOpenClawServing(AgentServingABC):
 
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径。"""
+        # 使用 task_id 作为 workspace 目录名，保持与 agent_id 一致
         return _workspace_dir(task_id)
 
     def _prepare_execution_context(
@@ -425,10 +420,11 @@ class CLIOpenClawServing(AgentServingABC):
         task_id: Optional[str] = None,
     ) -> Optional[List[str]]:
         """准备执行上下文（清理 workspace、生成文件、创建 session）。"""
-        # 使用 task_id 作为 agent_id，而不是 workspace_path.name
+        # 使用 task_id 作为 agent_id，确保与 workspace 对应
         if task_id:
             agent_id = self._get_or_create_worker_agent(task_id)
         else:
+            # 如果没有 task_id，从 workspace_path 推断
             agent_id = workspace_path.name
             if agent_id == "workspace":
                 agent_id = self.agent_id
@@ -534,11 +530,15 @@ class CLIOpenClawServing(AgentServingABC):
 
         return [Path(p).name for p in new_file_paths]
 
-    def _cleanup_execution_context(self, workspace_path: Path) -> None:
+    def _cleanup_execution_context(self, workspace_path: Path, task_id: Optional[str] = None) -> None:
         """清理执行上下文资源。"""
-        agent_id = workspace_path.name
-        if agent_id == "workspace":
-            agent_id = self.agent_id
+        # 使用 task_id 作为 agent_id，确保与 prepare 一致
+        if task_id:
+            agent_id = self._get_or_create_worker_agent(task_id)
+        else:
+            agent_id = workspace_path.name
+            if agent_id == "workspace":
+                agent_id = self.agent_id
 
         assets_dir = workspace_path / "assets"
         skills_dir = workspace_path / "skills"

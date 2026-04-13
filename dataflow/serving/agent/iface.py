@@ -178,12 +178,13 @@ class AgentServingABC(ABC):
         pass
 
     @abstractmethod
-    def _cleanup_execution_context(self, workspace_path: Path) -> None:
+    def _cleanup_execution_context(self, workspace_path: Path, task_id: Optional[str] = None) -> None:
         """
         清理执行上下文资源。
 
         Args:
             workspace_path: workspace 路径
+            task_id: 任务 ID（用于匹配对应的 agent）
         """
         pass
 
@@ -193,6 +194,7 @@ class AgentServingABC(ABC):
         workspace_path: Path,
         input_files_data: Dict[str, Any],
         input_skills_data: List[str],
+        task_id: Optional[str] = None,
     ) -> Iterator[Optional[List[str]]]:
         """
         管理完整的执行上下文生命周期（contextmanager 包装器）。
@@ -203,17 +205,18 @@ class AgentServingABC(ABC):
             workspace_path: workspace 路径
             input_files_data: 文件内容数据
             input_skills_data: skill 路径列表
+            task_id: 任务 ID（用于匹配对应的 agent）
 
         Yields:
             初始文件名称列表（可选），用于后续文件增量检测时排除
         """
         initial_files = self._prepare_execution_context(
-            workspace_path, input_files_data, input_skills_data, None
+            workspace_path, input_files_data, input_skills_data, task_id
         )
         try:
             yield initial_files
         finally:
-            self._cleanup_execution_context(workspace_path)
+            self._cleanup_execution_context(workspace_path, task_id)
 
     # =========================================================================
     # 通用实现 - 子类可直接使用
@@ -478,7 +481,7 @@ class AgentServingABC(ABC):
         for retry_attempt in range(self.max_retries):
             try:
                 with self._manage_execution_context(
-                    workspace_path, input_files_data, input_skills_data
+                    workspace_path, input_files_data, input_skills_data, task_id
                 ) as initial_file_names:
                     initial_file_names = initial_file_names or []
                     execution_start_time = datetime.now().strftime(
