@@ -491,7 +491,7 @@ class AgentServingABC(ABC):
         # 尝试多种分隔符：反馈:、反馈：、feedback:
         patterns = [
             r"反馈[:：]\s*(.+)",  # 中文或英文冒号
-            r"feedback[::]\s*(.+)",  # 英文 feedback
+            r"feedback[:：]\s*(.+)",  # 英文 feedback
         ]
 
         for pattern in patterns:
