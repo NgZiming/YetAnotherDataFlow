@@ -620,6 +620,13 @@ class AgentServingABC(ABC):
                             # user_input 已经在上面替换过了
                             pass
                         else:
+                            # 检查 feedback 是否为空
+                            if not feedback or not str(feedback).strip():
+                                self.logger.warning(
+                                    f"[轮次 {round_num}] feedback 为空，无法继续迭代，任务失败"
+                                )
+                                is_completed = False
+                                break
                             user_input = self._replace_file_paths_in_text(
                                 feedback,
                                 path_mapping,

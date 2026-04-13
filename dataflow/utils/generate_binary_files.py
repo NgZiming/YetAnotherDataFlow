@@ -36,7 +36,9 @@ except ImportError:
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from docx import Document
 
 # 演示文稿类
@@ -45,10 +47,133 @@ from pptx.util import Inches
 
 
 def generate_pdf(content: Dict, output_path: Path):
-    """生成 PDF 文件"""
+    """生成 PDF 文件（支持中文）"""
+    import re
+
+    # 检查内容是否包含中文
+    chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
+    has_chinese = False
+
+    def check_chinese(text):
+        nonlocal has_chinese
+        if isinstance(text, str) and chinese_pattern.search(text):
+            has_chinese = True
+
+    check_chinese(content.get("title", ""))
+    for section in content.get("sections", []):
+        check_chinese(section.get("heading", ""))
+        for para in section.get("paragraphs", []):
+            check_chinese(para)
+    if "table" in content and content["table"]:
+        for h in content["table"].get("headers", []):
+            check_chinese(h)
+        for row in content["table"].get("rows", []):
+            for cell in row:
+                check_chinese(cell)
+
+    # 如果有中文但没有中文字体，尝试使用 pdfkit 或报错
+    if has_chinese:
+        # 尝试注册中文字体
+        chinese_fonts = [
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # 文泉驿正黑
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # 文泉驿微米黑
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Noto Sans CJK
+        ]
+
+        font_registered = False
+        for font_path in chinese_fonts:
+            try:
+                pdfmetrics.registerFont(TTFont("ChineseFont", font_path))
+                font_registered = True
+                break
+            except Exception:
+                continue
+
+        if not font_registered:
+            # 没有中文字体，尝试使用 pdfkit
+            try:
+                import pdfkit
+
+                # 将内容转换为 HTML 然后用 pdfkit 生成 PDF
+                html_content = f"""
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <style>
+                        body {{ font-family: "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif; }}
+                        h1 {{ font-size: 24pt; }}
+                        h2 {{ font-size: 18pt; }}
+                        p {{ font-size: 12pt; line-height: 1.5; }}
+                        table {{ border-collapse: collapse; width: 100%; }}
+                        th, td {{ border: 1px solid black; padding: 8px; text-align: center; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>{content.get("title", "")}</h1>
+                """
+                for section in content.get("sections", []):
+                    html_content += f"<h2>{section.get('heading', '')}</h2>"
+                    for para in section.get("paragraphs", []):
+                        html_content += f"<p>{para}</p>"
+                if "table" in content and content["table"]:
+                    html_content += "<table>"
+                    html_content += (
+                        "<tr>"
+                        + "".join(f"<th>{h}</th>" for h in content["table"]["headers"])
+                        + "</tr>"
+                    )
+                    for row in content["table"]["rows"]:
+                        html_content += (
+                            "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
+                        )
+                    html_content += "</table>"
+                html_content += "</body></html>"
+
+                pdfkit.from_string(html_content, str(output_path))
+                return
+            except ImportError:
+                raise RuntimeError(
+                    "PDF 包含中文内容，但未找到中文字体。请安装文泉驿字体或 pdfkit:\n"
+                    "  sudo apt install fonts-wqy-zenhei\n"
+                    "  pip install pdfkit\n"
+                    "  sudo apt install wkhtmltopdf"
+                )
+            except Exception as e:
+                raise RuntimeError(f"pdfkit 生成 PDF 失败：{e}")
+
+    # 使用 reportlab 生成（无中文或已注册中文字体）
     doc = SimpleDocTemplate(str(output_path), pagesize=A4)
     elements = []
-    styles = getSampleStyleSheet()
+
+    # 创建支持中文的样式（如果已注册）
+    import os
+
+    if has_chinese and any(os.path.exists(p) for p in chinese_fonts):
+        styles = {
+            "Title": ParagraphStyle(
+                "Title",
+                fontName="ChineseFont",
+                fontSize=24,
+                textColor=colors.black,
+                spaceAfter=30,
+            ),
+            "Heading2": ParagraphStyle(
+                "Heading2",
+                fontName="ChineseFont",
+                fontSize=18,
+                textColor=colors.black,
+                spaceAfter=12,
+            ),
+            "Normal": ParagraphStyle(
+                "Normal",
+                fontName="ChineseFont",
+                fontSize=12,
+                textColor=colors.black,
+                leading=16,
+            ),
+        }
+    else:
+        styles = getSampleStyleSheet()
 
     # 标题
     elements.append(Paragraph(content["title"], styles["Title"]))

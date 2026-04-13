@@ -225,7 +225,11 @@ def _send_query_to_session(
     Raises:
         Exception: 执行失败时抛出异常
     """
-    query = user_query
+    # 验证 user_query 不为空
+    if not user_query or not str(user_query).strip():
+        raise ValueError("user_query 不能为空")
+
+    query = str(user_query).strip()
     if add_assets_info:
         assets_dir = _workspace_dir(agent_id) / "assets"
         skills_dir = _workspace_dir(agent_id) / "skills"
@@ -585,9 +589,24 @@ class CLIOpenClawServing(AgentServingABC):
                 "errors": List[str],
             }
         """
+        # 验证 query 不为空
+        if not query or not str(query).strip():
+            self.logger.error(
+                f"_send_query: query 为空！workspace_path={workspace_path}"
+            )
+            raise ValueError("query 不能为空")
+
         agent_id = workspace_path.name
         if agent_id == "workspace":
             agent_id = self.agent_id
+
+        # 检查 agent 是否存在
+        existing = _list_existing_agents()
+        if agent_id.lower() not in existing:
+            self.logger.error(
+                f"Agent {agent_id} 不存在，请确保 agent 已创建。可用 agents: {existing}"
+            )
+            raise ValueError(f"Agent {agent_id} 不存在")
 
         # session_id 从 session_file 中提取 UUID
         session_id = None
