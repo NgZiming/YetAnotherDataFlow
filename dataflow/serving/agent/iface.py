@@ -38,11 +38,12 @@ class MessageDict(TypedDict, total=False):
     round: int  # 所属轮次
     role: str  # "system" | "user" | "assistant" | "tool" | "toolResult"
     content: str  # 消息内容
-    thought: Optional[str]  # 思考内容(如有)
-    tool_calls: List[Dict]  # 工具调用列表(如有)
-    tool_results: List[Dict]  # 工具结果列表(如有)
-    id: Optional[str]  # 消息 ID(用于拓扑)
-    parentId: Optional[str]  # 父消息 ID(用于拓扑)
+    thought: Optional[str]  # 思考内容（如有）
+    tool_calls: List[Dict]  # 工具调用列表（如有）
+    tool_results: List[Dict]  # 工具结果列表（如有）
+    id: Optional[str]  # 消息 ID（用于拓扑）
+    parentId: Optional[str]  # 父消息 ID（用于拓扑）
+    session_id: Optional[str]  # 所属 session ID
 
 
 class TrajectoryDict(TypedDict, total=False):
@@ -253,12 +254,12 @@ class AgentServingABC(ABC):
 
         Args:
             workspace_path: workspace 路径
-            input_files_data: 文件内容数据（key 为原始文件路径）
+            input_files_data: 文件内容数据(key 为原始文件路径)
             input_skills_data: skill 名称列表
             skill_base_dir: Skill 基础目录
 
         Returns:
-            文件路径映射字典 {原始路径：实际生成路径}
+            文件路径映射字典 {原始路径:实际生成路径}
         """
         path_mapping = {}
 
@@ -280,7 +281,7 @@ class AgentServingABC(ABC):
                     str(assets_dir),
                 )
                 path_mapping[original_path] = actual_path
-                self.logger.debug(f"生成文件：{filename} -> {actual_path}")
+                self.logger.debug(f"生成文件:{filename} -> {actual_path}")
 
         # 准备 skills 到 skills 目录
         if input_skills_data and skill_base_dir:
@@ -296,7 +297,7 @@ class AgentServingABC(ABC):
                     src_path = Path(skill_base_dir) / skill_name
 
                 if not src_path.exists() or not src_path.is_dir():
-                    raise Exception(f"Skill 路径不存在：{src_path}")
+                    raise Exception(f"Skill 路径不存在:{src_path}")
 
                 dst_path = skills_dir / src_path.name
                 shutil.copytree(src_path, dst_path, dirs_exist_ok=True)

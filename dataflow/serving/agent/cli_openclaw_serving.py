@@ -571,6 +571,9 @@ class CLIOpenClawServing(AgentServingABC):
         if agent_id == "workspace":
             agent_id = self.agent_id
 
+        # session_id 从 session_file 中提取 UUID
+        session_id = None
+
         # 构建 system prompt
         skills_dir = workspace_path / "skills"
         skills_info = _read_skills_info(skills_dir)
@@ -590,6 +593,7 @@ class CLIOpenClawServing(AgentServingABC):
             "tool_results": [],
             "id": None,
             "parentId": None,
+            "session_id": session_id,
         }
 
         messages = _send_query_to_session(
@@ -600,20 +604,117 @@ class CLIOpenClawServing(AgentServingABC):
             add_assets_info=add_assets_info,
         )
 
+        # 从 session_file 字段中提取 session_id (UUID)
+        if messages:
+            for m in messages:
+                session_file = m.get("session_file", "")
+                if session_file:
+                    # session_file 格式如：'c3e9543b-537c-4e93-a45c-097a271b94c2.jsonl'
+                    # 提取 UUID 部分（去掉 .jsonl 后缀）
+                    if session_file.endswith(".jsonl"):
+                        session_id = session_file[:-6]
+                    else:
+                        session_id = session_file
+                    break
+
+        # 如果仍未找到，使用 agent_id 作为 fallback
+        if session_id is None:
+            session_id = agent_id
+
+        # 为每条消息添加 session_id 并统一格式
+        formatted_messages = []
+        user_round = 0
+        assistant_round = 0
+
+        for m in messages:
+            # 添加 session_id
+            if "session_id" not in m:
+                m["session_id"] = session_id
+
+            # 如果是原始 transcript 格式，转换为 MessageDict 格式
+            if m.get("type") == "message":
+                inner_msg = m.get("message", {})
+                role = inner_msg.get("role", "unknown")
+
+                # 计算 round 号
+                if role == "user":
+                    user_round += 1
+                    round_num = user_round
+                elif role == "assistant":
+                    assistant_round += 1
+                    round_num = assistant_round
+                else:
+                    round_num = 0
+
+                formatted_msg = {
+                    "round": round_num,
+                    "role": role,
+                    "content": inner_msg.get("content", []),
+                    "thought": None,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "id": m.get("id"),
+                    "parentId": m.get("parentId"),
+                    "session_id": session_id,
+                }
+
+                # 处理 toolResult
+                if role == "toolResult":
+                    formatted_msg["tool_results"] = [
+                        {
+                            "toolCallId": inner_msg.get("toolCallId"),
+                            "toolName": inner_msg.get("toolName"),
+                            "content": inner_msg.get("content", []),
+                        }
+                    ]
+
+                # 处理 toolCall 和 thinking
+                if role == "assistant":
+                    content_list = inner_msg.get("content", [])
+                    for item in content_list:
+                        if isinstance(item, dict):
+                            if item.get("type") == "toolCall":
+                                formatted_msg["tool_calls"].append(
+                                    {
+                                        "id": item.get("id"),
+                                        "name": item.get("name"),
+                                        "arguments": item.get("arguments"),
+                                    }
+                                )
+                            elif item.get("type") == "thinking":
+                                formatted_msg["thought"] = item.get("thinking")
+
+                formatted_messages.append(formatted_msg)
+            elif m.get("type") == "system":
+                # system 消息已经格式化过了
+                formatted_messages.append(m)
+            else:
+                # 其他类型（session, model_change 等）跳过
+                pass
+
         # 将 system 消息插入到开头
+        formatted_messages.insert(0, system_message)
         messages.insert(0, system_message)
 
-        # 提取最终输出
+        # 提取最终输出（从最后一条 role=assistant 的消息中提取 text 内容）
         output = ""
-        for m in reversed(messages):
-            if m.get("message", {}).get("role", None) == "assistant":
-                content_list = m.get("message", {}).get("content", [])
+        for m in reversed(formatted_messages):
+            if m.get("role") == "assistant":
+                content_list = m.get("content", [])
                 content_parts = []
                 for item in content_list:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        content_parts.append(item.get("text", ""))
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            content_parts.append(item.get("text", ""))
+                        elif item.get("type") == "thinking":
+                            # thinking 不算作最终输出
+                            pass
+                    elif isinstance(item, str):
+                        content_parts.append(item)
                 output = "\n\n".join(content_parts)
-                break
+                # 只要有 text 内容就停止，找最后一条有实际输出的 assistant 消息
+                if output:
+                    break
 
         if not output:
             self.logger.warning("未找到助手消息")
@@ -621,7 +722,7 @@ class CLIOpenClawServing(AgentServingABC):
 
         # 返回标准轨迹字典（子类内部格式化）
         return {
-            "messages": messages,
+            "messages": formatted_messages,
             "final_output": output,
             "files_created": [],
             "errors": [],
