@@ -1,0 +1,44 @@
+# 大文件 - 不要推送
+*.jsonl
+result.jsonl
+part_*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.log
+
+# 数据文件
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.docx
+*.pptx
+
+# 图片
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.screenshot
+
+# 其他
+karenchan_images/
+karenchan_nsfw/
+dataflow-agent/
+dataflow-engine/
+dataflow-skills/
+pipeline-write/
+scripts/
+tools/
+skills/
