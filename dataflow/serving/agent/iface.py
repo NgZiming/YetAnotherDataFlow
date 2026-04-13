@@ -577,7 +577,7 @@ class AgentServingABC(ABC):
                 ) as path_mapping:
                     path_mapping = path_mapping or {}
                     # 替换 task_description 中的文件路径为实际路径
-                    user_input = self._replace_file_paths_in_text(
+                    task_description = user_input = self._replace_file_paths_in_text(
                         task_description, path_mapping
                     )
 

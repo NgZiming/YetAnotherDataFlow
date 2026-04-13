@@ -382,19 +382,24 @@ class CLIOpenClawServing(AgentServingABC):
 
             # agent 不存在，尝试创建
             if self.create_if_missing and self.model:
-                self.logger.info(f"尝试创建 worker agent: {worker_agent_id} (attempt {attempt + 1}/{max_attempts})")
+                self.logger.info(
+                    f"尝试创建 worker agent: {worker_agent_id} (attempt {attempt + 1}/{max_attempts})"
+                )
                 try:
                     create_agent(worker_agent_id, self.model)
                 except RuntimeError as e:
                     error_msg = str(e)
                     # 如果是因为配置冲突，等待后重试
-                    if "ConfigMutationConflictError" in error_msg or "config changed" in error_msg:
+                    if (
+                        "ConfigMutationConflictError" in error_msg
+                        or "config changed" in error_msg
+                    ):
                         self.logger.warning(f"配置冲突，等待后重试：{e}")
                         time.sleep(retry_delay)
                         continue
                     # 其他错误直接抛出
                     raise
-                
+
                 # 等待 agent 创建完成并注册
                 self.logger.debug(f"等待 agent 注册：{worker_agent_id}")
                 time.sleep(retry_delay)
