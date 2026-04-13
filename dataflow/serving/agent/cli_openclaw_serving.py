@@ -887,11 +887,12 @@ class CLIOpenClawServing(LLMServingABC):
                     input_skills_data,
                     self.skill_base_dir,
                 ):
+                    injected_skills = _read_skills_info(
+                        _workspace_dir(worker_agent_id) / "skills"
+                    )
                     system_prompt = build_system_prompt(
                         workspace_path=str(_workspace_dir(worker_agent_id)),
-                        skills=_read_skills_info(
-                            _workspace_dir(worker_agent_id) / "skills"
-                        ),
+                        skills=injected_skills,
                         current_time=get_current_time_string(),
                     )
 
@@ -979,7 +980,11 @@ class CLIOpenClawServing(LLMServingABC):
 
         self.logger.info("任务执行结束，session 已清理")
         return json.dumps(
-            {"messages": messages, "system_prompt": system_prompt},
+            {
+                "messages": messages,
+                "system_prompt": system_prompt,
+                "skills": injected_skills,
+            },
             ensure_ascii=False,
         )
 
