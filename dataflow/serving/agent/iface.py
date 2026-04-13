@@ -38,11 +38,11 @@ class MessageDict(TypedDict, total=False):
     round: int  # 所属轮次
     role: str  # "system" | "user" | "assistant" | "tool" | "toolResult"
     content: str  # 消息内容
-    thought: Optional[str]  # 思考内容（如有）
-    tool_calls: List[Dict]  # 工具调用列表（如有）
-    tool_results: List[Dict]  # 工具结果列表（如有）
-    id: Optional[str]  # 消息 ID（用于拓扑）
-    parentId: Optional[str]  # 父消息 ID（用于拓扑）
+    thought: Optional[str]  # 思考内容(如有)
+    tool_calls: List[Dict]  # 工具调用列表(如有)
+    tool_results: List[Dict]  # 工具结果列表(如有)
+    id: Optional[str]  # 消息 ID(用于拓扑)
+    parentId: Optional[str]  # 父消息 ID(用于拓扑)
     session_id: Optional[str]  # 所属 session ID
 
 
@@ -470,28 +470,50 @@ class AgentServingABC(ABC):
             verify_output: LLM 验证输出
 
         Returns:
-            (是否完成,反馈信息)
+            (是否完成，反馈信息)
 
         Raises:
             Exception: 当反馈为空或格式不正确时
         """
-        verify_output = verify_output.lower()
+        import re
 
+        verify_output_lower = verify_output.lower()
+
+        # 判断是否完成
         is_completed = (
-            "completed" in verify_output and "incomplete" not in verify_output
+            "completed" in verify_output_lower
+            and "incomplete" not in verify_output_lower
         )
 
+        # 提取反馈 - 支持多种格式
         feedback = ""
-        if "反馈:" in verify_output:
-            feedback = verify_output.split("反馈:")[-1].strip()
-        elif "反馈:" in verify_output:
-            feedback = verify_output.split("反馈:")[-1].strip()
-        else:
-            self.logger.warning(f"验证输出中未找到'反馈:'字段")
-            raise Exception("反馈找不到")
+
+        # 尝试多种分隔符：反馈:、反馈：、feedback:
+        patterns = [
+            r"反馈[:：]\s*(.+)",  # 中文或英文冒号
+            r"feedback[::]\s*(.+)",  # 英文 feedback
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, verify_output, re.IGNORECASE | re.MULTILINE)
+            if match:
+                feedback = match.group(1).strip()
+                break
+
+        # 如果还是没找到，尝试用简单的 split
+        if not feedback:
+            for sep in ["反馈:", "反馈：", "feedback:", "feedback："]:
+                if sep in verify_output:
+                    feedback = verify_output.split(sep, 1)[-1].strip()
+                    # 移除可能的前导换行
+                    feedback = feedback.lstrip("\n\r").strip()
+                    break
 
         if not feedback:
-            raise Exception("验证反馈为空,LLM 未提供有效的改进建议")
+            self.logger.warning(
+                f"验证输出中未找到'反馈:'字段，原始输出：{verify_output[:200]}"
+            )
+            raise Exception("反馈找不到")
 
         return is_completed, feedback
 
