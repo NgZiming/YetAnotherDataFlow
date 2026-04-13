@@ -42,8 +42,59 @@ from dataflow.logger import get_logger
 # 导入二进制文件生成模块
 from dataflow.utils.generate_binary_files import generate_file
 
+from .system_prompt_builder import build_system_prompt, get_current_time_string
+
 # OpenClaw 基础目录
 OPENCLAW_BASE = Path.home() / ".openclaw"
+
+
+def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
+    """
+    从 skills 目录读取 skill 信息（name, description, location）
+
+    Args:
+        skills_dir: skills 目录路径
+
+    Returns:
+        skill 信息列表
+    """
+    skills_info = []
+
+    if not skills_dir.exists():
+        return skills_info
+
+    for skill_dir in skills_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+
+        # 尝试读取 SKILL.md
+        skill_md = skill_dir / "SKILL.md"
+        description = ""
+
+        if skill_md.exists():
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+                # 提取 description（简单解析）
+                for line in content.splitlines():
+                    if line.strip().startswith("<description>"):
+                        # 提取 <description>...</description>
+                        start = line.find("<description>")
+                        end = line.find("</description>")
+                        if start >= 0 and end > start:
+                            description = line[start + 13 : end].strip()
+                            break
+            except Exception:
+                pass
+
+        skills_info.append(
+            {
+                "name": skill_dir.name,
+                "description": description,
+                "location": str(skill_dir),
+            }
+        )
+
+    return skills_info
 
 
 # ============================================================================
@@ -836,6 +887,14 @@ class CLIOpenClawServing(LLMServingABC):
                     input_skills_data,
                     self.skill_base_dir,
                 ):
+                    system_prompt = build_system_prompt(
+                        workspace_path=str(_workspace_dir(worker_agent_id)),
+                        skills=_read_skills_info(
+                            _workspace_dir(worker_agent_id) / "skills"
+                        ),
+                        current_time=get_current_time_string(),
+                    )
+
                     while round_num < max_rounds:
                         round_num += 1
                         self.logger.info(f"[轮次 {round_num}/{max_rounds}] 执行任务...")
@@ -919,7 +978,10 @@ class CLIOpenClawServing(LLMServingABC):
                     raise
 
         self.logger.info("任务执行结束，session 已清理")
-        return json.dumps({"messages": messages}, ensure_ascii=False)
+        return json.dumps(
+            {"messages": messages, "system_prompt": system_prompt},
+            ensure_ascii=False,
+        )
 
     def cleanup(self) -> None:
         """清理资源。"""
