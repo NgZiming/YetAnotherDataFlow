@@ -530,7 +530,9 @@ class CLIOpenClawServing(AgentServingABC):
 
         return [Path(p).name for p in new_file_paths]
 
-    def _cleanup_execution_context(self, workspace_path: Path, task_id: Optional[str] = None) -> None:
+    def _cleanup_execution_context(
+        self, workspace_path: Path, task_id: Optional[str] = None
+    ) -> None:
         """清理执行上下文资源。"""
         # 使用 task_id 作为 agent_id，确保与 prepare 一致
         if task_id:

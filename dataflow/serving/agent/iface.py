@@ -107,7 +107,24 @@ class AgentServingABC(ABC):
         # 验证配置
         self._verification_api_url = verification_api_url
         self._verification_api_key = verification_api_key
-        self._verification_client_params = verification_client_params or {}
+        self._verification_client_params = {
+            "model_name": "/data/share/models/Qwen3.5-122B-A10B/",
+            "max_workers": 10,
+            "max_completion_tokens": 16384,
+            "read_timeout": 600,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+            },
+        }
+
+        if verification_client_params:
+            self._verification_client_params.update(verification_client_params)
 
     # =========================================================================
     # 抽象方法 - 子类必须实现
@@ -178,7 +195,9 @@ class AgentServingABC(ABC):
         pass
 
     @abstractmethod
-    def _cleanup_execution_context(self, workspace_path: Path, task_id: Optional[str] = None) -> None:
+    def _cleanup_execution_context(
+        self, workspace_path: Path, task_id: Optional[str] = None
+    ) -> None:
         """
         清理执行上下文资源。
 
