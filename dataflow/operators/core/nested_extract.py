@@ -185,14 +185,24 @@ class NestExtractOperator(OperatorABC):
                 output_keys[name] = value
                 self.logger.debug(f"Registered output key: {name} -> {value}")
 
+        # 验证 input_keys 和 output_keys 必须一一对应
+        if set(input_keys.keys()) != set(output_keys.keys()):
+            missing_in_output = set(input_keys.keys()) - set(output_keys.keys())
+            missing_in_input = set(output_keys.keys()) - set(input_keys.keys())
+            error_msg = (
+                "NestExtractOperator: input_keys 和 output_keys 必须一一对对应！"
+            )
+            if missing_in_output:
+                error_msg += f" 缺少 output 配置：{missing_in_output}"
+            if missing_in_input:
+                error_msg += f" 缺少 input 配置：{missing_in_input}"
+            raise ValueError(error_msg)
+
         # 构建输入到输出的映射
         for name, input_key in input_keys.items():
-            if name in output_keys:
-                output_key = output_keys[name]
-                keys_map[input_key] = output_key
-                self.logger.info(f"Created mapping: {input_key} -> {output_key}")
-            else:
-                self.logger.warning(f"No output key found for input '{name}', skipping")
+            output_key = output_keys[name]
+            keys_map[input_key] = output_key
+            self.logger.info(f"Created mapping: {input_key} -> {output_key}")
 
         self.logger.info(
             f"NestExtractOperator initialized with {len(keys_map)} mappings"
@@ -234,6 +244,11 @@ class NestExtractOperator(OperatorABC):
                 for input_key, output_key in keys_map.items():
                     extracted_value = get_nested_value(row, input_key)
 
+                    # 调试日志
+                    self.logger.debug(
+                        f"Row {row_idx}: Extracting {input_key} -> {output_key}, value={extracted_value} (type={type(extracted_value).__name__})"
+                    )
+
                     # 如果提取值为 None，标记该行需要丢弃
                     if extracted_value is None:
                         has_none = True
@@ -274,3 +289,19 @@ class NestExtractOperator(OperatorABC):
             f"errors={error_count}, "
             f"output_columns={len(result_df.columns)}"
         )
+
+        # 额外调试：检查输出列的值
+        for input_key, output_key in keys_map.items():
+            if output_key in result_df.columns:
+                non_empty_count = (
+                    result_df[output_key]
+                    .apply(
+                        lambda x: (
+                            bool(x) if isinstance(x, (list, dict)) else x is not None
+                        )
+                    )
+                    .sum()
+                )
+                self.logger.info(
+                    f"Output column '{output_key}': {non_empty_count}/{len(result_df)} rows have non-empty values"
+                )

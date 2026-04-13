@@ -450,24 +450,59 @@ class FileContextGenerator(OperatorABC):
         output_key: str,
     ):
         rows = dataframe.to_dict("records")
+        self.logger.info(
+            f"FileContextGenerator 输入：{len(rows)} rows, input_files_key={input_files_key}, input_question_key={input_question_key}"
+        )
 
-        # 收集需要生成的文件，验证 filename 格式
+        # 初始化输出列为空字典
+        for row in rows:
+            row[output_key] = {}
+
+        # 收集需要生成的文件
         gen_files: list[tuple[int, str, str]] = []
-        invalid_filenames = defaultdict(list)
         row_has_failure = defaultdict(bool)
+        invalid_filenames = defaultdict(list)
 
         for row_idx, row in enumerate(rows):
-            row[output_key] = {}
-            row_gen_files: list[tuple[int, str, str]] = []
-            for x in row[input_files_key]:
+            # 获取文件列表，支持多种输入格式
+            files_list = row.get(input_files_key, [])
+
+            self.logger.debug(
+                f"Row {row_idx}: {input_files_key} = {files_list} (type={type(files_list).__name__})"
+            )
+
+            # 确保是列表格式
+            if isinstance(files_list, str):
+                files_list = [files_list]
+            elif not isinstance(files_list, list):
+                self.logger.warning(
+                    f"Row {row_idx}: {input_files_key} 不是列表类型，转换为空列表"
+                )
+                files_list = []
+
+            # 如果没有文件，跳过
+            if not files_list:
+                self.logger.warning(f"Row {row_idx}: {input_files_key} 为空，跳过")
+                continue
+
+            question = row.get(input_question_key, "")
+            self.logger.debug(
+                f"Row {row_idx}: question = {question[:100]}..."
+                if len(question) > 100
+                else f"Row {row_idx}: question = {question}"
+            )
+
+            for filename in files_list:
                 # 验证 filename 必须以 /workspace/ 开头
-                if not x.startswith("/workspace/"):
-                    invalid_filenames[row_idx].append(x)
+                if not filename.startswith("/workspace/"):
+                    invalid_filenames[row_idx].append(filename)
                     row_has_failure[row_idx] = True
+                    self.logger.error(
+                        f"Row {row_idx}: 无效的 filename: {filename} (必须以 /workspace/ 开头)"
+                    )
                     break  # 这个 row 已经有无效的 filename，跳过其他文件
-                row_gen_files.append((row_idx, row[input_question_key], x))
-            if not row_has_failure[row_idx]:
-                gen_files.extend(row_gen_files)
+                gen_files.append((row_idx, question, filename))
+                self.logger.info(f"Row {row_idx}: 添加文件到生成队列: {filename}")
 
         # 记录无效的 filename
         for row_idx, filenames in invalid_filenames.items():
@@ -475,39 +510,73 @@ class FileContextGenerator(OperatorABC):
                 f"Row {row_idx} 有无效的 filename（必须以 /workspace/ 开头）: {filenames}"
             )
 
+        # 如果没有有效文件，直接返回
+        if not gen_files:
+            self.logger.warning(
+                f"没有有效文件需要生成，gen_files 为空，共检查了 {len(rows)} rows"
+            )
+            return pd.DataFrame(
+                [r for idx, r in enumerate(rows) if not row_has_failure[idx]]
+            )
+
+        self.logger.info(f"共 {len(gen_files)} 个文件需要生成内容")
+
+        # 为每个文件生成 prompt
         llm_prompts: list[str] = []
         for row_idx, question, filename in gen_files:
             ext = Path(filename).suffix[1:].lower()
             if ext not in format_to_category:
                 self.logger.warning(f"Row {row_idx}: 不支持的格式 {ext} - {filename}")
                 row_has_failure[row_idx] = True
-                break
+                continue
             cat = format_to_category[ext]
             prompt = prompts[cat]
             prompt = prompt.replace("{question}", question)
             prompt = prompt.replace("{filename}", filename)
             llm_prompts.append(prompt)
+            self.logger.debug(
+                f"Row {row_idx}: 为 {filename} (格式={ext}, 类别={cat}) 生成 prompt"
+            )
 
-        outputs = self.llm_serving.generate_from_input(
-            user_inputs=llm_prompts,
-            system_prompt="",
-        )
+        self.logger.info(f"准备调用 LLM，共 {len(llm_prompts)} 个 prompt")
+
+        # 调用 LLM 生成内容
+        try:
+            outputs = self.llm_serving.generate_from_input(
+                user_inputs=llm_prompts,
+                system_prompt="",
+            )
+            self.logger.info(f"LLM 调用完成，返回 {len(outputs)} 个结果")
+        except Exception as e:
+            self.logger.error(f"LLM 调用失败: {e}")
+            for row_idx, _, _ in gen_files:
+                row_has_failure[row_idx] = True
+            return pd.DataFrame(
+                [r for idx, r in enumerate(rows) if not row_has_failure[idx]]
+            )
 
         # 按 row_idx 分组处理结果
         row_results = defaultdict(dict)
 
         for (row_idx, _, filename), output in zip(gen_files, outputs):
+            if row_has_failure[row_idx]:
+                continue
+
+            self.logger.debug(f"处理结果：{filename}, 输出长度={len(output)}")
+
             # 清理 LLM 返回的 JSON 字符串（去除 markdown 代码块标记）
             json_string = output.strip(" \n")
             json_string = (
                 json_string.removeprefix("```json")
                 .removeprefix("```")
                 .removesuffix("```")
+                .removesuffix("```")
             )
 
             # 解析 LLM 返回的 JSON
             try:
                 content_data = json.loads(json_string)
+                self.logger.info(f"成功解析 {filename} 的 JSON 内容")
             except json.JSONDecodeError as e:
                 self.logger.error(f"解析 JSON 失败 {filename}: {e}")
                 self.logger.error(f"原始输出：{output[:500]}")
@@ -516,18 +585,20 @@ class FileContextGenerator(OperatorABC):
 
             row_results[row_idx][filename] = content_data
 
-        # 将成功的结果写回 rows，跳过有失败的 row
+        # 将成功的结果写回 rows
         for row_idx, file_contents in row_results.items():
             if row_has_failure[row_idx]:
                 self.logger.warning(f"Row {row_idx} 有文件合成失败，已丢弃整个 row")
                 continue
 
             rows[row_idx][output_key].update(file_contents)
+            self.logger.info(f"Row {row_idx}: 成功生成 {len(file_contents)} 个文件内容")
 
         # 过滤掉有失败的 row
-        rows = [row for idx, row in enumerate(rows) if not row_has_failure[idx]]
+        valid_rows = [row for idx, row in enumerate(rows) if not row_has_failure[idx]]
 
-        return pd.DataFrame(rows)
+        self.logger.info(f"文件内容生成完成：{len(valid_rows)}/{len(rows)} rows 有效")
+        return pd.DataFrame(valid_rows)
 
     def run(
         self,
