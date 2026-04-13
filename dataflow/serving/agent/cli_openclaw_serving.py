@@ -370,30 +370,43 @@ class CLIOpenClawServing(AgentServingABC):
         # 直接用 task_id 作为 agent_id，确保 workspace 路径和 agent 一致
         worker_agent_id = task_id
 
-        existing = _list_existing_agents()
+        max_attempts = 20  # 最多等待 200 秒
+        retry_delay = 10.0  # 每次重试间隔
 
-        if worker_agent_id.lower() not in existing:
+        for attempt in range(max_attempts):
+            existing = _list_existing_agents()
+
+            if worker_agent_id.lower() in existing:
+                self.logger.debug(f"Worker agent 已存在：{worker_agent_id}")
+                return worker_agent_id
+
+            # agent 不存在，尝试创建
             if self.create_if_missing and self.model:
-                self.logger.info(f"创建 worker agent: {worker_agent_id}")
-                create_agent(worker_agent_id, self.model)
-
-                # 等待 agent 创建完成
-                for attempt in range(10):
-                    time.sleep(0.5)
-                    check_result = subprocess.run(
-                        ["openclaw", "agents", "list"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    if worker_agent_id.lower() in check_result.stdout.lower():
-                        break
+                self.logger.info(f"尝试创建 worker agent: {worker_agent_id} (attempt {attempt + 1}/{max_attempts})")
+                try:
+                    create_agent(worker_agent_id, self.model)
+                except RuntimeError as e:
+                    error_msg = str(e)
+                    # 如果是因为配置冲突，等待后重试
+                    if "ConfigMutationConflictError" in error_msg or "config changed" in error_msg:
+                        self.logger.warning(f"配置冲突，等待后重试：{e}")
+                        time.sleep(retry_delay)
+                        continue
+                    # 其他错误直接抛出
+                    raise
+                
+                # 等待 agent 创建完成并注册
+                self.logger.debug(f"等待 agent 注册：{worker_agent_id}")
+                time.sleep(retry_delay)
             else:
                 raise RuntimeError(
                     f"Worker agent {worker_agent_id} 不存在，请设置 model 参数"
                 )
 
-        return worker_agent_id
+        # 所有尝试都失败后
+        raise RuntimeError(
+            f"创建 worker agent {worker_agent_id} 超时（等待了 {max_attempts * retry_delay} 秒）"
+        )
 
     def start_serving(self) -> None:
         """启动服务（确保 agent 存在）。"""
