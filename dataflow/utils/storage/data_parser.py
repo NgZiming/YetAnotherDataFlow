@@ -7,7 +7,6 @@ Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 
 from abc import ABC, abstractmethod
 from typing import Any, Generator
-from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
 
@@ -17,42 +16,6 @@ import pandas as pd
 from dataflow.logger import get_logger
 
 logger = get_logger()
-
-
-def _parse_jsonl_chunk(
-    file_path: str,
-    start_byte: int,
-    end_byte: int,
-) -> list[tuple[int, dict]]:
-    """子进程解析一个字节块（模块级函数，可被 pickle 序列化）。
-
-    Args:
-        file_path: JSONL 文件路径
-        start_byte: 块起始字节位置
-        end_byte: 块结束字节位置
-
-    Returns:
-        [(byte_offset, data), ...] 列表，按字节偏移量排序
-    """
-    results: list[tuple[int, dict]] = []
-
-    with open(file_path, "rb") as f:
-        # 直接从块起始位置开始读
-        f.seek(start_byte)
-
-        while True:
-            offset = f.tell()
-            if offset >= end_byte:
-                break
-            line = f.readline()
-            try:
-                d = orjson.loads(line)
-                results.append((offset, d))
-            except Exception:
-                # 跨越边界的行（前面缺数据）或无效 JSON，跳过
-                pass
-
-    return results
 
 
 def clean_surrogates(obj: Any) -> Any:
@@ -235,50 +198,20 @@ class JsonlParser(DataParser):
         Raises:
             ValueError: JSONL 解析失败时抛出
         """
-        yield from self._parse_parallel(file_path, chunk_size)
+        yield from self._parse_sequential(file_path)
 
-    def _parse_parallel(
+    def _parse_sequential(
         self,
         file_path: str,
-        chunk_size: int,
     ) -> Generator[dict, None, None]:
-        """并行解析 JSONL 文件（多进程，按字节分块，无需预扫描）。
-
-        原理：
-        1. 按文件大小均匀分块（不需要预扫描）
-        2. 每个进程 seek 到块起始，向前找行边界后顺序读取
-        3. 保持原始顺序输出
-
-        优势：不需要预扫描，适合超大文件
-        缺点：如果行大小不均匀，负载可能不均衡
-        """
-        num_workers = 8
-        num_chunks = num_workers * 4
-        file_size = os.path.getsize(file_path)
-        chunk_bytes = file_size // num_chunks
-
-        logger.info(
-            f"文件大小 {file_size / 1024**3:.2f}GB，分 {num_chunks} 块，每块 {chunk_bytes / 1024**3:.2f}GB"
-        )
-
-        # 按字节分块
-        chunks = []
-        for i in range(num_chunks):
-            start = i * chunk_bytes
-            end = (i + 1) * chunk_bytes if i < num_chunks - 1 else file_size
-            chunks.append((start, end))
-
-        # 多线程并行读取和解析
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # 提交所有任务，按顺序收集结果
-            futures = [
-                executor.submit(_parse_jsonl_chunk, file_path, start, end)
-                for start, end in chunks
-            ]
-            for future in futures:
-                chunk_results = future.result()  # 错误直接抛出
-                for _, item in chunk_results:
-                    yield item
+        """单线程解析 JSONL 文件。"""
+        with open(file_path, "rb") as f:
+            for line in f:
+                try:
+                    d = orjson.loads(line)
+                    yield d
+                except Exception as e:
+                    logger.warning(f"skip json line: {line[:50]} - {e}")
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSONL 文件。
