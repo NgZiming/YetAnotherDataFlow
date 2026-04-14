@@ -92,20 +92,23 @@ def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
 # ============================================================================
 
 
-def _agent_store_dir(agent_id: str) -> Path:
-    """获取 agent store 目录路径。"""
-    base = OPENCLAW_BASE / "agents"
-    direct = base / agent_id
-    if direct.exists():
-        return direct
-    normalized = base / agent_id.lower()
-    if normalized.exists():
-        return normalized
-    return direct
+def _agent_dir(agent_id: str) -> Path:
+    """获取 agent 目录路径（统一用于 store 和 workspace）。
 
+    OpenClaw 的 agent 目录结构：
+    - ~/.openclaw/agents/<agent_id>/
+      - store/  # agent 配置、模型设置
+      - sessions/  # session 记录
+      - workspace/  # 工作空间（任务相关文件）
 
-def _workspace_dir(agent_id: str) -> Path:
-    """获取 agent workspace 目录路径。"""
+    对于 main agent，workspace 使用默认路径 ~/.openclaw/workspace
+
+    Args:
+        agent_id: Agent 标识符
+
+    Returns:
+        agent 目录路径
+    """
     if agent_id == "main":
         return OPENCLAW_BASE / "workspace"
     return OPENCLAW_BASE / "agents" / agent_id
@@ -143,7 +146,7 @@ def create_agent(agent_id: str, model: str) -> None:
     Raises:
         RuntimeError: 创建失败时抛出
     """
-    ws = str(_workspace_dir(agent_id))
+    ws = str(_agent_dir(agent_id))
     Path(ws).mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
@@ -220,7 +223,7 @@ def _resolve_transcript_paths(agent_id: str) -> List[Path]:
     Raises:
         FileNotFoundError: 超时后文件仍未找到
     """
-    agent_dir = _agent_store_dir(agent_id)
+    agent_dir = _agent_dir(agent_id)
     sessions_dir = agent_dir / "sessions"
 
     start_time = time.time()
@@ -368,18 +371,6 @@ class CLIOpenClawServing(AgentServingABC):
             f"CLIOpenClawServing 初始化：agent_id={agent_id}, model={self.model}"
         )
 
-    def _ensure_agent(self) -> None:
-        """确保 agent 存在，不存在则创建。"""
-        existing = _list_existing_agents()
-
-        if self.agent_id.lower() not in existing:
-            if self.create_if_missing and self.model:
-                create_agent(self.agent_id, self.model)
-            else:
-                raise RuntimeError(
-                    f"Agent {self.agent_id} 不存在，请设置 model 参数或手动创建"
-                )
-
     def _get_or_create_worker_agent(self, task_id: str) -> str:
         """
         为任务获取或创建 worker agent。
@@ -436,14 +427,6 @@ class CLIOpenClawServing(AgentServingABC):
             f"创建 worker agent {worker_agent_id} 超时（等待了 {max_attempts * retry_delay} 秒）"
         )
 
-    def start_serving(self) -> None:
-        """启动服务（确保 agent 存在）。"""
-        if self._initialized:
-            return
-
-        self._ensure_agent()
-        self._initialized = True
-
     # =========================================================================
     # AgentServingABC 抽象方法实现
     # =========================================================================
@@ -451,7 +434,7 @@ class CLIOpenClawServing(AgentServingABC):
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径。"""
         # 使用 task_id 作为 workspace 目录名，保持与 agent_id 一致
-        return _workspace_dir(task_id)
+        return _agent_dir(task_id)
 
     def _cleanup(self, workspace_path: Path):
         core_files = {
@@ -735,11 +718,6 @@ class CLIOpenClawServing(AgentServingABC):
             "files_created": [],
             "errors": [],
         }
-
-    def cleanup(self) -> None:
-        """清理资源。"""
-        self._initialized = False
-        self.logger.info("OpenClaw CLI Serving 已清理")
 
 
 def create_openclaw_serving(
