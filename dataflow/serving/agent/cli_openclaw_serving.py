@@ -45,12 +45,18 @@ def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
     """
     从 skills 目录读取 skill 信息（name, description, location）
 
+    支持两种格式：
+    1. YAML frontmatter: ---\ndescription: ...\n---
+    2. XML 标签: <description>...</description>
+
     Args:
         skills_dir: skills 目录路径
 
     Returns:
         skill 信息列表
     """
+    import re
+
     skills_info = []
 
     if not skills_dir.exists():
@@ -61,11 +67,30 @@ def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
             continue
 
         skill_md = skill_dir / "SKILL.md"
+
+        # 没有 SKILL.md 的目录跳过
+        if not skill_md.exists():
+            continue
+
         description = ""
 
-        if skill_md.exists():
-            try:
-                content = skill_md.read_text(encoding="utf-8")
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+
+            # 尝试解析 YAML frontmatter 格式
+            if content.startswith("---"):
+                # 提取 frontmatter 部分
+                frontmatter_match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+                if frontmatter_match:
+                    frontmatter = frontmatter_match.group(1)
+                    # 查找 description 字段
+                    desc_match = re.search(
+                        r"^description:\s*(.+)$", frontmatter, re.MULTILINE
+                    )
+                    if desc_match:
+                        description = desc_match.group(1).strip()
+            else:
+                # 尝试解析 XML 标签格式
                 for line in content.splitlines():
                     if line.strip().startswith("<description>"):
                         start = line.find("<description>")
@@ -73,8 +98,8 @@ def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
                         if start >= 0 and end > start:
                             description = line[start + 13 : end].strip()
                             break
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         skills_info.append(
             {
