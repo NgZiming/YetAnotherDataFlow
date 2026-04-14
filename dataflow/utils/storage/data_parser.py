@@ -7,7 +7,7 @@ Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 
 from abc import ABC, abstractmethod
 from typing import Any, Generator
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
 
@@ -248,7 +248,7 @@ class JsonlParser(DataParser):
         优势：不需要预扫描，适合超大文件
         缺点：如果行大小不均匀，负载可能不均衡
         """
-        num_workers = os.cpu_count() or 4
+        num_workers = min(os.cpu_count() or 8, 32)
         file_size = os.path.getsize(file_path)
         chunk_bytes = file_size // num_workers
 
@@ -263,15 +263,15 @@ class JsonlParser(DataParser):
             end = (i + 1) * chunk_bytes if i < num_workers - 1 else file_size
             chunks.append((start, end))
 
-        # 多进程并行读取和解析
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        # 多线程并行读取和解析
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             # 提交所有任务，按顺序收集结果
             futures = [
                 executor.submit(_parse_jsonl_chunk, file_path, start, end)
                 for start, end in chunks
             ]
             for future in futures:
-                chunk_results = future.result()
+                chunk_results = future.result()  # 错误直接抛出
                 # 块内按 offset 排序
                 chunk_results.sort(key=lambda x: x[0])
                 for _, item in chunk_results:
