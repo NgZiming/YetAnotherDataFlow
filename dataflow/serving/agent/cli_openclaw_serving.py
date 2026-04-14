@@ -678,6 +678,7 @@ class CLIOpenClawServing(AgentServingABC):
         formatted_messages = []
         user_round = 0
         assistant_round = 0
+        has_system_message = False
 
         for m in messages:
             # 添加 session_id
@@ -739,14 +740,16 @@ class CLIOpenClawServing(AgentServingABC):
 
                 formatted_messages.append(formatted_msg)
             elif m.get("type") == "system":
-                # system 消息已经格式化过了
+                # system 消息已经格式化过了，标记已存在
+                has_system_message = True
                 formatted_messages.append(m)
             else:
                 # 其他类型（session, model_change 等）跳过
                 pass
 
-        # 将 system 消息插入到开头
-        formatted_messages.insert(0, system_message)
+        # 只有当 transcript 中没有 system 消息时，才插入新的 system message
+        if not has_system_message:
+            formatted_messages.insert(0, system_message)
         messages.insert(0, system_message)
 
         # 提取最终输出（从最后一条 role=assistant 的消息中提取 text 内容）
