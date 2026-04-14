@@ -16,6 +16,7 @@ colorama
 # gradio>5
 json5
 json-repair
+orjson  # fast JSON parsing, ~3-4x faster than stdlib json
 tiktoken
 pyarrow #==20.0.0 # larger than this will bug on python 3.10
 cookiecutter # auto template gen from CLI

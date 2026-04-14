@@ -8,8 +8,7 @@ Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 from abc import ABC, abstractmethod
 from typing import Any, Generator
 
-import json
-
+import orjson
 import pandas as pd
 
 from dataflow.logger import get_logger
@@ -196,10 +195,10 @@ class JsonlParser(DataParser):
             ValueError: JSONL 解析失败时抛出
         """
         # JSONL 可以逐行 stream 读取
-        with open(file_path) as f:
+        with open(file_path, "rb") as f:  # orjson 需要 bytes
             for line in f:
                 try:
-                    d = json.loads(line)
+                    d = orjson.loads(line)  # orjson 比标准 json 快 3-4 倍
                     yield d
                 except Exception:
                     logger.exception(f"skip json line: {line[:100]}")
