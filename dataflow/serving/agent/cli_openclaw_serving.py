@@ -172,6 +172,41 @@ def create_agent(agent_id: str, model: str) -> None:
 # ============================================================================
 
 
+def _wait_for_lock_release(session_file: Path, timeout: int = 30) -> None:
+    """
+    等待 session 文件的 lock 文件释放。
+
+    OpenClaw 在写入 session 文件时会创建对应的 .lock 文件，
+    写入完成后会删除 lock 文件。需要等待 lock 文件释放后再读取。
+
+    Args:
+        agent_id: Agent 标识符
+        session_file: session 文件路径
+        timeout: 超时时间（秒）
+
+    Raises:
+        TimeoutError: 超时后 lock 文件仍未释放
+    """
+    lock_file = session_file.with_suffix(session_file.suffix + ".lock")
+
+    if not lock_file.exists():
+        # 没有 lock 文件，直接返回
+        return
+
+    start_time = time.time()
+    logger = get_logger()
+    logger.info(f"等待 lock 文件释放：{lock_file}")
+
+    while time.time() - start_time < timeout:
+        if not lock_file.exists():
+            logger.info(f"Lock 文件已释放：{lock_file}")
+            return
+        time.sleep(0.5)
+
+    # 超时后尝试读取，可能文件已经写完但 lock 未清理
+    logger.warning(f"Lock 文件超时（{timeout}秒），尝试继续：{lock_file}")
+
+
 def _resolve_transcript_paths(agent_id: str) -> List[Path]:
     """
     解析 sessions 文件夹下所有的 jsonl 文件路径。
@@ -246,10 +281,17 @@ def _send_query_to_session(
     transcript_paths = _resolve_transcript_paths(agent_id)
     messages = []
     for transcript_path in transcript_paths:
+        # 等待 lock 文件释放
+        _wait_for_lock_release(transcript_path, timeout=30)
+
         for line in transcript_path.read_text(encoding="utf-8").splitlines():
             if not line:
                 continue
-            d = json.loads(line)
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.warning(f"解析 JSON 失败 {transcript_path.name}: {e}")
+                continue
             d["session_file"] = transcript_path.name
             messages.append(d)
     messages = sorted(messages, key=lambda x: x["timestamp"])
