@@ -171,7 +171,6 @@ class AgentServingABC(ABC):
         self,
         workspace_path: Path,
         query: str,
-        add_assets_info: bool = False,
         current_time: Optional[str] = None,
     ) -> TrajectoryDict:
         """
@@ -180,7 +179,6 @@ class AgentServingABC(ABC):
         Args:
             workspace_path: workspace 路径
             query: 用户查询
-            add_assets_info: 是否添加文件信息到查询
             current_time: 当前时间字符串,如果为 None 则使用默认时间
 
         Returns:
@@ -637,7 +635,6 @@ class AgentServingABC(ABC):
                         round_result = self._send_query(
                             workspace_path,
                             user_input,
-                            add_assets_info=(round_num == 1),
                             current_time=execution_start_time,
                         )
 

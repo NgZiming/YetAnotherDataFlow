@@ -309,7 +309,6 @@ class SDKNanobotServing(AgentServingABC):
         self,
         workspace_path: Path,
         query: str,
-        add_assets_info: bool = False,
         current_time: Optional[str] = None,
     ) -> AgentServingABC.TrajectoryDict:
         """
@@ -318,7 +317,6 @@ class SDKNanobotServing(AgentServingABC):
         Args:
             workspace_path: workspace 路径
             query: 用户查询
-            add_assets_info: 是否添加文件信息到查询
             current_time: 当前时间字符串，如果为 None 则使用默认时间
 
         Returns:
@@ -331,14 +329,6 @@ class SDKNanobotServing(AgentServingABC):
             }
         """
         session_key = f"serving-{id(self)}-{uuid.uuid4().hex[:8]}"
-
-        # 添加文件信息
-        if add_assets_info:
-            assets_dir = workspace_path / "assets"
-            if assets_dir.exists():
-                file_paths = [str(f) for f in assets_dir.iterdir() if f.is_file()]
-                if file_paths:
-                    query += f"\n下面是任务相关的文件:\n{file_paths}"
 
         # 执行异步查询
         async def run_query():
@@ -375,15 +365,8 @@ class SDKNanobotServing(AgentServingABC):
         """异步版本的任务执行。"""
         workspace_path = self._get_workspace_path(task_id)
 
-        async def async_send_query(query: str, add_assets_info: bool) -> str:
+        async def async_send_query(query: str) -> str:
             session_key = f"serving-{id(self)}-{uuid.uuid4().hex[:8]}"
-
-            if add_assets_info:
-                assets_dir = workspace_path / "assets"
-                if assets_dir.exists():
-                    file_paths = [str(f) for f in assets_dir.iterdir() if f.is_file()]
-                    if file_paths:
-                        query += f"\n下面是任务相关的文件:\n{file_paths}"
 
             result = await self.bot.run(query, session_key=session_key)
             return result.content if result.content else ""
@@ -401,9 +384,7 @@ class SDKNanobotServing(AgentServingABC):
                     for round_num in range(1, max_rounds + 1):
                         user_input = task_description if round_num == 1 else feedback
 
-                        output = await async_send_query(
-                            user_input, add_assets_info=(round_num == 1)
-                        )
+                        output = await async_send_query(user_input)
 
                         if not output:
                             raise Exception("未找到助手消息")

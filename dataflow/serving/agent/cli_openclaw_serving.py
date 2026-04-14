@@ -207,7 +207,6 @@ def _send_query_to_session(
     user_query: str,
     timeout: int,
     logger: Any,
-    add_assets_info: bool = True,
 ) -> list[dict]:
     """
     发送查询到当前 session(OpenClaw 会自动维护 session 上下文)。
@@ -217,7 +216,6 @@ def _send_query_to_session(
         user_query: 用户查询内容
         timeout: 超时时间 (秒)
         logger: 日志对象
-        add_assets_info: 是否添加文件/skills 信息到 prompt
 
     Returns:
         所有消息列表 (按时间戳排序)
@@ -230,27 +228,6 @@ def _send_query_to_session(
         raise ValueError("user_query 不能为空")
 
     query = str(user_query).strip()
-    if add_assets_info:
-        assets_dir = _workspace_dir(agent_id) / "assets"
-        skills_dir = _workspace_dir(agent_id) / "skills"
-
-        file_paths = []
-        skill_paths = []
-
-        if assets_dir.exists():
-            for f in assets_dir.iterdir():
-                if f.is_file():
-                    file_paths.append(str(f))
-
-        if skills_dir.exists():
-            for s in skills_dir.iterdir():
-                if s.is_dir():
-                    skill_paths.append(str(s))
-
-        if file_paths:
-            query += f"\n下面是任务相关的文件:\n{file_paths}"
-        if skill_paths:
-            query += f"\n下面是可用的 skills:\n{skill_paths}"
 
     logger.info(
         f"向 agent {agent_id} 发送查询 (长度={len(query)}字符): {query[:100]}..."
@@ -568,7 +545,6 @@ class CLIOpenClawServing(AgentServingABC):
         self,
         workspace_path: Path,
         query: str,
-        add_assets_info: bool = False,
         current_time: Optional[str] = None,
     ) -> TrajectoryDict:
         """
@@ -577,7 +553,6 @@ class CLIOpenClawServing(AgentServingABC):
         Args:
             workspace_path: workspace 路径
             query: 用户查询
-            add_assets_info: 是否添加文件信息到查询
             current_time: 当前时间字符串，如果为 None 则使用默认时间
 
         Returns:
@@ -638,7 +613,6 @@ class CLIOpenClawServing(AgentServingABC):
             query,
             self.timeout,
             self.logger,
-            add_assets_info=add_assets_info,
         )
 
         # 从 session_file 字段中提取 session_id (UUID)
