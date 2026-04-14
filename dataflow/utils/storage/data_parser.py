@@ -19,6 +19,38 @@ from dataflow.logger import get_logger
 logger = get_logger()
 
 
+def _parse_jsonl_chunk(file_path: str, start_byte: int, end_byte: int) -> list:
+    """子进程解析一个字节块（模块级函数，可被 pickle 序列化）。
+
+    Args:
+        file_path: JSONL 文件路径
+        start_byte: 块起始字节位置
+        end_byte: 块结束字节位置
+
+    Returns:
+        [(byte_offset, data), ...] 列表，按字节偏移量排序
+    """
+    results = []
+
+    with open(file_path, "rb") as f:
+        # 直接从块起始位置开始读
+        f.seek(start_byte)
+
+        while True:
+            offset = f.tell()
+            if offset >= end_byte:
+                break
+            line = f.readline()
+            try:
+                d = orjson.loads(line)
+                results.append((offset, d))
+            except Exception:
+                # 跨越边界的行（前面缺数据）或无效 JSON，跳过
+                pass
+
+    return results
+
+
 def clean_surrogates(obj: Any) -> Any:
     """递归清理字符串中的 Unicode surrogate 字符。
 
@@ -206,61 +238,42 @@ class JsonlParser(DataParser):
         file_path: str,
         chunk_size: int,
     ) -> Generator[dict, None, None]:
-        """并行解析 JSONL 文件（多进程，流式读取，支持大文件）。
+        """并行解析 JSONL 文件（多进程，按字节分块，无需预扫描）。
 
         原理：
-        1. 主进程扫描文件，建立行偏移量索引（只存 offset，不存内容）
-        2. 分块给多个进程，每个进程 seek 到块起始位置后顺序读取
+        1. 按文件大小均匀分块（不需要预扫描）
+        2. 每个进程 seek 到块起始，向前找行边界后顺序读取
         3. 保持原始顺序输出
 
-        内存占用：索引只存 (line_num, offset) 元组，1000 万行约 160MB
+        优势：不需要预扫描，适合超大文件
+        缺点：如果行大小不均匀，负载可能不均衡
         """
         num_workers = os.cpu_count() or 4
+        file_size = os.path.getsize(file_path)
+        chunk_bytes = file_size // num_workers
 
-        # 第一步：扫描文件，建立行偏移量索引
-        logger.info("扫描文件，建立行索引...")
-        offsets = []  # [(line_num, byte_offset), ...]
-        with open(file_path, "rb") as f:
-            for line_num in range(sys.maxsize):
-                offset = f.tell()
-                line = f.readline()
-                if not line:
-                    break
-                offsets.append((line_num, offset))
+        logger.info(
+            f"文件大小 {file_size / 1024**3:.2f}GB，分 {num_workers} 块，每块 {chunk_bytes / 1024**3:.2f}GB"
+        )
 
-        total_lines = len(offsets)
-        logger.info(f"共 {total_lines} 行，分给 {num_workers} 进程")
-
-        # 第二步：按行号分块（只保存起始 offset 和行号列表）
+        # 按字节分块
         chunks = []
-        for i in range(0, total_lines, chunk_size):
-            chunk_offsets = offsets[i : i + chunk_size]
-            if chunk_offsets:
-                start_offset = chunk_offsets[0][1]
-                line_numbers = [o[0] for o in chunk_offsets]
-                chunks.append((start_offset, line_numbers))
+        for i in range(num_workers):
+            start = i * chunk_bytes
+            end = (i + 1) * chunk_bytes if i < num_workers - 1 else file_size
+            chunks.append((start, end))
 
-        # 第三步：多进程并行读取和解析
-        def parse_chunk(chunk_info):
-            """子进程解析一个块，返回 [(line_num, data), ...]。"""
-            start_offset, line_numbers = chunk_info
-            results = []
-            with open(file_path, "rb") as f:
-                f.seek(start_offset)  # 只 seek 一次
-                for line_num in line_numbers:
-                    line = f.readline()
-                    if not line:
-                        break
-                    try:
-                        d = orjson.loads(line)
-                        results.append((line_num, d))
-                    except Exception as e:
-                        logger.warning(f"skip json line {line_num}: {line[:100]} - {e}")
-            return results
-
-        # 第四步：按顺序收集结果（保持原始行号顺序）
+        # 多进程并行读取和解析
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            for chunk_results in executor.map(parse_chunk, chunks):
+            # 提交所有任务，按顺序收集结果
+            futures = [
+                executor.submit(_parse_jsonl_chunk, file_path, start, end)
+                for start, end in chunks
+            ]
+            for future in futures:
+                chunk_results = future.result()
+                # 块内按 offset 排序
+                chunk_results.sort(key=lambda x: x[0])
                 for _, item in chunk_results:
                     yield item
 
