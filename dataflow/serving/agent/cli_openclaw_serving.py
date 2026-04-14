@@ -657,23 +657,6 @@ class CLIOpenClawServing(AgentServingABC):
             self.logger,
         )
 
-        # 从 session_file 字段中提取 session_id (UUID)
-        if messages:
-            for m in messages:
-                session_file = m.get("session_file", "")
-                if session_file:
-                    # session_file 格式如：'c3e9543b-537c-4e93-a45c-097a271b94c2.jsonl'
-                    # 提取 UUID 部分（去掉 .jsonl 后缀）
-                    if session_file.endswith(".jsonl"):
-                        session_id = session_file[:-6]
-                    else:
-                        session_id = session_file
-                    break
-
-        # 如果仍未找到，使用 agent_id 作为 fallback
-        if session_id is None:
-            session_id = agent_id
-
         # 为每条消息添加 session_id 并统一格式
         formatted_messages = []
         user_round = 0
@@ -681,9 +664,16 @@ class CLIOpenClawServing(AgentServingABC):
         has_system_message = False
 
         for m in messages:
-            # 添加 session_id
-            if "session_id" not in m:
-                m["session_id"] = session_id
+            # 从 session_file 中提取该消息对应的 session_id
+            session_file = m.get("session_file", "")
+            if session_file:
+                if session_file.endswith(".jsonl"):
+                    m["session_id"] = session_file[:-6]
+                else:
+                    m["session_id"] = session_file
+            elif "session_id" not in m:
+                # fallback: 使用 agent_id
+                m["session_id"] = agent_id
 
             # 如果是原始 transcript 格式，转换为 MessageDict 格式
             if m.get("type") == "message":
@@ -709,7 +699,7 @@ class CLIOpenClawServing(AgentServingABC):
                     "tool_results": [],
                     "id": m.get("id"),
                     "parentId": m.get("parentId"),
-                    "session_id": session_id,
+                    "session_id": m["session_id"],
                 }
 
                 # 处理 toolResult
