@@ -19,7 +19,11 @@ from dataflow.logger import get_logger
 logger = get_logger()
 
 
-def _parse_jsonl_chunk(file_path: str, start_byte: int, end_byte: int) -> list:
+def _parse_jsonl_chunk(
+    file_path: str,
+    start_byte: int,
+    end_byte: int,
+) -> list[tuple[int, dict]]:
     """子进程解析一个字节块（模块级函数，可被 pickle 序列化）。
 
     Args:
@@ -30,7 +34,7 @@ def _parse_jsonl_chunk(file_path: str, start_byte: int, end_byte: int) -> list:
     Returns:
         [(byte_offset, data), ...] 列表，按字节偏移量排序
     """
-    results = []
+    results: list[tuple[int, dict]] = []
 
     with open(file_path, "rb") as f:
         # 直接从块起始位置开始读
@@ -248,19 +252,20 @@ class JsonlParser(DataParser):
         优势：不需要预扫描，适合超大文件
         缺点：如果行大小不均匀，负载可能不均衡
         """
-        num_workers = min(os.cpu_count() or 8, 32)
+        num_workers = 8
+        num_chunks = num_workers * 4
         file_size = os.path.getsize(file_path)
-        chunk_bytes = file_size // num_workers
+        chunk_bytes = file_size // num_chunks
 
         logger.info(
-            f"文件大小 {file_size / 1024**3:.2f}GB，分 {num_workers} 块，每块 {chunk_bytes / 1024**3:.2f}GB"
+            f"文件大小 {file_size / 1024**3:.2f}GB，分 {num_chunks} 块，每块 {chunk_bytes / 1024**3:.2f}GB"
         )
 
         # 按字节分块
         chunks = []
-        for i in range(num_workers):
+        for i in range(num_chunks):
             start = i * chunk_bytes
-            end = (i + 1) * chunk_bytes if i < num_workers - 1 else file_size
+            end = (i + 1) * chunk_bytes if i < num_chunks - 1 else file_size
             chunks.append((start, end))
 
         # 多线程并行读取和解析
@@ -272,8 +277,6 @@ class JsonlParser(DataParser):
             ]
             for future in futures:
                 chunk_results = future.result()  # 错误直接抛出
-                # 块内按 offset 排序
-                chunk_results.sort(key=lambda x: x[0])
                 for _, item in chunk_results:
                     yield item
 
