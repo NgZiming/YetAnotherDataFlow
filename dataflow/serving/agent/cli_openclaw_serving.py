@@ -47,7 +47,7 @@ def _read_skills_info(skills_dir: Path) -> list[dict[str, str]]:
 
     支持两种格式：
     1. YAML frontmatter: ---\ndescription: ...\n---
-    2. XML 标签: <description>...</description>
+    2. XML 标签：<description>...</description>
 
     Args:
         skills_dir: skills 目录路径
@@ -351,7 +351,7 @@ class CLIOpenClawServing(AgentServingABC):
         create_if_missing: bool = True,
         max_workers: int = 4,
         max_retries: int = 3,
-        skill_base_dir: Optional[str] = None,
+        skill_base_dir: str = "/root/clawhub",
         verification_api_key: Optional[str] = None,
         verification_base_url: Optional[str] = None,
         verification_client_params: Optional[Dict[str, Any]] = None,
@@ -366,7 +366,7 @@ class CLIOpenClawServing(AgentServingABC):
             create_if_missing: 如果 agent 不存在是否自动创建
             max_workers: 并发 worker 数量
             max_retries: 请求失败时的最大重试次数
-            skill_base_dir: Skill 基础目录
+            skill_base_dir: Skill 基础目录（必需，默认为 /root/clawhub）
             verification_api_key: 验证用 API key
             verification_base_url: 验证用 API base URL
             verification_client_params: 验证用 LLM 调用参数
@@ -377,7 +377,11 @@ class CLIOpenClawServing(AgentServingABC):
         self.model: str = model or "vllm//data/share/models/Qwen3.5-122B-A10B/"
         self.timeout = timeout
         self.create_if_missing = create_if_missing
-        self.skill_base_dir = skill_base_dir
+
+        # skill_base_dir 必须是有效的非空字符串
+        if not skill_base_dir or not str(skill_base_dir).strip():
+            raise ValueError("skill_base_dir 不能为空，必须指定 Skill 基础目录路径")
+        self.skill_base_dir = str(skill_base_dir).strip()
 
         super().__init__(
             max_workers=max_workers,

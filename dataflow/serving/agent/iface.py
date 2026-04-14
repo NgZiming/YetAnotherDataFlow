@@ -245,7 +245,7 @@ class AgentServingABC(ABC):
         workspace_path: Path,
         input_files_data: Dict[str, Any],
         input_skills_data: List[str],
-        skill_base_dir: Optional[str] = None,
+        skill_base_dir: str,
     ) -> Dict[str, str]:
         """
         将文件和 skills 准备到 workspace 目录。
@@ -254,7 +254,7 @@ class AgentServingABC(ABC):
             workspace_path: workspace 路径
             input_files_data: 文件内容数据(key 为原始文件路径)
             input_skills_data: skill 名称列表
-            skill_base_dir: Skill 基础目录
+            skill_base_dir: Skill 基础目录（必需）
 
         Returns:
             文件路径映射字典 {原始路径:实际生成路径}
@@ -282,17 +282,15 @@ class AgentServingABC(ABC):
                 self.logger.debug(f"生成文件:{filename} -> {actual_path}")
 
         # 准备 skills 到 skills 目录
-        if input_skills_data and skill_base_dir:
+        if input_skills_data:
             skills_dir = workspace_path / "skills"
             skills_dir.mkdir(parents=True, exist_ok=True)
 
             import shutil
 
             for skill_name in input_skills_data:
-                if Path(skill_name).is_absolute():
-                    src_path = Path(skill_name)
-                else:
-                    src_path = Path(skill_base_dir) / skill_name
+                # skill_base_dir 现在是必需的，直接拼接
+                src_path = Path(skill_base_dir) / skill_name
 
                 if not src_path.exists() or not src_path.is_dir():
                     raise Exception(f"Skill 路径不存在:{src_path}")

@@ -21,7 +21,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
     与 FormatStrPromptedGenerator 的区别：
     - 只能使用 CLIOpenClawServing
     - 支持 input_files_data_key 参数，用于传递文件内容数据
-    - 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills
+    - 支持 input_skills_key 参数，用于传递技能名称列表（路径拼接由 CLIOpenClawServing 负责）
     - 支持 verification_prompt_template 参数，用于任务验证循环
     """
 
@@ -29,7 +29,6 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self,
         llm_serving: CLIOpenClawServing,
         prompt_template: Union[FormatStrPrompt, DIYPromptABC],
-        input_skills_dir: Optional[str] = None,
         verification_prompt_template: Optional[str] = None,
         enable_verification: bool = False,
         max_verification_rounds: int = 5,
@@ -40,7 +39,6 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         Args:
             llm_serving: CLIOpenClawServing 服务对象
             prompt_template: 提示词模板对象
-            input_skills_dir: skill 路径的前缀目录（可选）
             verification_prompt_template: 验证提示词模板（可选），用于任务验证循环
             enable_verification: 是否启用自动验证循环，默认 False
             max_verification_rounds: 最大验证轮数，默认 5
@@ -48,7 +46,6 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self.logger = get_logger()
         self.llm_serving = llm_serving
         self.prompt_template = prompt_template
-        self.input_skills_dir = input_skills_dir
         self.verification_prompt_template = verification_prompt_template
         self.enable_verification = enable_verification
         self.max_verification_rounds = max_verification_rounds
@@ -79,7 +76,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self.input_keys = input_keys
         self.input_files_data_key = input_files_data_key
         self.input_skills_key = input_skills_key
-        self.logger.info(f"input_skills_dir: {self.input_skills_dir}")
+        self.logger.info(f"input_skills_key: {input_skills_key}")
 
         need_fields = set(input_keys.keys())
         # Load the raw dataframe from the input file
@@ -108,7 +105,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             else:
                 input_files_data.append({})
 
-        # 准备 input_skills_data：拼接 skill 路径
+        # 准备 input_skills_data：直接传递技能名称列表（路径拼接由 CLIOpenClawServing 负责）
         input_skills_data = []
         for idx, row in dataframe.iterrows():
             if (
@@ -116,10 +113,8 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 and input_skills_key in row
                 and isinstance(row[input_skills_key], list)
             ):
-                # 使用实例变量 input_skills_dir 拼接路径
+                # 直接传递技能名称列表，不拼接路径
                 skills = row[input_skills_key]
-                if self.input_skills_dir:
-                    skills = [os.path.join(self.input_skills_dir, s) for s in skills]
                 input_skills_data.append(skills)
                 self.logger.debug(f"Row {idx}: 准备 {len(skills)} 个 skills")
             else:
@@ -156,7 +151,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "与 FormatStrPromptedGenerator 的区别：\n"
                 "- 只能使用 CLIOpenClawServing\n"
                 "- 支持 input_files_data_key 参数，用于传递 FileContextGenerator 合成的文件数据\n"
-                "- 支持 input_skills_key 和 input_skills_dir 参数，用于动态加载 skills\n"
+                "- 支持 input_skills_key 参数，用于传递技能名称列表（路径拼接由 CLIOpenClawServing 负责）\n"
                 "- 支持 verification_prompt_template 参数，用于任务验证循环\n\n"
                 "输入参数：\n"
                 "- llm_serving：CLIOpenClawServing 服务对象\n"
@@ -164,8 +159,8 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "- input_keys：输入字段映射字典\n"
                 "- output_key：输出生成内容字段名\n"
                 "- input_files_data_key：FileContextGenerator 的输出 key，用于读取合成的文件数据\n"
-                "- input_skills_key：DataFrame 列名，包含 skill 路径列表\n"
-                "- input_skills_dir：skill 路径的前缀目录\n"
+                "- input_skills_key：DataFrame 列名，包含技能名称列表\n"
+                "- verification_prompt_template：验证提示词模板（可选）\n"
                 "- verification_prompt_template：验证提示词模板（可选）\n"
                 "- enable_verification：是否启用自动验证循环\n"
                 "- max_verification_rounds：最大验证轮数\n\n"
