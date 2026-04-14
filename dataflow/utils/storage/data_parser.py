@@ -7,6 +7,9 @@ Storage 负责 bytes 的读写，文件格式解析由 Parser 负责。
 
 from abc import ABC, abstractmethod
 from typing import Any, Generator
+from concurrent.futures import ProcessPoolExecutor
+import os
+import sys
 
 import orjson
 import pandas as pd
@@ -175,6 +178,8 @@ class JsonlParser(DataParser):
     - 每行一个独立的 JSON 对象
     - 解析：lines=True
     - 序列化：orient="records", lines=True
+    - 使用 orjson 加速解析（~3-4x 比 stdlib json）
+    - 支持并行解析（大文件）
     """
 
     def parse_to_dataframe(
@@ -194,14 +199,70 @@ class JsonlParser(DataParser):
         Raises:
             ValueError: JSONL 解析失败时抛出
         """
-        # JSONL 可以逐行 stream 读取
-        with open(file_path, "rb") as f:  # orjson 需要 bytes
-            for line in f:
-                try:
-                    d = orjson.loads(line)  # orjson 比标准 json 快 3-4 倍
-                    yield d
-                except Exception:
-                    logger.exception(f"skip json line: {line[:100]}")
+        yield from self._parse_parallel(file_path, chunk_size)
+
+    def _parse_parallel(
+        self,
+        file_path: str,
+        chunk_size: int,
+    ) -> Generator[dict, None, None]:
+        """并行解析 JSONL 文件（多进程，流式读取，支持大文件）。
+
+        原理：
+        1. 主进程扫描文件，建立行偏移量索引（只存 offset，不存内容）
+        2. 分块给多个进程，每个进程 seek 到块起始位置后顺序读取
+        3. 保持原始顺序输出
+
+        内存占用：索引只存 (line_num, offset) 元组，1000 万行约 160MB
+        """
+        num_workers = os.cpu_count() or 4
+
+        # 第一步：扫描文件，建立行偏移量索引
+        logger.info("扫描文件，建立行索引...")
+        offsets = []  # [(line_num, byte_offset), ...]
+        with open(file_path, "rb") as f:
+            for line_num in range(sys.maxsize):
+                offset = f.tell()
+                line = f.readline()
+                if not line:
+                    break
+                offsets.append((line_num, offset))
+
+        total_lines = len(offsets)
+        logger.info(f"共 {total_lines} 行，分给 {num_workers} 进程")
+
+        # 第二步：按行号分块（只保存起始 offset 和行号列表）
+        chunks = []
+        for i in range(0, total_lines, chunk_size):
+            chunk_offsets = offsets[i : i + chunk_size]
+            if chunk_offsets:
+                start_offset = chunk_offsets[0][1]
+                line_numbers = [o[0] for o in chunk_offsets]
+                chunks.append((start_offset, line_numbers))
+
+        # 第三步：多进程并行读取和解析
+        def parse_chunk(chunk_info):
+            """子进程解析一个块，返回 [(line_num, data), ...]。"""
+            start_offset, line_numbers = chunk_info
+            results = []
+            with open(file_path, "rb") as f:
+                f.seek(start_offset)  # 只 seek 一次
+                for line_num in line_numbers:
+                    line = f.readline()
+                    if not line:
+                        break
+                    try:
+                        d = orjson.loads(line)
+                        results.append((line_num, d))
+                    except Exception as e:
+                        logger.warning(f"skip json line {line_num}: {line[:100]} - {e}")
+            return results
+
+        # 第四步：按顺序收集结果（保持原始行号顺序）
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            for chunk_results in executor.map(parse_chunk, chunks):
+                for _, item in chunk_results:
+                    yield item
 
     def serialize_to_file(self, df: pd.DataFrame, dst: str) -> None:
         """将 DataFrame 序列化为 JSONL 文件。
