@@ -12,7 +12,9 @@ AgentServingABC - Agent 能力流程抽象基类
 
 from __future__ import annotations
 
+import random
 import requests
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -573,6 +575,13 @@ class AgentServingABC(ABC):
         """
         self.logger.info(f"开始任务:{task_id}, 描述长度={len(task_description)}")
 
+        # ========== 新增：随机等待，避免大量 agent 同时创建 ==========
+        # 随机等待 1-3 秒，分散任务启动时间，减少 agent 创建时的锁竞争
+        random_delay = random.uniform(1.0, 3.0)
+        self.logger.debug(f"任务 {task_id} 随机等待 {random_delay:.2f} 秒后启动")
+        time.sleep(random_delay)
+        # =========================================================
+
         if not task_description or not task_description.strip():
             self.logger.error(f"task_description 为空!task_id={task_id}")
             raise Exception("task_description 为空")
@@ -698,6 +707,7 @@ class AgentServingABC(ABC):
                     f"[重试 {retry_attempt + 1}/{self.max_retries}] 任务失败"
                 )
                 if retry_attempt < self.max_retries - 1:
+                    time.sleep(5 * (retry_attempt + 1))  # 指数退避:5s, 10s
                     continue
                 # 最后一次重试失败,返回错误轨迹
                 return {

@@ -466,6 +466,7 @@ class CLIOpenClawServing(AgentServingABC):
         return _agent_dir(task_id)
 
     def _cleanup(self, workspace_path: Path):
+        """清理 workspace，包括强制等待 lock 文件释放。"""
         core_files = {
             "AGENTS.md",
             "BOOTSTRAP.md",
@@ -475,6 +476,30 @@ class CLIOpenClawServing(AgentServingABC):
             "TOOLS.md",
             "USER.md",
         }
+
+        # ========== 新增：等待 lock 文件释放 ==========
+        sessions_dir = workspace_path / "sessions"
+        if sessions_dir.exists():
+            # 等待最多 30 秒，让 lock 文件释放
+            for _ in range(15):  # 15 * 2s = 30s
+                lock_files = list(sessions_dir.glob("*.lock"))
+                if not lock_files:
+                    break
+                self.logger.warning(f"等待 lock 文件释放 ({len(lock_files)}个)...")
+                time.sleep(2)
+
+            # 如果还有 lock 文件，强制删除
+            lock_files = list(sessions_dir.glob("*.lock"))
+            if lock_files:
+                self.logger.warning(f"强制删除 {len(lock_files)} 个残留 lock 文件")
+                for lock_file in lock_files:
+                    try:
+                        lock_file.unlink()
+                        self.logger.info(f"删除 lock 文件：{lock_file.name}")
+                    except Exception as e:
+                        self.logger.warning(f"删除 lock 文件失败 {lock_file}: {e}")
+        # ============================================
+
         for item in workspace_path.iterdir():
             if item.name in core_files:
                 continue
@@ -546,16 +571,43 @@ class CLIOpenClawServing(AgentServingABC):
     def _cleanup_execution_context(
         self, workspace_path: Path, task_id: Optional[str] = None
     ) -> None:
-        """清理执行上下文资源。"""
-        # 使用 task_id 作为 agent_id，确保与 prepare 一致
+        """清理执行上下文资源，完全删除 agent。"""
+        # 获取 agent_id
         if task_id:
-            agent_id = self._get_or_create_worker_agent(task_id)
+            agent_id = task_id
         else:
             agent_id = workspace_path.name
             if agent_id == "workspace":
                 agent_id = self.agent_id
 
+        # 1. 先清理 workspace（等待 lock 文件释放）
         self._cleanup(workspace_path)
+
+        # 2. 等待一小会儿，确保 OpenClaw 完成清理
+        time.sleep(1)
+
+        # 3. 使用 openclaw 命令完全删除 agent
+        self.logger.info(f"删除 agent: {agent_id}")
+        result = subprocess.run(
+            ["openclaw", "agents", "delete", "--force", agent_id],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            self.logger.info(f"成功删除 agent: {agent_id}")
+        else:
+            self.logger.warning(f"删除 agent 失败 {agent_id}: {result.stderr}")
+
+        # 4. 清理 agent 目录（如果还有残留）
+        agent_dir = _agent_dir(agent_id)
+        if agent_dir.exists():
+            try:
+                shutil.rmtree(agent_dir)
+                self.logger.info(f"删除 agent 目录：{agent_dir}")
+            except Exception as e:
+                self.logger.warning(f"删除 agent 目录失败 {agent_dir}: {e}")
 
     def _send_query(
         self,
