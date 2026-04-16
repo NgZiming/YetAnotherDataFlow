@@ -402,7 +402,7 @@ class LLMGeneratorDataSource(DataSource):
         return self.num_rows
 
     def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
-        """使用 LLM 批量生成数据"""
+        """使用 LLM 批量生成数据（按 chunk_size 分批处理）"""
         import json
 
         pbar = tqdm(
@@ -411,31 +411,38 @@ class LLMGeneratorDataSource(DataSource):
             unit="row",
         )
         try:
-            # 生成所有输入（每个字段一个 batch）
-            results = [{} for _ in range(self.num_rows)]
+            # 按 chunk_size 分批处理
+            for start in range(0, self.num_rows, chunk_size):
+                end = min(start + chunk_size, self.num_rows)
+                chunk_size_actual = end - start
 
-            for field_name, prompt in self.prompts.items():
-                # 批量输入：每个 row 都使用相同的 prompt
-                inputs = [prompt for _ in range(self.num_rows)]
+                # 初始化这个 chunk 的结果
+                chunk_results = [{} for _ in range(chunk_size_actual)]
 
-                # 批量调用 LLM
-                responses = self.serving.generate_from_input(inputs, system_prompt="")
+                for field_name, prompt in self.prompts.items():
+                    # 批量输入：这个 chunk 的每一行都使用相同的 prompt
+                    inputs = [prompt for _ in range(chunk_size_actual)]
 
-                # 解析响应
-                for i, response in enumerate(responses):
-                    try:
-                        parsed = json.loads(response)
-                        if isinstance(parsed, dict) and field_name in parsed:
-                            results[i][field_name] = parsed[field_name]
-                        else:
-                            results[i][field_name] = parsed
-                    except json.JSONDecodeError:
-                        results[i][field_name] = response
+                    # 批量调用 LLM
+                    responses = self.serving.generate_from_input(
+                        inputs, system_prompt=""
+                    )
 
-            # 逐行 yield
-            for row in results:
-                yield row
-                pbar.update(1)
+                    # 解析响应
+                    for i, response in enumerate(responses):
+                        try:
+                            parsed = json.loads(response)
+                            if isinstance(parsed, dict) and field_name in parsed:
+                                chunk_results[i][field_name] = parsed[field_name]
+                            else:
+                                chunk_results[i][field_name] = parsed
+                        except json.JSONDecodeError:
+                            chunk_results[i][field_name] = response
+
+                # yield 这个 chunk 的结果
+                for row in chunk_results:
+                    yield row
+                    pbar.update(1)
         finally:
             pbar.close()
 
