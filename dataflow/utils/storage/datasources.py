@@ -345,8 +345,12 @@ class GeneratorDataSource(DataSource):
         )
         try:
             batch = []
+            count = 0
             for base_row in self.generator_fn():
+                if count >= self.total_rows:
+                    break
                 batch.append(base_row)
+                count += 1
                 if len(batch) >= chunk_size:
                     # 批量生成
                     results = self._generate_fields_with_llm(batch)
