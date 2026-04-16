@@ -40,11 +40,13 @@ from .data_parser import (
     get_parser,
 )
 from .datasources import (
-    FileDataSource,
-    S3DataSource,
-    HuggingFaceDataSource,
-    ModelScopeDataSource,
     create_data_source,
+    FileDataSource,
+    GeneratorDataSource,
+    HuggingFaceDataSource,
+    LLMGeneratorDataSource,
+    ModelScopeDataSource,
+    S3DataSource,
 )
 
 __all__ = [
@@ -57,13 +59,15 @@ __all__ = [
     "PartitionOrBatchProgress",
     "ProgressInfo",
     # DataSource
+    "create_data_source",
     "DataSource",
     "DataSourceInfo",
     "FileDataSource",
-    "S3DataSource",
+    "GeneratorDataSource",
     "HuggingFaceDataSource",
+    "LLMGeneratorDataSource",
     "ModelScopeDataSource",
-    "create_data_source",
+    "S3DataSource",
     # 实现
     "FileStorage",
     "S3Storage",
