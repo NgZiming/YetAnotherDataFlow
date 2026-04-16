@@ -4,9 +4,12 @@ import tempfile
 import shutil
 
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, Optional, Callable
 
 from tqdm import tqdm
+
+from dataflow.core.llm_serving import LLMServingABC
+from dataflow.prompts.core_text import FormatStrPrompt
 
 from .iface import DataSource, DataSourceInfo
 from .data_parser import get_parser
@@ -252,6 +255,187 @@ class S3DataSource(DataSource):
             pbar.close()
 
 
+class GeneratorDataSource(DataSource):
+    """生成器数据源 - 不读取文件，按生成器函数产生数据"""
+
+    def __init__(
+        self,
+        generator_fn: Callable[[], Generator[dict, None, None]],
+        total_rows: int,
+        name: str = "generator",
+        # LLM 生成相关
+        serving: Optional[LLMServingABC] = None,
+        prompt_templates: Optional[dict[str, str]] = None,
+        fields_from_base: Optional[list[str]] = None,
+    ):
+        """
+        Args:
+            generator_fn: 生成器函数，返回基础数据的迭代器（dict）
+            total_rows: 总行数（必需，用于进度条和估算）
+            name: 数据源名称（用于日志/进度显示）
+            serving: LLM Serving 实例（用于生成字段）
+            prompt_templates: 字段到 prompt 模板的映射，{字段名: template}
+                             template 可以使用 {field_name} 占位符从 base_row 取值
+            fields_from_base: 从基础数据中直接复制的字段名列表
+        """
+        self.generator_fn = generator_fn
+        self.total_rows = total_rows
+        self.name = name
+        self.serving = serving
+        self.prompt_templates = prompt_templates or {}
+        self.fields_from_base = fields_from_base or []
+        self._info: Optional[DataSourceInfo] = None
+
+    def get_info(self) -> DataSourceInfo:
+        return DataSourceInfo(source_type="generator", paths=[self.name])
+
+    def estimate_total_rows(self) -> int:
+        """返回总行数"""
+        return self.total_rows
+
+    def _generate_fields_with_llm(self, base_rows: list[dict]) -> list[dict]:
+        """使用 LLM 批量生成指定字段"""
+        if not self.serving or not self.prompt_templates:
+            # 没有 serving 或 prompt_templates，直接返回基础数据
+            return [{k: row.get(k) for k in self.fields_from_base} for row in base_rows]
+
+        import json
+
+        results = []
+
+        # 为每个字段批量调用 LLM
+        for field_name, prompt_template in self.prompt_templates.items():
+            # 构建批量输入：每个 base_row 格式化一次 prompt
+            inputs = []
+            for row in base_rows:
+                try:
+                    inputs.append(prompt_template.format(**row))
+                except KeyError:
+                    # 如果 base_row 中没有对应的 key，使用原始 template
+                    inputs.append(prompt_template)
+
+            # 批量调用 LLM
+            responses = self.serving.generate_from_input(inputs, system_prompt="")
+
+            # 解析响应
+            for i, response in enumerate(responses):
+                if i >= len(results):
+                    # 复制基础字段
+                    results.append(
+                        {k: base_rows[i].get(k) for k in self.fields_from_base}
+                    )
+
+                try:
+                    parsed = json.loads(response)
+                    if isinstance(parsed, dict) and field_name in parsed:
+                        results[i][field_name] = parsed[field_name]
+                    else:
+                        results[i][field_name] = parsed
+                except json.JSONDecodeError:
+                    results[i][field_name] = response
+
+        return results
+
+    def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
+        """批量生成数据"""
+        pbar = tqdm(
+            total=self.total_rows,
+            desc=f"Generating {self.name}",
+            unit="row",
+        )
+        try:
+            batch = []
+            for base_row in self.generator_fn():
+                batch.append(base_row)
+                if len(batch) >= chunk_size:
+                    # 批量生成
+                    results = self._generate_fields_with_llm(batch)
+                    for row in results:
+                        yield row
+                        pbar.update(1)
+                    batch = []
+
+            # 处理剩余的 batch
+            if batch:
+                results = self._generate_fields_with_llm(batch)
+                for row in results:
+                    yield row
+                    pbar.update(1)
+        finally:
+            pbar.close()
+
+
+class LLMGeneratorDataSource(DataSource):
+    """LLM 生成器数据源 - 完全由 LLM 生成数据"""
+
+    def __init__(
+        self,
+        serving: LLMServingABC,
+        prompts: dict[str, str],
+        num_rows: int,
+        name: str = "llm_generator",
+        batch_size: int = 32,
+    ):
+        """
+        Args:
+            serving: LLM Serving 实例
+            prompts: 字段到 prompt 的映射，{字段名: prompt}
+            num_rows: 要生成的行数
+            name: 数据源名称
+            batch_size: 批处理大小
+        """
+        self.serving = serving
+        self.prompts = prompts
+        self.num_rows = num_rows
+        self.name = name
+        self.batch_size = batch_size
+        self._info: Optional[DataSourceInfo] = None
+
+    def get_info(self) -> DataSourceInfo:
+        return DataSourceInfo(source_type="llm_generator", paths=[self.name])
+
+    def estimate_total_rows(self) -> int:
+        return self.num_rows
+
+    def read(self, chunk_size: int = 1000) -> Generator[dict, None, None]:
+        """使用 LLM 批量生成数据"""
+        import json
+
+        pbar = tqdm(
+            total=self.num_rows,
+            desc=f"LLM Generating {self.name}",
+            unit="row",
+        )
+        try:
+            # 生成所有输入（每个字段一个 batch）
+            results = [{} for _ in range(self.num_rows)]
+
+            for field_name, prompt in self.prompts.items():
+                # 批量输入：每个 row 都使用相同的 prompt
+                inputs = [prompt for _ in range(self.num_rows)]
+
+                # 批量调用 LLM
+                responses = self.serving.generate_from_input(inputs, system_prompt="")
+
+                # 解析响应
+                for i, response in enumerate(responses):
+                    try:
+                        parsed = json.loads(response)
+                        if isinstance(parsed, dict) and field_name in parsed:
+                            results[i][field_name] = parsed[field_name]
+                        else:
+                            results[i][field_name] = parsed
+                    except json.JSONDecodeError:
+                        results[i][field_name] = response
+
+            # 逐行 yield
+            for row in results:
+                yield row
+                pbar.update(1)
+        finally:
+            pbar.close()
+
+
 class HuggingFaceDataSource(DataSource):
     """HuggingFace datasets 数据源"""
 
@@ -353,13 +537,26 @@ class ModelScopeDataSource(DataSource):
 def create_data_source(
     paths: list[str],
     source_type: Optional[str] = None,
+    generator_fn: Optional[Callable[[], Generator[dict, None, None]]] = None,
+    total_rows: Optional[int] = None,
+    serving: Optional[object] = None,
+    prompt_templates: Optional[dict[str, str]] = None,
+    fields_from_base: Optional[list[str]] = None,
+    num_rows: Optional[int] = None,
     **kwargs: dict[str, str],
 ) -> DataSource:
     """创建数据源实例
 
     Args:
-        path: 数据源路径
+        paths: 数据源路径列表
         source_type: 数据源类型（自动检测如果为 None）
+        generator_fn: 生成器函数（仅用于 generator 类型）
+        total_rows: 总行数（仅用于 generator 类型）
+        serving: LLM Serving 实例（用于 generator/llm_generator 类型）
+        prompt_templates: 字段到 prompt 模板的映射 {字段名: template}（用于 generator 类型）
+                         template 可以使用 {field_name} 占位符从 base_row 取值
+        fields_from_base: 从基础数据中直接复制的字段名列表（仅用于 generator 类型）
+        num_rows: 要生成的行数（仅用于 llm_generator 类型）
         **kwargs: 数据源特定参数
 
     Returns:
@@ -376,7 +573,62 @@ def create_data_source(
             source_type="huggingface",
             split="train"
         )
+
+        # 生成器数据源（基础数据 + LLM 增强）
+        def my_generator():
+            for i in range(1000):
+                yield {"index": i, "scene": "search", "keywords": "特斯拉"}
+
+        source = create_data_source(
+            ["enhanced_tasks"],
+            source_type="generator",
+            generator_fn=my_generator,
+            total_rows=1000,
+            serving=llm_serving,
+            prompt_templates={
+                "question": "基于场景 {scene} 和关键词 {keywords}，生成一个真实的搜索问题。返回 JSON: {{\"question\": \"...\"}}",
+                "target_skills": "基于场景 {scene}，选择适合的技能。返回 JSON: {{\"target_skills\": [...]}}",
+            },
+            fields_from_base=["index", "scene", "keywords"],
+        )
+
+        # 纯 LLM 生成数据源
+        source = create_data_source(
+            ["llm_tasks"],
+            source_type="llm_generator",
+            serving=llm_serving,
+            prompts={
+                "question": "生成一个真实的技能使用问题。返回 JSON: {{\"question\": \"...\"}}",
+                "target_skills": "选择适合的技能。返回 JSON: {{\"target_skills\": [...]}}",
+            },
+            num_rows=10000,
+        )
     """
+    if source_type == "generator":
+        if generator_fn is None:
+            raise ValueError("generator_fn is required for generator data source")
+        return GeneratorDataSource(
+            generator_fn=generator_fn,
+            total_rows=total_rows,
+            name=paths[0] if paths else "generator",
+            serving=serving,
+            prompt_templates=prompt_templates,
+            fields_from_base=fields_from_base,
+        )
+    elif source_type == "llm_generator":
+        if serving is None:
+            raise ValueError("serving is required for llm_generator data source")
+        if prompts is None:
+            raise ValueError("prompts is required for llm_generator data source")
+        if num_rows is None:
+            raise ValueError("num_rows is required for llm_generator data source")
+        return LLMGeneratorDataSource(
+            serving=serving,
+            prompts=prompts,
+            num_rows=num_rows,
+            name=paths[0] if paths else "llm_generator",
+        )
+
     path = paths[0]
     if source_type is None:
         # 自动检测

@@ -24,6 +24,7 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 from __future__ import annotations
 
 import json
+import random
 import shutil
 import subprocess
 import time
@@ -437,8 +438,12 @@ class CLIOpenClawServing(AgentServingABC):
                         "ConfigMutationConflictError" in error_msg
                         or "config changed" in error_msg
                     ):
-                        self.logger.warning(f"配置冲突，等待后重试：{e}")
-                        time.sleep(retry_delay)
+                        # 添加随机延迟，避免多个任务同时重试
+                        random_delay = retry_delay + random.uniform(0, 5)
+                        self.logger.warning(
+                            f"配置冲突，等待 {random_delay:.1f}秒后重试：{e}"
+                        )
+                        time.sleep(random_delay)
                         continue
                     # 其他错误直接抛出
                     raise
