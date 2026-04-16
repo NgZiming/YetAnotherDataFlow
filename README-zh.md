@@ -123,6 +123,101 @@ pipeline.compile()
 pipeline.run()
 ```
 
+### 4. 新增：生成器数据源 (v1.0.8+)
+
+无需预先存在的文件，动态生成数据。
+
+#### GeneratorDataSource - 基础数据 + LLM 增强
+
+当您有基础数据并希望用 LLM 生成字段进行增强时使用：
+
+```python
+from dataflow.utils.storage import GeneratorDataSource, FileCacheStorage
+from dataflow.serving.agent.cli_openclaw_serving import CLIOpenClawServing
+
+# 定义基础数据生成器
+def task_generator():
+    """生成基础任务数据"""
+    for i in range(1000):
+        yield {
+            "index": i,
+            "scene": "搜索" if i % 2 == 0 else "数据分析",
+            "keywords": "特斯拉" if i % 2 == 0 else "财务数据"
+        }
+
+# 创建带 LLM 增强的数据源
+source = GeneratorDataSource(
+    generator_fn=task_generator,
+    total_rows=1000,
+    name="enhanced_tasks",
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompt_templates={
+        "question": "基于场景 {scene} 和关键词 {keywords}，生成一个真实的技能使用问题。返回 JSON: {{\"question\": \"...\"}}",
+        "target_skills": "基于场景 {scene}，选择 2-3 个适合的技能。返回 JSON: {{\"target_skills\": [...]}}",
+    },
+    fields_from_base=["index", "scene", "keywords"],
+)
+
+# 读取数据（LLM 字段实时生成）
+for row in source.read(chunk_size=32):
+    print(row)  # 包含：index, scene, keywords, question, target_skills
+```
+
+#### LLMGeneratorDataSource - 纯 LLM 生成
+
+当您希望 LLM 从头生成所有数据时使用：
+
+```python
+from dataflow.utils.storage import LLMGeneratorDataSource
+
+# 纯 LLM 生成 - 无需基础数据
+source = LLMGeneratorDataSource(
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompts={
+        "question": "生成一个真实的 OpenClaw 技能使用问题。返回 JSON: {{\"question\": \"...\"}}",
+        "target_skills": "为这个问题选择 2-3 个合适的技能。返回 JSON: {{\"target_skills\": [...]}}",
+        "difficulty": "评估问题难度（1-5 分）。返回 JSON: {{\"difficulty\": 3}}",
+    },
+    num_rows=10000,
+    batch_size=32,
+    name="llm_generated_tasks",
+)
+
+# 读取生成的数据
+for row in source.read(chunk_size=32):
+    print(row)  # 包含：question, target_skills, difficulty
+```
+
+#### 使用 create_data_source 工厂函数
+
+```python
+from dataflow.utils.storage import create_data_source
+
+# 生成器数据源
+source = create_data_source(
+    ["enhanced_tasks"],
+    source_type="generator",
+    generator_fn=task_generator,
+    total_rows=1000,
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompt_templates={
+        "question": "基于场景 {scene} 生成问题",
+    },
+    fields_from_base=["index", "scene"],
+)
+
+# LLM 生成器数据源
+source = create_data_source(
+    ["llm_tasks"],
+    source_type="llm_generator",
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompts={
+        "question": "生成一个技能使用问题",
+    },
+    num_rows=5000,
+)
+```
+
 ### 3. 高级进阶：大规模 S3 任务与断点续传
 
 ```python

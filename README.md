@@ -123,6 +123,101 @@ pipeline.compile()
 pipeline.run()
 ```
 
+### 4. New: Generator Data Sources (v1.0.8+)
+
+Generate data on-the-fly without relying on pre-existing files.
+
+#### GeneratorDataSource - Base Data + LLM Enhancement
+
+Use when you have base data and want to enhance it with LLM-generated fields:
+
+```python
+from dataflow.utils.storage import GeneratorDataSource, FileCacheStorage
+from dataflow.serving.agent.cli_openclaw_serving import CLIOpenClawServing
+
+# Define your base data generator
+def task_generator():
+    """Yield base task data"""
+    for i in range(1000):
+        yield {
+            "index": i,
+            "scene": "search" if i % 2 == 0 else "analysis",
+            "keywords": "特斯拉" if i % 2 == 0 else "财务数据"
+        }
+
+# Create data source with LLM enhancement
+source = GeneratorDataSource(
+    generator_fn=task_generator,
+    total_rows=1000,
+    name="enhanced_tasks",
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompt_templates={
+        "question": "基于场景 {scene} 和关键词 {keywords}，生成一个真实的技能使用问题。返回 JSON: {{\"question\": \"...\"}}",
+        "target_skills": "基于场景 {scene}，选择 2-3 个适合的技能。返回 JSON: {{\"target_skills\": [...]}}",
+    },
+    fields_from_base=["index", "scene", "keywords"],
+)
+
+# Read data (LLM fields are generated on-the-fly)
+for row in source.read(chunk_size=32):
+    print(row)  # Contains: index, scene, keywords, question, target_skills
+```
+
+#### LLMGeneratorDataSource - Pure LLM Generation
+
+Use when you want LLM to generate all data from scratch:
+
+```python
+from dataflow.utils.storage import LLMGeneratorDataSource
+
+# Pure LLM generation - no base data needed
+source = LLMGeneratorDataSource(
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompts={
+        "question": "生成一个真实的 OpenClaw 技能使用问题。返回 JSON: {{\"question\": \"...\"}}",
+        "target_skills": "为这个问题选择 2-3 个合适的技能。返回 JSON: {{\"target_skills\": [...]}}",
+        "difficulty": "评估问题难度（1-5 分）。返回 JSON: {{\"difficulty\": 3}}",
+    },
+    num_rows=10000,
+    batch_size=32,
+    name="llm_generated_tasks",
+)
+
+# Read generated data
+for row in source.read(chunk_size=32):
+    print(row)  # Contains: question, target_skills, difficulty
+```
+
+#### Using create_data_source Factory
+
+```python
+from dataflow.utils.storage import create_data_source
+
+# Generator data source
+source = create_data_source(
+    ["enhanced_tasks"],
+    source_type="generator",
+    generator_fn=task_generator,
+    total_rows=1000,
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompt_templates={
+        "question": "基于场景 {scene} 生成问题",
+    },
+    fields_from_base=["index", "scene"],
+)
+
+# LLM generator data source
+source = create_data_source(
+    ["llm_tasks"],
+    source_type="llm_generator",
+    serving=CLIOpenClawServing(agent_id="main"),
+    prompts={
+        "question": "生成一个技能使用问题",
+    },
+    num_rows=5000,
+)
+```
+
 ### 3. Advanced: High-Scale S3 Pipeline with Resumption
 
 ```python
