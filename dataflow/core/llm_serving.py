@@ -427,8 +427,8 @@ class AgentServingABC(ABC):
             if f.is_file() and f.name not in initial_files_set:
                 try:
                     content = f.read_text(encoding="utf-8", errors="ignore")
-                    if len(content) > 5000:
-                        content = content[:5000] + "\n...(内容被截断)"
+                    if len(content) > 10000:
+                        content = content[:10000] + "\n...(内容被截断)"
                     file_contents.append(f"【{f.name}】\n{content}\n")
                 except Exception:
                     self.logger.exception(f"读取文件 {f} 失败")
