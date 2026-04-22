@@ -7,7 +7,7 @@ if [ ! -d "$HOME/.openclaw" ]; then
     # Create basic workspace structure
     mkdir -p "$HOME/.openclaw/workspace"
 
-    openclaw config set models.providers.vllm "$(cat << 'EOF'
+    cat > /tmp/vllm_config.json << EOF
 {
   "baseUrl": "${VLLM_BASE_URL}",
   "apiKey": "${VLLM_API_KEY}",
@@ -17,7 +17,9 @@ if [ ! -d "$HOME/.openclaw" ]; then
       "id": "${VLLM_MODEL_ID}",
       "name": "${VLLM_MODEL_NAME}",
       "reasoning": false,
-      "input": ["text"],
+      "input": [
+        "text"
+      ],
       "cost": {
         "input": 0,
         "output": 0,
@@ -30,10 +32,15 @@ if [ ! -d "$HOME/.openclaw" ]; then
   ]
 }
 EOF
-)"
 
-    openclaw models set "vllm/${VLLM_MODEL_ID}"
+    openclaw config set models.providers.vllm "$(cat /tmp/vllm_config.json)"
+    rm /tmp/vllm_config.json
+
+    openclaw models set vllm/${VLLM_MODEL_ID}
     openclaw config set gateway.mode local
+    openclaw config set tools.web.search.provider duckduckgo
+    openclaw plugins enable duckduckgo
+    openclaw config set plugins.entries.duckduckgo.config.webSearch.region cn-zh
 
     # Create auth profiles for vllm provider
     mkdir -p "$HOME/.openclaw/agents/main/agent"
