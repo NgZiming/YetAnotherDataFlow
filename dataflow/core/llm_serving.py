@@ -406,7 +406,7 @@ class AgentServingABC(ABC):
         path_mapping: Dict[str, str],
     ) -> str:
         """
-        检查 workspace/assets 目录中的文件,返回新增文件的内容。
+        检查整个 workspace 目录中的文件,返回新增文件的内容。
 
         Args:
             workspace_path: workspace 路径
@@ -415,21 +415,44 @@ class AgentServingABC(ABC):
         Returns:
             新增文件的内容字符串
         """
-        assets_dir = workspace_path / "assets"
-        if not assets_dir.exists():
+        if not workspace_path.exists():
             return ""
+
+        # 排除列表
+        EXCLUDED_FILES = {
+            "AGENTS.md",
+            "BOOTSTRAP.md",
+            "HEARTBEAT.md",
+            "IDENTITY.md",
+            "SOUL.md",
+            "TOOLS.md",
+            "USER.md",
+        }
+        EXCLUDED_DIRS = {"skills", "sessions", "agent"}
 
         # 从 path_mapping 中提取实际生成的文件名集合
         initial_files_set = set(Path(p).name for p in path_mapping.values())
         file_contents = []
 
-        for f in assets_dir.iterdir():
-            if f.is_file() and f.name not in initial_files_set:
+        # 递归扫描整个 workspace
+        for f in workspace_path.rglob("*"):
+            # 检查是否在排除目录中
+            if any(part in EXCLUDED_DIRS for part in f.parts):
+                continue
+
+            # 只处理文件，且排除预定义文件和初始文件
+            if (
+                f.is_file()
+                and f.name not in EXCLUDED_FILES
+                and f.name not in initial_files_set
+            ):
                 try:
                     content = f.read_text(encoding="utf-8", errors="ignore")
                     if len(content) > 10000:
                         content = content[:10000] + "\n...(内容被截断)"
-                    file_contents.append(f"【{f.name}】\n{content}\n")
+                    # 使用相对路径作为标识，方便区分不同目录下的同名文件
+                    rel_path = f.relative_to(workspace_path)
+                    file_contents.append(f"【{rel_path}】\n{content}\n")
                 except Exception:
                     self.logger.exception(f"读取文件 {f} 失败")
 
