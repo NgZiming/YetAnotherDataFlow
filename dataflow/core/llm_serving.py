@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import shutil
 import traceback
@@ -534,7 +535,7 @@ class AgentServingABC(ABC):
 
     def _parse_verification_result(self, verify_output: str) -> Tuple[bool, str]:
         """
-        解析验证结果。
+        解析验证结果。支持 JSON 格式解析。
 
         Args:
             verify_output: LLM 验证输出
@@ -545,45 +546,61 @@ class AgentServingABC(ABC):
         Raises:
             Exception: 当反馈为空或格式不正确时
         """
-        verify_output_lower = verify_output.lower()
+        try:
+            # 尝试解析为 JSON
+            # 首先去除可能包裹的 Markdown 代码块
+            json_str = verify_output.strip()
+            if json_str.startswith("```json"):
+                json_str = json_str[7:]
+            if json_str.startswith("```"):
+                json_str = json_str[3:]
+            if json_str.endswith("```"):
+                json_str = json_str[:-3]
+            json_str = json_str.strip()
 
-        # 判断是否完成
-        is_completed = (
-            "completed" in verify_output_lower
-            and "incomplete" not in verify_output_lower
-        )
+            data = json.loads(json_str)
 
-        # 提取反馈 - 支持多种格式
-        feedback = ""
+            judgment = data.get("judgment", "").lower()
+            feedback = data.get("feedback", "")
 
-        # 尝试多种分隔符：反馈:、反馈：、feedback:
-        patterns = [
-            r"反馈[:：]\s*(.+)",  # 中文或英文冒号
-            r"feedback[:：]\s*(.+)",  # 英文 feedback
-        ]
+            if not feedback:
+                raise ValueError("JSON 中缺失 feedback 字段")
 
-        for pattern in patterns:
-            match = re.search(pattern, verify_output, re.IGNORECASE | re.MULTILINE)
-            if match:
-                feedback = match.group(1).strip()
-                break
+            # 判断完成状态 (completed 为 True, 其他为 False)
+            is_completed = judgment == "completed"
 
-        # 如果还是没找到，尝试用简单的 split
-        if not feedback:
-            for sep in ["反馈:", "反馈：", "feedback:", "feedback："]:
-                if sep in verify_output:
-                    feedback = verify_output.split(sep, 1)[-1].strip()
-                    # 移除可能的前导换行
-                    feedback = feedback.lstrip("\n\r").strip()
+            # 处理 aborted 状态: 如果是 aborted，我们可以通过在 feedback 中标记或通过
+            # 抛出特定异常/返回特殊标志来告知外层中断。
+            # 在目前的 API 签名 (bool, str) 下，aborted 同样返回 False，
+            # 但通过 feedback 让 Agent 知道无需再试。
+            if judgment == "aborted":
+                self.logger.info("验证 LLM 判定任务为 aborted (不可抗力/死循环)")
+                # 我们可以通过在 feedback 头部添加特殊标记，让 _execute_single_task_with_verification 能够识别并直接 break
+                feedback = f"[ABORTED] {feedback}"
+
+            return is_completed, feedback
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            self.logger.warning(f"JSON 解析失败，尝试 fallback 到正则解析: {e}")
+            # Fallback to old regex parsing logic
+            verify_output_lower = verify_output.lower()
+            is_completed = (
+                "completed" in verify_output_lower
+                and "incomplete" not in verify_output_lower
+            )
+
+            feedback = ""
+            patterns = [r"反馈[:：]\s*(.+)", r"feedback[:：]\s*(.+)$"]
+            for pattern in patterns:
+                match = re.search(pattern, verify_output, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    feedback = match.group(1).strip()
                     break
 
-        if not feedback:
-            self.logger.warning(
-                f"验证输出中未找到'反馈:'字段，原始输出：{verify_output[:200]}"
-            )
-            raise Exception("反馈找不到")
+            if not feedback:
+                raise Exception(f"无法解析验证结果: {verify_output[:100]}")
 
-        return is_completed, feedback
+            return is_completed, feedback
 
     def _execute_single_task_with_verification(
         self,
@@ -722,6 +739,15 @@ class AgentServingABC(ABC):
                                 )
                                 break
                             else:
+                                # 检查是否为 aborted 状态
+                                if feedback.startswith("[ABORTED]"):
+                                    self.logger.info(
+                                        f"[轮次 {round_num}] 验证判定为 aborted, 立即终止任务: {feedback}"
+                                    )
+                                    # 移除标记后再传递给 Agent，以免 Agent 困惑
+                                    feedback = feedback.replace("[ABORTED] ", "", 1)
+                                    break
+
                                 self.logger.info(
                                     f"[轮次 {round_num}] 验证未通过,继续迭代:{feedback}"
                                 )
