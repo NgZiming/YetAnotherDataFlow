@@ -24,8 +24,10 @@ OpenClaw Serving via CLI (基于 openclaw CLI 命令，支持并发)
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
+import signal
 import subprocess
 import time
 
@@ -298,13 +300,41 @@ def _send_query_to_session(
 
     cmd = ["openclaw", "agent", "--agent", agent_id, "--local", "-m", query]
 
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, check=False
-    )
-    if result.returncode != 0:
-        raise Exception(result.stderr)
+    try:
+        # 使用 Popen 启动并创建新的进程组 (os.setsid)
+        # 这样在超时时我们可以杀掉整个进程组，防止子进程泄露
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            preexec_fn=os.setsid,
+        )
 
-    logger.info(f"请求完成:{result.stdout[:50]}...")
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            result_stdout = stdout
+            result_stderr = stderr
+            result_returncode = process.returncode
+        except subprocess.TimeoutExpired:
+            # 关键修复：杀掉整个进程组
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            process.wait()
+            raise Exception(
+                f"Task timed out after {timeout}s and process group was killed"
+            )
+
+    except Exception as e:
+        if "result_stdout" not in locals():
+            raise e
+        result_stdout = ""
+        result_stderr = str(e)
+        result_returncode = -1
+
+    if result_returncode != 0:
+        raise Exception(result_stderr)
+
+    logger.info(f"请求完成:{result_stdout[:50]}...")
 
     transcript_paths = _resolve_transcript_paths(agent_id)
     messages = []
