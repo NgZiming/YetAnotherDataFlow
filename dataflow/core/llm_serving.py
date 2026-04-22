@@ -672,20 +672,21 @@ class AgentServingABC(ABC):
             self.logger.error(f"task_description 为空!task_id={task_id}")
             raise Exception("task_description 为空")
 
+        # 状态变量初始化
         workspace_path = self._get_workspace_path(task_id)
-        round_num = 0
-        feedback = ""
-
-        # 累积文件创建和错误信息(跨轮次累积)
-        all_files_created: List[str] = []
-        all_errors: List[str] = []
-        all_final_outputs: List[str] = []  # 记录每轮的 final_output
-        all_feedbacks: List[str] = []  # 记录每轮的历史反馈
-        final_output = ""
-        is_completed = False
-        messages: List[Dict] = []  # 最后一轮的消息(子类返回全量)
 
         for retry_attempt in range(self.max_retries):
+            # 在 retry 循环内部初始化所有状态变量，确保每次重试都是从第一轮(原始任务)开始
+            round_num = 0
+            feedback = ""
+            all_files_created: List[str] = []
+            all_errors: List[str] = []
+            all_final_outputs: List[str] = []  # 记录每轮的 final_output
+            all_feedbacks: List[str] = []  # 记录每轮的历史反馈
+            final_output = ""
+            is_completed = False
+            messages: List[Dict] = []  # 最后一轮的消息(子类返回全量)
+
             try:
                 with self._manage_execution_context(
                     workspace_path, input_files_data, input_skills_data, task_id
