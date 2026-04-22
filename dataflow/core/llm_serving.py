@@ -358,7 +358,7 @@ class AgentServingABC(ABC):
         Args:
             text: 原始文本
             path_mapping: 路径映射 {原始路径:实际路径}
-            workspace_path: agent 的 workspace 路径(用于处理 /workspace/assets/ 到实际 workspace 的映射)
+            workspace_path: agent 的 workspace 路径(用于处理 /workspace/ 到实际 workspace 的映射)
 
         Returns:
             替换后的文本
@@ -368,27 +368,34 @@ class AgentServingABC(ABC):
 
         result = text
 
-        # 先应用 path_mapping 中的替换
+        # 1. 先应用 path_mapping 中的精确替换 (按长度降序排序, 避免部分匹配)
         if path_mapping:
-            # 按路径长度降序排序,避免部分匹配问题
             for original_path, actual_path in sorted(
                 path_mapping.items(), key=lambda x: len(x[0]), reverse=True
             ):
                 result = result.replace(original_path, actual_path)
 
-        # 处理 /workspace/assets/ 到 agent workspace 的映射
-        # 如果文本中有 /workspace/assets/xxx 但不在 path_mapping 中,需要映射到实际 workspace
+        # 2. 处理 /workspace/ 前缀的通用映射
+        # 只要出现 /workspace/xxx，都映射到真实的 workspace_path/xxx
         if workspace_path:
-            # 查找所有 /workspace/assets/xxx 模式
-            workspace_assets_pattern = r'/workspace/assets/([^\s"\'>]+)'
+            # 匹配 /workspace/ 及其后面直到空白或引号的部分
+            workspace_pattern = r'/workspace/([^\s"\'>]+)'
 
-            def replace_workspace_assets(match):
-                filename = match.group(1)
-                # 构建实际路径
-                actual_path = str(workspace_path / "assets" / filename)
-                return actual_path
+            def replace_workspace(match):
+                relative_path = match.group(1)
+                # 构建绝对路径并规范化 (解决 ../ 等问题)
+                actual_path = (workspace_path / relative_path).resolve()
+                return str(actual_path)
 
-            result = re.sub(workspace_assets_pattern, replace_workspace_assets, result)
+            result = re.sub(workspace_pattern, replace_workspace, result)
+
+            # 额外处理常见的 ~/ 缩写 (如果出现在路径上下文中)
+            # 简单处理：将 ~/ 替换为 workspace_path (仅当它像个路径时)
+            result = re.sub(
+                r'(?<=[\s"\'\)])~/([^\s"\'>]+)',
+                lambda m: str((workspace_path / m.group(1)).resolve()),
+                result,
+            )
 
         return result
 
