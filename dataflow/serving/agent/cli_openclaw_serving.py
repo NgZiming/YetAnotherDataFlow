@@ -34,8 +34,7 @@ from typing import Optional, Dict, Any, List
 
 from dataflow.logger import get_logger
 
-# 导入 AgentServingABC 基类
-from .iface import AgentServingABC, TrajectoryDict
+from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict
 from .system_prompt_builder import build_system_prompt
 
 # OpenClaw 基础目录

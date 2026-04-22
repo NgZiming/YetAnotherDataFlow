@@ -39,7 +39,7 @@ from tqdm import tqdm
 from dataflow.logger import get_logger
 
 # 导入 AgentServingABC 基类
-from .iface import AgentServingABC
+from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict
 
 
 class SDKNanobotServing(AgentServingABC):
@@ -402,9 +402,17 @@ class SDKNanobotServing(AgentServingABC):
                             )
 
                             if is_completed:
-                                return {"output": output, "rounds": round_num, "is_completed": True}
+                                return {
+                                    "output": output,
+                                    "rounds": round_num,
+                                    "is_completed": True,
+                                }
 
-                    return {"output": outputs[-1] if outputs else "", "rounds": round_num, "is_completed": False}
+                    return {
+                        "output": outputs[-1] if outputs else "",
+                        "rounds": round_num,
+                        "is_completed": False,
+                    }
 
             except Exception as e:
                 if retry_attempt < self.max_retries - 1:
