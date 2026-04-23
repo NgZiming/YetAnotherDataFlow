@@ -503,7 +503,7 @@ class CLIOpenClawServing(AgentServingABC):
         """清理 workspace，包括强制等待 lock 文件释放。"""
         core_files = {
             "AGENTS.md",
-            "BOOTSTRAP.md",
+            # "BOOTSTRAP.md", # 删除 BOOTSTRAP，避免每个请求都询问要不要初始化性格。
             "HEARTBEAT.md",
             "IDENTITY.md",
             "SOUL.md",

@@ -40,6 +40,7 @@ from dataflow.logger import get_logger
 
 # 导入 AgentServingABC 基类
 from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict
+from dataflow.utils.generate_binary_files import generate_file
 
 
 class SDKNanobotServing(AgentServingABC):
@@ -296,7 +297,9 @@ class SDKNanobotServing(AgentServingABC):
 
         return [Path(p).name for p in new_file_paths]
 
-    def _cleanup_execution_context(self, workspace_path: Path) -> None:
+    def _cleanup_execution_context(
+        self, workspace_path: Path, task_id: Optional[str] = None
+    ) -> None:
         """清理执行上下文资源（删除临时目录）。"""
         if workspace_path.exists():
             try:
@@ -310,9 +313,9 @@ class SDKNanobotServing(AgentServingABC):
         workspace_path: Path,
         query: str,
         current_time: Optional[str] = None,
-    ) -> AgentServingABC.TrajectoryDict:
+    ) -> TrajectoryDict:
         """
-        发送查询并获取响应（返回标准轨迹字典）。
+        发送查询并获取响应（从 session 文件提取完整轨迹）。
 
         Args:
             workspace_path: workspace 路径
@@ -320,13 +323,7 @@ class SDKNanobotServing(AgentServingABC):
             current_time: 当前时间字符串，如果为 None 则使用默认时间
 
         Returns:
-            标准轨迹字典 (AgentServingABC.TrajectoryDict):
-            {
-                "messages": List[AgentServingABC.MessageDict],
-                "final_output": str,
-                "files_created": List[str],
-                "errors": List[str],
-            }
+            标准轨迹字典 (AgentServingABC.TrajectoryDict)
         """
         session_key = f"serving-{id(self)}-{uuid.uuid4().hex[:8]}"
 
@@ -337,91 +334,66 @@ class SDKNanobotServing(AgentServingABC):
         result = asyncio.run(run_query())
         content = result.content if result.content else ""
 
-        # 返回标准轨迹字典（子类内部格式化）
+        # 从 session 文件提取轨迹
+        # Nanobot 的 session 文件路径: workspace/sessions/{session_key}.jsonl
+        session_file = self.workspace / "sessions" / f"{session_key}.jsonl"
+
+        formatted_messages = []
+        if session_file.exists():
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            m = json.loads(line)
+                            # 映射 Nanobot 格式到 TrajectoryDict 格式
+                            # 假设 m 包含 role, content, tool_calls 等
+                            formatted_messages.append(
+                                {
+                                    "round": 0,  # 可以在这里根据消息索引计算 round
+                                    "role": m.get("role", "unknown"),
+                                    "content": m.get("content", ""),
+                                    "thought": m.get("thought") or m.get("reasoning"),
+                                    "tool_calls": m.get("tool_calls", []),
+                                    "tool_results": m.get("tool_results", []),
+                                    "id": m.get("id"),
+                                    "parentId": m.get("parentId"),
+                                    "session_id": session_key,
+                                }
+                            )
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                self.logger.error(f"读取 session 文件失败 {session_file}: {e}")
+
+        if not formatted_messages:
+            # fallback: 仅包含最终响应
+            formatted_messages.append(
+                {
+                    "round": 1,
+                    "role": "assistant",
+                    "content": content,
+                    "thought": None,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "id": None,
+                    "parentId": None,
+                    "session_id": session_key,
+                }
+            )
+
+        # 返回标准轨迹字典
         return {
-            "messages": [{"role": "assistant", "content": content}],
+            "messages": formatted_messages,
             "final_output": content,
             "files_created": [],
             "errors": [],
         }
 
-    def _cleanup_execution_context(self, workspace_path: Path) -> None:
-        """清理执行上下文资源（由 contextmanager 的 finally 块处理）。"""
-        pass
-
     # =========================================================================
     # 公共接口
     # =========================================================================
-
-    async def _execute_single_async(
-        self,
-        task_id: str,
-        task_description: str,
-        input_files_data: Dict,
-        input_skills_data: List[str],
-        prompt_template: Optional[str] = None,
-        max_rounds: int = 1,
-    ) -> str:
-        """异步版本的任务执行。"""
-        workspace_path = self._get_workspace_path(task_id)
-
-        async def async_send_query(query: str) -> str:
-            session_key = f"serving-{id(self)}-{uuid.uuid4().hex[:8]}"
-
-            result = await self.bot.run(query, session_key=session_key)
-            return result.content if result.content else ""
-
-        outputs = []
-        feedback = ""
-
-        for retry_attempt in range(self.max_retries):
-            try:
-                with self._manage_execution_context(
-                    workspace_path, input_files_data, input_skills_data
-                ) as initial_file_names:
-                    initial_file_names = initial_file_names or []
-
-                    for round_num in range(1, max_rounds + 1):
-                        user_input = task_description if round_num == 1 else feedback
-
-                        output = await async_send_query(user_input)
-
-                        if not output:
-                            raise Exception("未找到助手消息")
-
-                        outputs.append(output)
-
-                        if max_rounds > 1:
-                            is_completed, feedback = self._verify_with_external_llm(
-                                task_description,
-                                [],
-                                outputs,
-                                prompt_template,
-                                workspace_path,
-                                initial_file_names,
-                            )
-
-                            if is_completed:
-                                return {
-                                    "output": output,
-                                    "rounds": round_num,
-                                    "is_completed": True,
-                                }
-
-                    return {
-                        "output": outputs[-1] if outputs else "",
-                        "rounds": round_num,
-                        "is_completed": False,
-                    }
-
-            except Exception as e:
-                if retry_attempt < self.max_retries - 1:
-                    self.logger.error(f"任务失败，重试：{e}")
-                    await asyncio.sleep(1.0)
-                else:
-                    raise
-
-        return {"output": "", "rounds": 0, "is_completed": False}
 
     def generate_from_input(
         self,
@@ -431,7 +403,7 @@ class SDKNanobotServing(AgentServingABC):
         enable_verification: bool = False,
         verification_prompt_template: Optional[str] = None,
         max_verification_rounds: int = 3,
-    ) -> List[AgentServingABC.TrajectoryDict]:
+    ) -> List[TrajectoryDict]:
         """
         生成轨迹字典列表（并发执行）。
 
@@ -472,7 +444,8 @@ class SDKNanobotServing(AgentServingABC):
 
             async def limited_task(i: int):
                 async with semaphore:
-                    raw_result = await self._execute_single_async(
+                    # 使用父类 AgentServingABC 提供的 _execute_single_task_with_verification
+                    return self._execute_single_task_with_verification(
                         f"task-{i}",
                         user_inputs[i],
                         input_files_data[i],
@@ -480,7 +453,6 @@ class SDKNanobotServing(AgentServingABC):
                         verification_prompt_template,
                         max_verification_rounds if enable_verification else 1,
                     )
-                    return raw_result  # 直接返回轨迹字典
 
             tasks = [limited_task(i) for i in range(len(user_inputs))]
 
@@ -491,7 +463,8 @@ class SDKNanobotServing(AgentServingABC):
             with tqdm(total=len(user_inputs), desc="处理请求", unit="task") as pbar:
                 for i, future in enumerate(asyncio.as_completed(tasks)):
                     try:
-                        results[i] = await future
+                        res = await future
+                        results[i] = res
                         completed += 1
                     except Exception as e:
                         self.logger.error(f"[任务 {i + 1}] 失败：{e}")
