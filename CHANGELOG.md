@@ -1,11 +1,14 @@
-# Changelog
+## [1.0.10] - 2026-04-24
 
-All notable changes to this project will be documented in this file.
+### 🛠️ Improvements & Fixes
+- **JsonParseFilter Enhancement**: Added support for nested field validation using dot-notation (e.g., `user.profile.name`), enabling deeper JSON structure verification.
+- **Robustness**: Improved retry logic and streamlined bootstrap processes.
+- **Versioning**: Updated versioning metadata.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+---
 
 ## [1.0.9] - 2026-04-22
+
 
 ### 🏗️ Architecture & Refactoring
 - **Agent Serving Decoupling**: Moved `AgentServingABC` and its related logic from `dataflow/core/llm_serving.py` to a dedicated interface file `dataflow/serving/agent/iface.py`.
