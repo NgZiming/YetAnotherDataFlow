@@ -100,9 +100,23 @@ class JsonParseFilter(OperatorABC):
         else:
             return "JsonParseFilter"
 
+    def _get_nested_value(self, data: dict, path: str) -> Any:
+        """
+        支持点分隔路径的字段提取，例如 'user.profile.name'。
+        如果路径不存在，返回 None。
+        """
+        keys = path.split(".")
+        val = data
+        for key in keys:
+            if isinstance(val, dict) and key in val:
+                val = val[key]
+            else:
+                return None
+        return val
+
     def _validate_json_fields(self, data: dict) -> tuple[bool, str]:
         """
-        验证 JSON 字段是否符合预期。
+        验证 JSON 字段是否符合预期。支持点分隔的嵌套路径。
 
         Args:
             data: 解析后的 JSON 数据
@@ -113,59 +127,61 @@ class JsonParseFilter(OperatorABC):
         # 检查必填字段
         if self.required_fields:
             for field in self.required_fields:
-                if field not in data:
+                if self._get_nested_value(data, field) is None:
                     return False, f"Missing required field: {field}"
 
         # 检查字段类型
         if self.field_types:
             for field, expected_type in self.field_types.items():
-                if field in data:
-                    if not isinstance(data[field], expected_type):
+                val = self._get_nested_value(data, field)
+                if val is not None:
+                    if not isinstance(val, expected_type):
                         return (
                             False,
-                            f"Field '{field}' type mismatch: expected {expected_type.__name__}, got {type(data[field]).__name__}",
+                            f"Field '{field}' type mismatch: expected {expected_type.__name__}, got {type(val).__name__}",
                         )
 
         # 检查字段值精确匹配
         if self.field_values:
             for field, expected_value in self.field_values.items():
-                if field in data:
-                    if data[field] != expected_value:
+                val = self._get_nested_value(data, field)
+                if val is not None:
+                    if val != expected_value:
                         return (
                             False,
-                            f"Field '{field}' value mismatch: expected {expected_value!r}, got {data[field]!r}",
+                            f"Field '{field}' value mismatch: expected {expected_value!r}, got {val!r}",
                         )
 
         # 检查字段正则匹配
         if self.field_patterns:
             for field, pattern in self.field_patterns.items():
-                if field in data:
-                    value = data[field]
-                    if not isinstance(value, str):
+                val = self._get_nested_value(data, field)
+                if val is not None:
+                    if not isinstance(val, str):
                         return (
                             False,
-                            f"Field '{field}' pattern check requires string, got {type(value).__name__}",
+                            f"Field '{field}' pattern check requires string, got {type(val).__name__}",
                         )
-                    if not re.match(pattern, value):
+                    if not re.match(pattern, val):
                         return (
                             False,
-                            f"Field '{field}' pattern mismatch: '{value}' does not match '{pattern}'",
+                            f"Field '{field}' pattern mismatch: '{val}' does not match '{pattern}'",
                         )
 
         # 检查数值范围
         if self.field_ranges:
             for field, (min_val, max_val) in self.field_ranges.items():
-                if field in data:
-                    value = data[field]
-                    if not isinstance(value, (int, float)):
+                val = self._get_nested_value(data, field)
+                if val is not None:
+                    if not isinstance(val, (int, float)):
                         return (
                             False,
-                            f"Field '{field}' range check requires number, got {type(value).__name__}",
+                            f"Field '{field}' range check requires number, got {type(val).__name__}",
                         )
-                    if value < min_val or value > max_val:
+                    if val < min_val or val > max_val:
                         return (
                             False,
-                            f"Field '{field}' out of range: {value} not in [{min_val}, {max_val}]",
+                            f"Field '{field}' out of range: {val} not in [{min_val}, {max_val}]",
                         )
 
         return True, ""
