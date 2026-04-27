@@ -337,7 +337,7 @@ prompts = {
 ```
 
 现在请根据用户问题生成结构化数据内容，返回纯 JSON。""",
-    "text": """你是一名测试内容生成器。根据用户的问题/场景，为 TXT 格式生成真实感的内容数据，稍后会由 Python 脚本封装成真实二进制文件。
+    "text": """你是一名测试内容生成器。根据用户的问题/场景，为文本/日志格式生成真实感的内容数据，稍后会由 Python 脚本封装成真实二进制文件。支持 TXT (.txt) 和日志 (.log) 格式。
 
 **用户问题/场景:** {question}
 
@@ -349,28 +349,40 @@ prompts = {
 ```json
 {
   "filename": "{filename}",
+  "format": "txt 或 log",
   "lines": ["行 1", "行 2", "行 3", ...]
 }
 ```
 
-**示例:**
+**示例 (TXT):**
 ```json
 {
   "filename": "{filename}",
+  "format": "txt",
+  "lines": [
+    "系统启动成功",
+    "用户登录：user_12345",
+    "请求完成：/api/users"
+  ]
+}
+```
+
+**示例 (LOG):**
+```json
+{
+  "filename": "{filename}",
+  "format": "log",
   "lines": [
     "[2026-04-01 10:00:01] INFO  Application started",
     "[2026-04-01 10:00:02] INFO  Database connection established",
     "[2026-04-01 10:00:05] INFO  User login: user_12345",
     "[2026-04-01 10:01:30] WARN  Slow query detected (2.3s)",
-    "[2026-04-01 10:02:15] INFO  Request completed: /api/users",
-    "[2026-04-01 10:05:00] ERROR Connection timeout: external_service",
-    "[2026-04-01 10:05:01] INFO  Retry attempt 1/3",
-    "[2026-04-01 10:05:03] INFO  Connection restored"
+    "[2026-04-01 10:05:00] ERROR Connection timeout: external_service"
   ]
 }
 ```
 
-现在请根据用户问题生成 TXT 内容，返回纯 JSON。""",
+现在请根据用户问题生成文本内容，返回纯 JSON。注意：format 字段必须与文件扩展名一致（.txt 用 "txt"，.log 用 "log"）。""",
     "code": """你是一名测试内容生成器。根据用户的问题/场景，为代码格式生成真实感的内容数据，稍后会由 Python 脚本封装成真实二进制文件。支持 Python (.py)、JavaScript (.js) 和 TypeScript (.ts) 格式。
 
 **用户问题/场景:** {question}
@@ -492,17 +504,35 @@ class FileContextGenerator(OperatorABC):
                 else f"Row {row_idx}: question = {question}"
             )
 
+            # 先检查这个 row 是否有不合法的文件
+            row_valid = True
             for filename in files_list:
                 # 验证 filename 必须以 /workspace/ 开头
                 if not filename.startswith("/workspace/"):
                     invalid_filenames[row_idx].append(filename)
-                    row_has_failure[row_idx] = True
+                    row_valid = False
                     self.logger.error(
                         f"Row {row_idx}: 无效的 filename: {filename} (必须以 /workspace/ 开头)"
                     )
-                    break  # 这个 row 已经有无效的 filename，跳过其他文件
-                gen_files.append((row_idx, question, filename))
-                self.logger.info(f"Row {row_idx}: 添加文件到生成队列: {filename}")
+                    break
+
+                # 检查格式是否支持
+                ext = Path(filename).suffix[1:].lower()
+                if ext not in format_to_category:
+                    invalid_filenames[row_idx].append(filename)
+                    self.logger.warning(
+                        f"Row {row_idx}: 不支持的格式 {ext} - {filename}"
+                    )
+                    row_valid = False
+                    break
+
+            # 只有 row 完全合法，才将所有文件添加到 gen_files
+            if row_valid:
+                for filename in files_list:
+                    gen_files.append((row_idx, question, filename))
+                    self.logger.info(f"Row {row_idx}: 添加文件到生成队列：{filename}")
+            else:
+                row_has_failure[row_idx] = True
 
         # 记录无效的 filename
         for row_idx, filenames in invalid_filenames.items():
@@ -525,10 +555,6 @@ class FileContextGenerator(OperatorABC):
         llm_prompts: list[str] = []
         for row_idx, question, filename in gen_files:
             ext = Path(filename).suffix[1:].lower()
-            if ext not in format_to_category:
-                self.logger.warning(f"Row {row_idx}: 不支持的格式 {ext} - {filename}")
-                row_has_failure[row_idx] = True
-                continue
             cat = format_to_category[ext]
             prompt = prompts[cat]
             prompt = prompt.replace("{question}", question)
