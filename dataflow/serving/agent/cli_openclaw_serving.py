@@ -36,7 +36,7 @@ from typing import Optional, Dict, Any, List
 
 from dataflow.logger import get_logger
 
-from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict
+from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict, MessageDict
 from .system_prompt_builder import build_system_prompt
 
 # OpenClaw 基础目录
@@ -750,7 +750,7 @@ class CLIOpenClawServing(AgentServingABC):
                 else:
                     round_num = 0
 
-                formatted_msg = {
+                formatted_msg: MessageDict = {
                     "round": round_num,
                     "role": role,
                     "content": inner_msg.get("content", []),
@@ -828,10 +828,13 @@ class CLIOpenClawServing(AgentServingABC):
 
         # 返回标准轨迹字典（子类内部格式化）
         return {
-            "messages": formatted_messages,
+            "task_id": "",
+            "task_description": "",
             "final_output": output,
-            "files_created": [],
-            "errors": [],
+            "total_rounds": round_num,
+            "is_completed": False,
+            "messages": formatted_messages,
+            "metadata": {},
         }
 
 

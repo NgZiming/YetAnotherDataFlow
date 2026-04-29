@@ -27,7 +27,7 @@ from dataflow.utils.generate_binary_files import generate_file
 # =========================================================================
 
 
-class MessageDict(TypedDict, total=False):
+class MessageDict(TypedDict, total=True):
     """单条消息的字典格式。"""
 
     round: int  # 所属轮次
@@ -41,7 +41,7 @@ class MessageDict(TypedDict, total=False):
     session_id: Optional[str]  # 所属 session ID
 
 
-class TrajectoryDict(TypedDict, total=False):
+class TrajectoryDict(TypedDict, total=True):
     """
     标准轨迹字典格式(子类格式化结果时使用此类型)。
     参考 OpenClawTrajectorySimplifierOperator 的字段保留策略。
@@ -53,8 +53,6 @@ class TrajectoryDict(TypedDict, total=False):
     total_rounds: int  # 总轮数
     is_completed: bool  # 是否通过验证完成
     messages: List[MessageDict]  # 消息列表(按时间顺序)
-    files_created: List[str]  # 创建的文件路径列表
-    errors: List[str]  # 错误信息列表(如有)
     metadata: Dict[str, Any]  # 元数据(子类可扩展)
 
 
@@ -679,13 +677,11 @@ class AgentServingABC(ABC):
             # 在 retry 循环内部初始化所有状态变量，确保每次重试都是从第一轮(原始任务)开始
             round_num = 0
             feedback = ""
-            all_files_created: List[str] = []
-            all_errors: List[str] = []
             all_final_outputs: List[str] = []  # 记录每轮的 final_output
             all_feedbacks: List[str] = []  # 记录每轮的历史反馈
             final_output = ""
             is_completed = False
-            messages: List[Dict] = []  # 最后一轮的消息(子类返回全量)
+            messages: List[MessageDict] = []  # 最后一轮的消息(子类返回全量)
 
             try:
                 with self._manage_execution_context(
@@ -732,14 +728,12 @@ class AgentServingABC(ABC):
                             current_time=execution_start_time,
                         )
 
-                        if not round_result or not isinstance(round_result, dict):
+                        if not round_result:
                             self.logger.warning(f"[轮次 {round_num}] 未找到助手消息")
                             raise Exception("未找到助手消息")
 
                         # 累积本轮结果
-                        messages = round_result.get("messages", [])  # 子类返回全量消息
-                        all_files_created.extend(round_result.get("files_created", []))
-                        all_errors.extend(round_result.get("errors", []))
+                        messages: list[MessageDict] = round_result.get("messages", [])
                         final_output = round_result.get("final_output", "")
                         all_final_outputs.append(final_output)  # 记录本轮输出
 
@@ -788,8 +782,6 @@ class AgentServingABC(ABC):
                         "total_rounds": round_num,
                         "is_completed": is_completed,
                         "messages": messages,
-                        "files_created": all_files_created,
-                        "errors": all_errors,
                         "metadata": {
                             "max_retries": self.max_retries,
                             "retry_attempt": retry_attempt,
@@ -811,8 +803,6 @@ class AgentServingABC(ABC):
                     "total_rounds": round_num,
                     "is_completed": False,
                     "messages": messages,
-                    "files_created": all_files_created,
-                    "errors": [traceback.format_exc()],
                     "metadata": {
                         "max_retries": self.max_retries,
                         "retry_attempt": retry_attempt,
@@ -827,8 +817,6 @@ class AgentServingABC(ABC):
             "total_rounds": round_num,
             "is_completed": False,
             "messages": [],
-            "files_created": [],
-            "errors": ["未知错误"],
             "metadata": {},
         }
 
