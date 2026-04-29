@@ -258,7 +258,8 @@ def _resolve_transcript_paths(agent_id: str) -> List[Path]:
 
     while time.time() - start_time < timeout:
         if sessions_dir.exists():
-            candidates = list(sessions_dir.rglob("*.jsonl"))
+            exclude = set(list(sessions_dir.rglob(".trajectory.jsonl")))
+            candidates = set(list(sessions_dir.rglob("*.jsonl"))) - exclude
             if candidates:
                 return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
 
