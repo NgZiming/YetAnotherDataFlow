@@ -1,4 +1,4 @@
-import os
+import json
 
 from typing import Union, Any, Optional
 
@@ -139,14 +139,15 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             verification_prompt_templates = []
             for idx, row in dataframe.iterrows():
                 if self.input_milestones_key in row and row[self.input_milestones_key]:
-                    milestones_str = row[self.input_milestones_key]
-                    # 将 milestones 填入 verification_prompt_template 中的 {milestones} 占位符
-                    filled_template = self.verification_prompt_template.format(
-                        milestones=milestones_str,
-                        task_description="{task_description}",  # 保留其他占位符给底层处理
-                        agent_outputs="{agent_outputs}",
-                        feedbacks="{feedbacks}",
-                        file_contents="{file_contents}",
+                    milestones_str = json.dumps(
+                        row[self.input_milestones_key],
+                        ensure_ascii=False,
+                    )
+                    # 只替换 {milestones} 占位符，保留其他占位符给底层处理
+                    # 使用 str.replace 而不是 .format()，避免其他占位符被错误替换
+                    filled_template = self.verification_prompt_template.replace(
+                        "{milestones}",
+                        milestones_str,
                     )
                     verification_prompt_templates.append(filled_template)
                 else:

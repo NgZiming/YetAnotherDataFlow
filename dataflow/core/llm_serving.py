@@ -497,11 +497,21 @@ class AgentServingABC(ABC):
                 f"请返回:\n判断:completed/incomplete\n反馈:(如果未完成,给出具体的改进建议)"
             )
         else:
-            verification_prompt = prompt_template.format(
-                task_description=task_description,
-                agent_outputs=agent_outputs,
-                feedbacks=feedbacks,
-                file_contents=file_contents_str,
+            # 使用 str.replace 逐个替换占位符，避免 .format() 因缺失占位符而报错
+            verification_prompt = prompt_template
+            verification_prompt = verification_prompt.replace(
+                "{task_description}", task_description
+            )
+            verification_prompt = verification_prompt.replace(
+                "{agent_outputs}",
+                json.dumps(agent_outputs, ensure_ascii=False),
+            )
+            verification_prompt = verification_prompt.replace(
+                "{feedbacks}",
+                json.dumps(feedbacks, ensure_ascii=False),
+            )
+            verification_prompt = verification_prompt.replace(
+                "{file_contents}", file_contents_str
             )
 
         try:
