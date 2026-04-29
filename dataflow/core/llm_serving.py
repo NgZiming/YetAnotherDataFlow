@@ -830,18 +830,18 @@ class AgentServingABC(ABC):
         input_files_data: List[Dict[str, Any]],
         input_skills_data: List[List[str]],
         enable_verification: bool = False,
-        verification_prompt_template: Optional[str] = None,
+        verification_prompt_templates: Optional[List[str]] = None,
         max_verification_rounds: int = 3,
     ) -> List[TrajectoryDict]:
         """
-        生成轨迹字典列表(并发执行)。
+        生成轨迹字典列表 (并发执行)。
 
         Args:
             user_inputs: 用户输入列表
             input_files_data: 文件内容数据列表
             input_skills_data: skill 路径列表
             enable_verification: 是否启用验证
-            verification_prompt_template: 验证提示词模板
+            verification_prompt_templates: 验证提示词模板列表（每行一个，支持不同的 milestones）
             max_verification_rounds: 最大验证轮数
 
         Returns:
@@ -862,6 +862,13 @@ class AgentServingABC(ABC):
                 f"input_skills_data 长度 ({len(input_skills_data)}) "
                 f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
             )
+
+        if verification_prompt_templates is not None:
+            if len(verification_prompt_templates) != len(user_inputs):
+                raise ValueError(
+                    f"verification_prompt_templates 长度 ({len(verification_prompt_templates)}) "
+                    f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
+                )
 
         self.logger.info(f"开始处理 {len(user_inputs)} 个请求")
 
@@ -890,13 +897,18 @@ class AgentServingABC(ABC):
 
                 use_max_rounds = max_verification_rounds if enable_verification else 1
 
+                # 获取当前任务的验证模板（如果提供列表，则取对应索引；否则使用单个模板）
+                task_verification_template = None
+                if verification_prompt_templates:
+                    task_verification_template = verification_prompt_templates[i]
+
                 future = executor.submit(
                     self._execute_single_task_with_verification,
                     f"task-{i}",
                     question,
                     input_files_data[i],
                     input_skills_data[i],
-                    verification_prompt_template,
+                    task_verification_template,
                     use_max_rounds,
                 )
                 futures[future] = i

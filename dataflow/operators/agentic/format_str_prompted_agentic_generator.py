@@ -58,6 +58,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         input_files_data_key: str,
         input_skills_key: Optional[str] = None,
         output_key: str = "generated_content",
+        input_milestones_key: Optional[str] = None,
         **input_keys: Any,
     ):
         """
@@ -68,6 +69,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             input_files_data_key: FileContextGenerator 输出的 key，用于传递文件内容数据
             input_skills_key: 存储 skill 路径列表的 DataFrame 列名（可选）
             output_key: 输出生成内容字段名
+            input_milestones_key: 存储 milestones 的 DataFrame 列名（可选），用于构建每行不同的 verification prompt
             **input_keys: 输入字段映射字典
         """
         self.storage: DataFlowStorage = storage
@@ -76,7 +78,10 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         self.input_keys = input_keys
         self.input_files_data_key = input_files_data_key
         self.input_skills_key = input_skills_key
-        self.logger.info(f"input_skills_key: {input_skills_key}")
+        self.input_milestones_key = input_milestones_key
+        self.logger.info(
+            f"input_skills_key: {input_skills_key}, input_milestones_key: {input_milestones_key}"
+        )
 
         need_fields = set(input_keys.keys())
         # Load the raw dataframe from the input file
@@ -124,13 +129,39 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             f"Prepared {len(input_skills_data)} skill lists for generation."
         )
 
+        # 如果有 input_milestones_key，为每行构建不同的 verification_prompt_template
+        verification_prompt_templates = None
+        if (
+            self.enable_verification
+            and self.verification_prompt_template
+            and self.input_milestones_key
+        ):
+            verification_prompt_templates = []
+            for idx, row in dataframe.iterrows():
+                if self.input_milestones_key in row and row[self.input_milestones_key]:
+                    milestones_str = row[self.input_milestones_key]
+                    # 将 milestones 填入 verification_prompt_template 中的 {milestones} 占位符
+                    filled_template = self.verification_prompt_template.format(
+                        milestones=milestones_str,
+                        task_description="{task_description}",  # 保留其他占位符给底层处理
+                        agent_outputs="{agent_outputs}",
+                        feedbacks="{feedbacks}",
+                        file_contents="{file_contents}",
+                    )
+                    verification_prompt_templates.append(filled_template)
+                else:
+                    # 如果没有 milestones，使用原始模板（不填充 milestones）
+                    verification_prompt_templates.append(
+                        self.verification_prompt_template
+                    )
+
         # Generate content using the CLIOpenClawServing
         generated_outputs = self.llm_serving.generate_from_input(
             user_inputs=llm_inputs,
             input_files_data=input_files_data,
             input_skills_data=input_skills_data,
             enable_verification=self.enable_verification,
-            verification_prompt_template=self.verification_prompt_template,
+            verification_prompt_templates=verification_prompt_templates,
             max_verification_rounds=self.max_verification_rounds,
         )
 
