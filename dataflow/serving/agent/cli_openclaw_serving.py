@@ -37,7 +37,7 @@ from typing import Optional, Dict, Any, List
 from dataflow.logger import get_logger
 
 from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict, MessageDict
-from .system_prompt_builder import build_system_prompt
+from dataflow.serving.agent.system_prompt_builder import build_system_prompt
 
 # OpenClaw 基础目录
 OPENCLAW_BASE = Path.home() / ".openclaw"
@@ -698,7 +698,7 @@ class CLIOpenClawServing(AgentServingABC):
         )
 
         # 在消息列表开头插入 system 消息
-        system_message = {
+        system_message: MessageDict = {
             "round": 0,
             "role": "system",
             "content": system_prompt,
@@ -718,10 +718,9 @@ class CLIOpenClawServing(AgentServingABC):
         )
 
         # 为每条消息添加 session_id 并统一格式
-        formatted_messages = []
+        formatted_messages: list[MessageDict] = []
         user_round = 0
         assistant_round = 0
-        has_system_message = False
 
         for m in messages:
             # 从 session_file 中提取该消息对应的 session_id
@@ -789,18 +788,12 @@ class CLIOpenClawServing(AgentServingABC):
                                 formatted_msg["thought"] = item.get("thinking")
 
                 formatted_messages.append(formatted_msg)
-            elif m.get("type") == "system":
-                # system 消息已经格式化过了，标记已存在
-                has_system_message = True
-                formatted_messages.append(m)
             else:
                 # 其他类型（session, model_change 等）跳过
                 pass
 
         # 只有当 transcript 中没有 system 消息时，才插入新的 system message
-        if not has_system_message:
-            formatted_messages.insert(0, system_message)
-        messages.insert(0, system_message)
+        formatted_messages.insert(0, system_message)
 
         # 提取最终输出（从最后一条 role=assistant 的消息中提取 text 内容）
         output = ""
