@@ -401,16 +401,22 @@ class AgentServingABC(ABC):
         self,
         workspace_path: Path,
         path_mapping: Dict[str, str],
+        max_total_len: int = 8000,  # 新增：总内容长度限制
+        summary_mode: bool = True,  # 新增：是否使用总结模式
+        use_llm_summary: bool = False,  # 新增：是否使用 LLM 总结（需要额外 LLM 调用）
     ) -> str:
         """
-        检查整个 workspace 目录中的文件,返回新增文件的内容。
+        检查整个 workspace 目录中的文件，返回新增文件的内容（或总结）。
 
         Args:
             workspace_path: workspace 路径
-            path_mapping: 路径映射 {原始路径:实际生成路径}
+            path_mapping: 路径映射 {原始路径：实际生成路径}
+            max_total_len: 总内容长度限制（默认 8000 字符，避免 prompt 过长）
+            summary_mode: 是否使用总结模式（True=只发送文件大纲 + 总结，False=发送完整内容）
+            use_llm_summary: 是否使用 LLM 总结大文件（需要额外 LLM 调用，更智能但成本高）
 
         Returns:
-            新增文件的内容字符串
+            新增文件的内容字符串（或总结）
         """
         if not workspace_path.exists():
             return ""
@@ -430,8 +436,10 @@ class AgentServingABC(ABC):
         # 从 path_mapping 中提取实际生成的文件名集合
         initial_files_set = set(Path(p).name for p in path_mapping.values())
         file_contents = []
+        total_len = 0
 
         # 递归扫描整个 workspace
+        files = []
         for f in workspace_path.rglob("*"):
             # 检查是否在排除目录中
             if any(part in EXCLUDED_DIRS for part in f.parts):
@@ -443,17 +451,223 @@ class AgentServingABC(ABC):
                 and f.name not in EXCLUDED_FILES
                 and f.name not in initial_files_set
             ):
-                try:
-                    content = f.read_text(encoding="utf-8", errors="ignore")
+                files.append(f)
+
+        # 按文件大小排序，优先处理小文件
+        files.sort(key=lambda f: f.stat().st_size)
+
+        for f in files:
+            try:
+                content = f.read_text(encoding="utf-8", errors="ignore")
+                rel_path = f.relative_to(workspace_path)
+
+                if summary_mode:
+                    # 总结模式：只发送文件大纲 + 首尾总结
+                    file_len = len(content)
+                    if file_len <= 2000:
+                        # 小文件：发送完整内容
+                        summary = content
+                        actual_len = file_len
+                    elif use_llm_summary:
+                        # 🔥 使用 LLM 总结大文件
+                        summary = self._summarize_file_with_llm(str(rel_path), content)
+                        actual_len = len(summary)
+                    else:
+                        # 机械总结：发送首尾各 500 字符 + 中间摘要
+                        head = content[:500]
+                        tail = content[-500:]
+                        summary = f"{head}\n\n... [内容被截断：文件总长度 {file_len} 字符，中间内容已省略] ...\n\n{tail}"
+                        actual_len = 1000 + 50  # 估算长度
+                else:
+                    # 完整模式：截断单个文件
                     if len(content) > 10000:
                         content = content[:10000] + "\n...(内容被截断)"
-                    # 使用相对路径作为标识，方便区分不同目录下的同名文件
-                    rel_path = f.relative_to(workspace_path)
-                    file_contents.append(f"【{rel_path}】\n{content}\n")
-                except Exception:
-                    self.logger.exception(f"读取文件 {f} 失败")
+                    summary = content
+                    actual_len = len(content)
 
-        return "\n".join(file_contents) if file_contents else ""
+                # 检查是否超过总长度限制
+                if total_len + actual_len > max_total_len and total_len > 0:
+                    # 添加截断提示
+                    file_contents.append(
+                        f"\n... [后续文件已省略：总长度已达 {total_len} 字符，超过限制 {max_total_len}] ..."
+                    )
+                    break
+
+                # 使用相对路径作为标识，方便区分不同目录下的同名文件
+                if summary_mode and len(content) > 2000:
+                    file_contents.append(
+                        f"【{rel_path}】（文件大小：{file_len} 字符，已总结）\n{summary}\n"
+                    )
+                else:
+                    file_contents.append(f"【{rel_path}】\n{summary}\n")
+
+                total_len += actual_len + len(str(rel_path)) + 10
+
+            except Exception:
+                self.logger.exception(f"读取文件 {f} 失败")
+
+        result = "\n".join(file_contents) if file_contents else ""
+
+        # 记录日志
+        if summary_mode:
+            self.logger.info(
+                f"文件总结模式：共 {len(files)} 个文件，总长度 {total_len} 字符"
+            )
+        else:
+            self.logger.info(
+                f"完整模式：共 {len(files)} 个文件，总长度 {total_len} 字符"
+            )
+
+        return result
+
+    def _call_user_simulator_llm(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout: int | None = None,
+    ) -> str:
+        """
+        调用用户模拟器 LLM 的通用方法。
+
+        Args:
+            prompt: 提示词内容
+            max_tokens: 最大生成 token 数（默认使用配置值）
+            temperature: 生成温度（默认使用配置值）
+            timeout: 超时时间（秒，默认使用配置值）
+
+        Returns:
+            LLM 生成的文本内容
+
+        Raises:
+            Exception: 当请求失败时抛出异常
+        """
+        # 构建请求 payload
+        payload = {
+            "model": self._user_simulator_client_params.get("model", "default"),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        # 可选参数
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        # 合并其他配置参数
+        payload.update(self._user_simulator_client_params)
+
+        # 设置请求头
+        headers = {"Content-Type": "application/json"}
+        if self._user_simulator_api_key:
+            headers["Authorization"] = f"Bearer {self._user_simulator_api_key}"
+
+        # 设置超时
+        request_timeout = timeout or self._user_simulator_client_params.get(
+            "read_timeout", 600
+        )
+
+        try:
+            self.logger.info(
+                f"向用户模拟器 LLM 发起请求 (prompt 长度={len(prompt)}字符)"
+            )
+
+            response = requests.post(
+                self._user_simulator_api_url,
+                headers=headers,
+                json=payload,
+                timeout=request_timeout,
+            )
+
+            if response.status_code != 200:
+                self.logger.error(
+                    f"LLM 请求失败：status={response.status_code}, body={response.text[:500]}"
+                )
+                raise Exception(f"LLM 请求失败：status={response.status_code}")
+
+            result = response.json()
+            llm_output = (
+                result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
+
+            self.logger.info(
+                f"LLM 调用完成，输出长度={len(llm_output)}字符"
+                if llm_output
+                else "LLM 调用完成，无输出"
+            )
+
+            return llm_output
+
+        except requests.exceptions.ConnectTimeout:
+            self.logger.exception("LLM 连接超时")
+            raise
+        except requests.exceptions.ReadTimeout:
+            self.logger.exception("LLM 读取超时")
+            raise
+        except Exception:
+            self.logger.exception("LLM 调用失败")
+            raise
+
+    def _summarize_file_with_llm(
+        self,
+        file_path: str,
+        content: str,
+        max_summary_len: int = 1000,
+    ) -> str:
+        """
+        使用 LLM 总结文件内容。
+
+        Args:
+            file_path: 文件路径（用于提示词）
+            content: 文件完整内容
+            max_summary_len: 总结的最大长度
+
+        Returns:
+            总结后的内容
+        """
+        # 如果文件内容已经很短，直接返回
+        if len(content) <= 2000:
+            return content
+
+        # 构建总结提示词
+        summary_prompt = f"""请总结以下文件的核心内容，要求：
+1. 用简洁的语言概括文件的主要信息
+2. 保留关键数据、结论和重要细节
+3. 忽略冗余的格式和重复内容
+4. 总结长度控制在 {max_summary_len} 字符以内
+
+文件路径：{file_path}
+文件长度：{len(content)} 字符
+
+---
+
+文件内容：
+{content[:10000]}  # 如果文件太长，先截取前 10000 字符用于总结
+
+---
+
+请输出总结内容："""
+
+        try:
+            # 调用 LLM 进行总结
+            summary = self._call_user_simulator_llm(
+                prompt=summary_prompt,
+                max_tokens=1024,
+                temperature=0.3,  # 较低的 temperature，确保总结准确
+                timeout=60,  # 总结请求超时时间较短
+            )
+
+            # 限制总结长度
+            if len(summary) > max_summary_len:
+                summary = summary[:max_summary_len] + "..."
+            return summary
+
+        except Exception as e:
+            self.logger.warning(f"LLM 总结异常：{e}, 回退到机械总结")
+            # 回退到机械总结
+            head = content[:500]
+            tail = content[-500:]
+            return f"{head}\n\n... [内容被截断：文件总长度 {len(content)} 字符，中间内容已省略] ...\n\n{tail}"
 
     def _mock_user_with_external_llm(
         self,
@@ -476,8 +690,13 @@ class AgentServingABC(ABC):
         Returns:
             (是否完成，用户模拟器生成的下一轮反馈消息)
         """
-        # 获取新增文件内容
-        file_contents_str = self._get_new_file_contents(workspace_path, path_mapping)
+        # 获取新增文件内容（使用 LLM 总结模式，智能压缩大文件）
+        file_contents_str = self._get_new_file_contents(
+            workspace_path,
+            path_mapping,
+            summary_mode=True,
+            use_llm_summary=True,
+        )
 
         # 使用 str.replace 逐个替换占位符，避免 .format() 因缺失占位符而报错
         user_sim_prompt = self._replace_file_paths_in_text(
@@ -496,36 +715,10 @@ class AgentServingABC(ABC):
         user_sim_prompt = user_sim_prompt.replace("{file_contents}", file_contents_str)
 
         try:
-            self.logger.info(
-                f"向用户模拟器 LLM 发起请求 (prompt 长度={len(user_sim_prompt)}字符)"
-            )
-
-            payload = {
-                "model": self._user_simulator_client_params.get("model", "default"),
-                "messages": [{"role": "user", "content": user_sim_prompt}],
-            }
-            payload.update(self._user_simulator_client_params)
-
-            headers = {"Content-Type": "application/json"}
-            if self._user_simulator_api_key:
-                headers["Authorization"] = f"Bearer {self._user_simulator_api_key}"
-
-            response = requests.post(
-                self._user_simulator_api_url,
-                headers=headers,
-                json=payload,
+            # 使用统一的 LLM 调用方法
+            user_sim_output = self._call_user_simulator_llm(
+                prompt=user_sim_prompt,
                 timeout=self._user_simulator_client_params.get("read_timeout", 600),
-            )
-
-            if response.status_code != 200:
-                self.logger.error(
-                    f"用户模拟请求失败:status={response.status_code}, body={response.text[:500]}"
-                )
-                raise Exception(f"response error")
-
-            result = response.json()
-            user_sim_output = (
-                result.get("choices", [{}])[0].get("message", {}).get("content", "")
             )
 
             self.logger.info(
