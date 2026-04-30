@@ -90,6 +90,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         )
 
         dataframe[output_key] = clean_surrogates(generated_outputs)
+        dataframe[".prompt.user.chat"] = user_prompt_templates
 
         return dataframe
 
