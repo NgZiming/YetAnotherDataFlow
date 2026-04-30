@@ -376,6 +376,9 @@ class CLIOpenClawServing(AgentServingABC):
 
     def __init__(
         self,
+        user_simulator_api_url: str,
+        user_simulator_api_key: Optional[str] = None,
+        user_simulator_client_params: Optional[Dict[str, Any]] = None,
         agent_id: str = "main",
         model: Optional[str] = None,
         timeout: int = 1200,
@@ -383,10 +386,7 @@ class CLIOpenClawServing(AgentServingABC):
         max_workers: int = 4,
         max_retries: int = 3,
         skill_base_dir: str = "/root/clawhub",
-        verification_api_key: Optional[str] = None,
-        verification_base_url: Optional[str] = None,
-        verification_client_params: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         """
         初始化 CLIOpenClawServing。
 
@@ -398,9 +398,9 @@ class CLIOpenClawServing(AgentServingABC):
             max_workers: 并发 worker 数量
             max_retries: 请求失败时的最大重试次数
             skill_base_dir: Skill 基础目录（必需，默认为 /root/clawhub）
-            verification_api_key: 验证用 API key
-            verification_base_url: 验证用 API base URL
-            verification_client_params: 验证用 LLM 调用参数
+            user_simulator_api_url: 用户模拟器 LLM API URL（必需）
+            user_simulator_api_key: 用户模拟器 LLM API Key（可选）
+            user_simulator_client_params: 用户模拟器 LLM 的其他参数 (model, temperature 等)
         """
         self.logger = get_logger()
 
@@ -415,12 +415,12 @@ class CLIOpenClawServing(AgentServingABC):
         self.skill_base_dir = str(skill_base_dir).strip()
 
         super().__init__(
+            user_simulator_api_url=user_simulator_api_url,
+            user_simulator_api_key=user_simulator_api_key,
+            user_simulator_client_params=user_simulator_client_params,
             max_workers=max_workers,
             max_retries=max_retries,
             timeout=timeout,
-            verification_api_url=verification_base_url,
-            verification_api_key=verification_api_key,
-            verification_client_params=verification_client_params,
         )
 
         self._initialized = False
@@ -823,7 +823,6 @@ class CLIOpenClawServing(AgentServingABC):
         # 返回标准轨迹字典（子类内部格式化）
         return {
             "task_id": "",
-            "task_description": "",
             "final_output": output,
             "total_rounds": round_num,
             "is_completed": False,
