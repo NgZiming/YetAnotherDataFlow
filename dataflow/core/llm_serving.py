@@ -48,7 +48,6 @@ class TrajectoryDict(TypedDict, total=True):
     """
 
     task_id: str  # 任务 ID
-    task_description: str  # 任务描述
     final_output: str  # 最终输出文本
     total_rounds: int  # 总轮数
     is_completed: bool  # 是否通过验证完成
@@ -128,12 +127,12 @@ class AgentServingABC(ABC):
 
     def __init__(
         self,
+        user_simulator_api_url: str,
+        user_simulator_api_key: Optional[str] = None,
+        user_simulator_client_params: Optional[Dict[str, Any]] = None,
         max_workers: int = 4,
         max_retries: int = 3,
         timeout: int = 300,
-        verification_api_url: Optional[str] = None,
-        verification_api_key: Optional[str] = None,
-        verification_client_params: Optional[Dict[str, Any]] = None,
     ):
         """
         初始化 AgentServingABC。
@@ -141,21 +140,21 @@ class AgentServingABC(ABC):
         Args:
             max_workers: 最大并发数
             max_retries: 最大重试次数
-            timeout: 超时时间(秒)
-            verification_api_url: 验证用 LLM API URL
-            verification_api_key: 验证用 LLM API Key
-            verification_client_params: 验证 LLM 的其他参数(model, temperature 等)
+            timeout: 超时时间 (秒)
+            user_simulator_api_url: 用户模拟器 LLM API URL（必需）
+            user_simulator_api_key: 用户模拟器 LLM API Key（可选）
+            user_simulator_client_params: 用户模拟器 LLM 的其他参数 (model, temperature 等)，有默认配置
         """
         self.logger = get_logger()
         self.max_workers = max_workers
         self.max_retries = max_retries
         self.timeout = timeout
 
-        # 验证配置
-        self._verification_api_url = verification_api_url
-        self._verification_api_key = verification_api_key
-        self._verification_client_params = {
-            "model_name": "/data/share/models/Qwen3.5-122B-A10B/",
+        # 用户模拟器配置（不再是"验证"，而是"用户模拟"）
+        self._user_simulator_api_url = user_simulator_api_url
+        self._user_simulator_api_key = user_simulator_api_key
+        self._user_simulator_client_params = {
+            "model": "/data/share/models/Qwen3.5-122B-A10B/",
             "max_workers": 10,
             "max_completion_tokens": 16384,
             "read_timeout": 600,
@@ -170,8 +169,8 @@ class AgentServingABC(ABC):
             },
         }
 
-        if verification_client_params:
-            self._verification_client_params.update(verification_client_params)
+        if user_simulator_client_params:
+            self._user_simulator_client_params.update(user_simulator_client_params)
 
     # =========================================================================
     # 抽象方法 - 子类必须实现
@@ -456,115 +455,97 @@ class AgentServingABC(ABC):
 
         return "\n".join(file_contents) if file_contents else ""
 
-    def _verify_with_external_llm(
+    def _mock_user_with_external_llm(
         self,
-        task_description: str,
         feedbacks: List[str],
         agent_outputs: List[str],
-        prompt_template: Optional[str],
+        prompt_template: str,
         workspace_path: Path,
         path_mapping: Dict[str, str],
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
-        使用外部 LLM 进行验证。
+        使用外部 LLM 模拟用户，生成下一轮对话的反馈。
 
         Args:
-            task_description: 任务描述
             feedbacks: 之前每一轮的反馈意见
             agent_outputs: Agent 每一轮的输出
-            prompt_template: 验证提示词模板
+            prompt_template: 用户模拟提示词模板（已包含 task_description/milestones/retrieval_points/dialogue_scripts 等信息）
             workspace_path: workspace 路径
-            path_mapping: 路径映射 {原始路径:实际生成路径}
+            path_mapping: 路径映射 {原始路径：实际生成路径}
 
         Returns:
-            (是否完成,反馈信息)
+            (是否完成，用户模拟器生成的下一轮反馈消息)
         """
-        if not self._verification_api_url:
-            self.logger.warning("验证用 API URL 未设置,跳过验证")
-            return True, ""
-
         # 获取新增文件内容
         file_contents_str = self._get_new_file_contents(workspace_path, path_mapping)
 
-        # 构建验证提示词
-        if not prompt_template:
-            verification_prompt = (
-                f"请评估以下任务是否完成:\n\n"
-                f"任务:{task_description}\n\n"
-                f"之前每一轮的反馈意见:\n{feedbacks}\n\n"
-                f"Agent 每一轮的输出:\n{agent_outputs}\n\n"
-                f"Agent 创建的文件内容:\n{file_contents_str}\n\n"
-                f"请返回:\n判断:completed/incomplete\n反馈:(如果未完成,给出具体的改进建议)"
-            )
-        else:
-            # 使用 str.replace 逐个替换占位符，避免 .format() 因缺失占位符而报错
-            verification_prompt = prompt_template
-            verification_prompt = verification_prompt.replace(
-                "{task_description}", task_description
-            )
-            verification_prompt = verification_prompt.replace(
-                "{agent_outputs}",
-                json.dumps(agent_outputs, ensure_ascii=False),
-            )
-            verification_prompt = verification_prompt.replace(
-                "{feedbacks}",
-                json.dumps(feedbacks, ensure_ascii=False),
-            )
-            verification_prompt = verification_prompt.replace(
-                "{file_contents}", file_contents_str
-            )
+        # 使用 str.replace 逐个替换占位符，避免 .format() 因缺失占位符而报错
+        user_sim_prompt = self._replace_file_paths_in_text(
+            prompt_template,
+            path_mapping,
+            workspace_path,
+        )
+        user_sim_prompt = user_sim_prompt.replace(
+            "{agent_outputs}",
+            json.dumps(agent_outputs, ensure_ascii=False),
+        )
+        user_sim_prompt = user_sim_prompt.replace(
+            "{feedbacks}",
+            json.dumps(feedbacks, ensure_ascii=False),
+        )
+        user_sim_prompt = user_sim_prompt.replace("{file_contents}", file_contents_str)
 
         try:
             self.logger.info(
-                f"向验证 LLM 发起请求 (prompt 长度={len(verification_prompt)}字符)"
+                f"向用户模拟器 LLM 发起请求 (prompt 长度={len(user_sim_prompt)}字符)"
             )
 
             payload = {
-                "model": self._verification_client_params.get("model", "default"),
-                "messages": [{"role": "user", "content": verification_prompt}],
+                "model": self._user_simulator_client_params.get("model", "default"),
+                "messages": [{"role": "user", "content": user_sim_prompt}],
             }
-            payload.update(self._verification_client_params)
+            payload.update(self._user_simulator_client_params)
 
             headers = {"Content-Type": "application/json"}
-            if self._verification_api_key:
-                headers["Authorization"] = f"Bearer {self._verification_api_key}"
+            if self._user_simulator_api_key:
+                headers["Authorization"] = f"Bearer {self._user_simulator_api_key}"
 
             response = requests.post(
-                self._verification_api_url,
+                self._user_simulator_api_url,
                 headers=headers,
                 json=payload,
-                timeout=self._verification_client_params.get("timeout", 600),
+                timeout=self._user_simulator_client_params.get("read_timeout", 600),
             )
 
             if response.status_code != 200:
                 self.logger.error(
-                    f"验证请求失败:status={response.status_code}, body={response.text[:500]}"
+                    f"用户模拟请求失败:status={response.status_code}, body={response.text[:500]}"
                 )
-                return True, ""
+                raise Exception(f"response error")
 
             result = response.json()
-            verify_output = (
+            user_sim_output = (
                 result.get("choices", [{}])[0].get("message", {}).get("content", "")
             )
 
             self.logger.info(
-                f"验证完成,输出:{verify_output[:100]}..."
-                if verify_output
-                else "验证完成,无输出"
+                f"用户模拟完成，输出:{user_sim_output[:100]}..."
+                if user_sim_output
+                else "用户模拟完成，无输出"
             )
-            return self._parse_verification_result(verify_output)
 
+            return self._parse_user_result(user_sim_output)
         except requests.exceptions.ConnectTimeout:
-            self.logger.exception("验证 LLM 连接超时")
+            self.logger.exception("用户模拟器 LLM 连接超时")
             raise
         except requests.exceptions.ReadTimeout:
-            self.logger.exception("验证 LLM 读取超时")
+            self.logger.exception("用户模拟器 LLM 读取超时")
             raise
         except Exception:
-            self.logger.exception("验证 LLM 调用失败")
+            self.logger.exception("用户模拟器 LLM 调用失败")
             raise
 
-    def _parse_verification_result(self, verify_output: str) -> Tuple[bool, str]:
+    def _parse_user_result(self, user_output: str) -> tuple[bool, str]:
         """
         解析验证结果。支持 JSON 格式解析。
 
@@ -577,87 +558,61 @@ class AgentServingABC(ABC):
         Raises:
             Exception: 当反馈为空或格式不正确时
         """
-        try:
-            # 尝试解析为 JSON
-            # 首先去除可能包裹的 Markdown 代码块
-            json_str = verify_output.strip()
-            if json_str.startswith("```json"):
-                json_str = json_str[7:]
-            if json_str.startswith("```"):
-                json_str = json_str[3:]
-            if json_str.endswith("```"):
-                json_str = json_str[:-3]
-            json_str = json_str.strip()
+        # 尝试解析为 JSON
+        # 首先去除可能包裹的 Markdown 代码块
+        json_str = user_output.strip()
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        if json_str.startswith("```"):
+            json_str = json_str[3:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
+        json_str = json_str.strip()
 
-            data = json.loads(json_str)
+        data = json.loads(json_str)
 
-            judgment = data.get("judgment", "").lower()
-            feedback = data.get("feedback", "")
+        judgment = data.get("judgment", "").lower()
+        feedback = data.get("feedback", "")
 
-            if not feedback:
-                raise ValueError("JSON 中缺失 feedback 字段")
+        if not feedback:
+            raise ValueError("JSON 中缺失 feedback 字段")
 
-            # 判断完成状态 (completed 为 True, 其他为 False)
-            is_completed = judgment == "completed"
+        # 判断完成状态 (completed 为 True, 其他为 False)
+        is_completed = judgment == "completed"
 
-            # 处理 aborted 状态: 如果是 aborted，我们可以通过在 feedback 中标记或通过
-            # 抛出特定异常/返回特殊标志来告知外层中断。
-            # 在目前的 API 签名 (bool, str) 下，aborted 同样返回 False，
-            # 但通过 feedback 让 Agent 知道无需再试。
-            if judgment == "aborted":
-                self.logger.info("验证 LLM 判定任务为 aborted (不可抗力/死循环)")
-                # 我们可以通过在 feedback 头部添加特殊标记，让 _execute_single_task_with_verification 能够识别并直接 break
-                feedback = f"[ABORTED] {feedback}"
+        # 处理 aborted 状态: 如果是 aborted，我们可以通过在 feedback 中标记或通过
+        # 抛出特定异常/返回特殊标志来告知外层中断。
+        # 在目前的 API 签名 (bool, str) 下，aborted 同样返回 False，
+        # 但通过 feedback 让 Agent 知道无需再试。
+        if judgment == "aborted":
+            self.logger.info("验证 LLM 判定任务为 aborted (不可抗力/死循环)")
+            # 我们可以通过在 feedback 头部添加特殊标记，让 _execute_single_task_with_verification 能够识别并直接 break
+            feedback = f"[ABORTED] {feedback}"
 
-            return is_completed, feedback
-
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            self.logger.warning(f"JSON 解析失败，尝试 fallback 到正则解析: {e}")
-            # Fallback to old regex parsing logic
-            verify_output_lower = verify_output.lower()
-            is_completed = (
-                "completed" in verify_output_lower
-                and "incomplete" not in verify_output_lower
-            )
-
-            feedback = ""
-            patterns = [r"反馈[:：]\s*(.+)", r"feedback[:：]\s*(.+)$"]
-            for pattern in patterns:
-                match = re.search(pattern, verify_output, re.IGNORECASE | re.MULTILINE)
-                if match:
-                    feedback = match.group(1).strip()
-                    break
-
-            if not feedback:
-                raise Exception(f"无法解析验证结果: {verify_output[:100]}")
-
-            return is_completed, feedback
+        return is_completed, feedback
 
     def _execute_single_task_with_verification(
         self,
         task_id: str,
-        task_description: str,
         input_files_data: Dict[str, Any],
         input_skills_data: List[str],
-        prompt_template: Optional[str] = None,
+        prompt_template: str,
         max_rounds: int = 1,
     ) -> TrajectoryDict:
         """
-        执行单个任务,支持验证循环。
+        执行单个任务，支持验证循环。
 
         Args:
             task_id: 任务标识符
-            task_description: 任务描述
             input_files_data: 文件内容数据
             input_skills_data: skill 路径列表
-            prompt_template: 验证提示词模板
-            max_rounds: 最大轮数(>1 时启用验证循环)
+            prompt_template: 用户模拟提示词模板（已包含 task_description/milestones/retrieval_points/dialogue_scripts 等信息）
+            max_rounds: 最大轮数 (>1 时启用验证循环)
 
         Returns:
             完整轨迹字典:
             {
                 "task_id": str,
-                "task_description": str,
                 "final_output": str,
                 "total_rounds": int,
                 "is_completed": bool,
@@ -667,7 +622,7 @@ class AgentServingABC(ABC):
                 "metadata": Dict,
             }
         """
-        self.logger.info(f"开始任务:{task_id}, 描述长度={len(task_description)}")
+        self.logger.info(f"开始任务:{task_id}")
 
         # ========== 新增：随机等待，避免大量 agent 同时创建 ==========
         # 随机等待 1-3 秒，分散任务启动时间，减少 agent 创建时的锁竞争
@@ -676,17 +631,13 @@ class AgentServingABC(ABC):
         time.sleep(random_delay)
         # =========================================================
 
-        if not task_description or not task_description.strip():
-            self.logger.error(f"task_description 为空!task_id={task_id}")
-            raise Exception("task_description 为空")
-
         # 状态变量初始化
         workspace_path = self._get_workspace_path(task_id)
 
         for retry_attempt in range(self.max_retries):
             # 在 retry 循环内部初始化所有状态变量，确保每次重试都是从第一轮(原始任务)开始
             round_num = 0
-            feedback = ""
+            conversation = ""
             all_final_outputs: List[str] = []  # 记录每轮的 final_output
             all_feedbacks: List[str] = []  # 记录每轮的历史反馈
             final_output = ""
@@ -695,15 +646,12 @@ class AgentServingABC(ABC):
 
             try:
                 with self._manage_execution_context(
-                    workspace_path, input_files_data, input_skills_data, task_id
+                    workspace_path,
+                    input_files_data,
+                    input_skills_data,
+                    task_id,
                 ) as path_mapping:
                     path_mapping = path_mapping or {}
-                    # 替换 task_description 中的文件路径为实际路径
-                    task_description = user_input = self._replace_file_paths_in_text(
-                        task_description,
-                        path_mapping,
-                        workspace_path,
-                    )
 
                     execution_start_time = datetime.now().strftime(
                         "%Y-%m-%d %H:%M:%S CST"
@@ -713,91 +661,44 @@ class AgentServingABC(ABC):
                         round_num += 1
                         self.logger.info(f"[轮次 {round_num}/{max_rounds}] 执行任务...")
 
-                        # 构建本轮用户输入(第一轮用替换后的 task_description,后续用 feedback)
-                        if round_num == 1:
-                            # user_input 已经在上面替换过了
-                            pass
-                        else:
-                            # 检查 feedback 是否为空
-                            if not feedback or not str(feedback).strip():
-                                self.logger.warning(
-                                    f"[轮次 {round_num}] feedback 为空，无法继续迭代，任务失败"
-                                )
-                                is_completed = False
-                                break
-                            user_input = self._replace_file_paths_in_text(
-                                feedback,
-                                path_mapping,
-                                workspace_path,
-                            )
+                        is_completed, conversation = self._mock_user_with_external_llm(
+                            all_feedbacks,
+                            all_final_outputs,
+                            prompt_template,
+                            workspace_path,
+                            path_mapping,
+                        )
+                        if (
+                            is_completed
+                            or conversation.startswith("[ABORTED]")
+                            or round_num == max_rounds
+                        ):
+                            return {
+                                "task_id": task_id,
+                                "final_output": final_output,
+                                "total_rounds": round_num,
+                                "is_completed": is_completed,
+                                "messages": messages,
+                                "metadata": {
+                                    "max_retries": self.max_retries,
+                                    "retry_attempt": retry_attempt,
+                                },
+                            }
+                        if not conversation:
+                            raise Exception("user feedback is empty")
 
-                        # 发送查询(子类返回格式化后的轨迹字典)
+                        all_feedbacks.append(conversation)
+                        # 发送查询 (子类返回格式化后的轨迹字典)
                         round_result = self._send_query(
                             workspace_path,
-                            user_input,
+                            conversation,
                             current_time=execution_start_time,
                         )
-
-                        if not round_result:
-                            self.logger.warning(f"[轮次 {round_num}] 未找到助手消息")
-                            raise Exception("未找到助手消息")
 
                         # 累积本轮结果
                         messages: list[MessageDict] = round_result.get("messages", [])
                         final_output = round_result.get("final_output", "")
                         all_final_outputs.append(final_output)  # 记录本轮输出
-
-                        # 验证阶段
-                        if max_rounds > 1:
-                            self.logger.info(f"[轮次 {round_num}] 进行验证...")
-                            is_completed, feedback = self._verify_with_external_llm(
-                                task_description,
-                                all_feedbacks,  # 传递所有历史反馈
-                                all_final_outputs,  # 传递所有历史输出
-                                prompt_template,
-                                workspace_path,
-                                path_mapping,
-                            )
-
-                            all_feedbacks.append(feedback)  # 记录本轮反馈
-
-                            if is_completed:
-                                self.logger.info(
-                                    f"[轮次 {round_num}] 验证通过,任务完成"
-                                )
-                                break
-                            else:
-                                # 检查是否为 aborted 状态
-                                if feedback.startswith("[ABORTED]"):
-                                    self.logger.info(
-                                        f"[轮次 {round_num}] 验证判定为 aborted, 立即终止任务: {feedback}"
-                                    )
-                                    # 移除标记后再传递给 Agent，以免 Agent 困惑
-                                    feedback = feedback.replace("[ABORTED] ", "", 1)
-                                    break
-
-                                self.logger.info(
-                                    f"[轮次 {round_num}] 验证未通过,继续迭代:{feedback}"
-                                )
-                        else:
-                            # 单轮模式,直接完成
-                            is_completed = True
-                            break
-
-                    # 返回完整轨迹字典
-                    return {
-                        "task_id": task_id,
-                        "task_description": task_description,
-                        "final_output": final_output,
-                        "total_rounds": round_num,
-                        "is_completed": is_completed,
-                        "messages": messages,
-                        "metadata": {
-                            "max_retries": self.max_retries,
-                            "retry_attempt": retry_attempt,
-                        },
-                    }
-
             except Exception:
                 self.logger.exception(
                     f"[重试 {retry_attempt + 1}/{self.max_retries}] 任务失败"
@@ -805,29 +706,17 @@ class AgentServingABC(ABC):
                 if retry_attempt < self.max_retries - 1:
                     time.sleep(5 * (retry_attempt + 1))  # 指数退避:5s, 10s
                     continue
-                # 最后一次重试失败,返回错误轨迹
-                return {
-                    "task_id": task_id,
-                    "task_description": task_description,
-                    "final_output": "",
-                    "total_rounds": round_num,
-                    "is_completed": False,
-                    "messages": messages,
-                    "metadata": {
-                        "max_retries": self.max_retries,
-                        "retry_attempt": retry_attempt,
-                    },
-                }
 
-        # 理论上不会到这里
         return {
             "task_id": task_id,
-            "task_description": task_description,
             "final_output": "",
             "total_rounds": round_num,
             "is_completed": False,
-            "messages": [],
-            "metadata": {},
+            "messages": messages,
+            "metadata": {
+                "max_retries": self.max_retries,
+                "retry_attempt": retry_attempt,
+            },
         }
 
     # =========================================================================
@@ -839,26 +728,25 @@ class AgentServingABC(ABC):
         user_inputs: List[str],
         input_files_data: List[Dict[str, Any]],
         input_skills_data: List[List[str]],
-        enable_verification: bool = False,
-        verification_prompt_templates: Optional[List[str]] = None,
-        max_verification_rounds: int = 3,
+        max_rounds: int = 1,
     ) -> List[TrajectoryDict]:
         """
         生成轨迹字典列表 (并发执行)。
 
         Args:
-            user_inputs: 用户输入列表
+            user_inputs: 用户输入列表（每行一个任务的初始对话，由用户模拟器生成）
             input_files_data: 文件内容数据列表
             input_skills_data: skill 路径列表
-            enable_verification: 是否启用验证
-            verification_prompt_templates: 验证提示词模板列表（每行一个，支持不同的 milestones）
-            max_verification_rounds: 最大验证轮数
+            max_rounds: 最大对话轮数
+            milestones: 任务规划列表（每行一个，可选）
+            retrieval_points: 预期推理锚点列表（每行一个，可选）
+            user_dialogue_scripts: 完整对话脚本列表（每行一个，可选）
 
         Returns:
-            List[Dict] - 轨迹字典列表
+            List[TrajectoryDict] - 轨迹字典列表
         """
         if not user_inputs:
-            self.logger.warning("user_inputs 为空,直接返回")
+            self.logger.warning("user_inputs 为空，直接返回")
             return []
 
         if len(input_files_data) != len(user_inputs):
@@ -873,55 +761,29 @@ class AgentServingABC(ABC):
                 f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
             )
 
-        if verification_prompt_templates is not None:
-            if len(verification_prompt_templates) != len(user_inputs):
-                raise ValueError(
-                    f"verification_prompt_templates 长度 ({len(verification_prompt_templates)}) "
-                    f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
-                )
-
-        self.logger.info(f"开始处理 {len(user_inputs)} 个请求")
+        self.logger.info(f"开始处理 {len(user_inputs)} 个请求，最大轮数={max_rounds}")
 
         total = len(user_inputs)
         completed = 0
         failed = 0
-        results: List[Dict[str, Any]] = [{} for _ in range(total)]
+        results: List[Optional[TrajectoryDict]] = [None for _ in range(total)]
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
-            for i, question in enumerate(user_inputs):
-                if not question or not question.strip():
-                    self.logger.warning(f"任务 {i}: user_inputs[{i}] 为空字符串,跳过")
-                    results[i] = {
-                        "task_id": f"task-{i}",
-                        "task_description": question,
-                        "final_output": "",
-                        "total_rounds": 0,
-                        "is_completed": False,
-                        "messages": [],
-                        "files_created": [],
-                        "errors": ["user_inputs 为空"],
-                        "metadata": {},
-                    }
-                    continue
-
-                use_max_rounds = max_verification_rounds if enable_verification else 1
-
-                # 获取当前任务的验证模板（如果提供列表，则取对应索引；否则使用单个模板）
-                task_verification_template = None
-                if verification_prompt_templates:
-                    task_verification_template = verification_prompt_templates[i]
-
-                future = executor.submit(
-                    self._execute_single_task_with_verification,
+        def execute_task(i: int) -> Optional[TrajectoryDict]:
+            try:
+                trajectory = self._execute_single_task_with_verification(
                     f"task-{i}",
-                    question,
                     input_files_data[i],
                     input_skills_data[i],
-                    task_verification_template,
-                    use_max_rounds,
+                    user_inputs[i],
+                    max_rounds,
                 )
-                futures[future] = i
+                return trajectory
+            except Exception:
+                self.logger.exception(f"任务 {i} 执行失败")
+                return None
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {executor.submit(execute_task, i): i for i in range(total)}
 
             with tqdm(total=total, desc="处理请求", unit="task") as pbar:
                 for future in as_completed(futures):
@@ -931,20 +793,8 @@ class AgentServingABC(ABC):
                         results[idx] = trajectory
                         completed += 1
                     except Exception:
-                        self.logger.exception(f"[任务 {idx + 1}/{total}] 失败")
-                        results[idx] = {
-                            "task_id": f"task-{idx}",
-                            "task_description": user_inputs[idx],
-                            "final_output": "",
-                            "total_rounds": 0,
-                            "is_completed": False,
-                            "messages": [],
-                            "files_created": [],
-                            "errors": ["执行失败"],
-                            "metadata": {},
-                        }
                         failed += 1
                     pbar.update(1)
 
-        self.logger.info(f"处理完成:成功 {completed}, 失败 {failed}, 总计 {total}")
+        self.logger.info(f"处理完成：成功 {completed}, 失败 {failed}, 总计 {total}")
         return results  # type: ignore
