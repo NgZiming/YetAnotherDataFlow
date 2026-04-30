@@ -86,7 +86,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             user_inputs=user_prompt_templates,
             input_files_data=input_files_data,
             input_skills_data=input_skills_data,
-            max_verification_rounds=self.max_rounds,  # 改为 max_rounds
+            max_rounds=self.max_rounds,
         )
 
         dataframe[output_key] = clean_surrogates(generated_outputs)
