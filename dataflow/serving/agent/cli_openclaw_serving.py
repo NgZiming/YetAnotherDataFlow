@@ -36,7 +36,8 @@ from typing import Optional, Dict, Any, List
 
 from dataflow.logger import get_logger
 
-from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict, MessageDict
+from dataflow.core.agentic import AgentServingABC, TrajectoryDict, MessageDict
+from dataflow.core.agentic.user import UserSimulatorABC
 from dataflow.serving.agent.system_prompt_builder import build_system_prompt
 
 # OpenClaw 基础目录
@@ -376,9 +377,7 @@ class CLIOpenClawServing(AgentServingABC):
 
     def __init__(
         self,
-        user_simulator_api_url: str,
-        user_simulator_api_key: Optional[str] = None,
-        user_simulator_client_params: Optional[Dict[str, Any]] = None,
+        user: UserSimulatorABC,
         agent_id: str = "main",
         model: Optional[str] = None,
         timeout: int = 1200,
@@ -391,6 +390,7 @@ class CLIOpenClawServing(AgentServingABC):
         初始化 CLIOpenClawServing。
 
         Args:
+            user: UserSimulatorABC 实例（必需）
             agent_id: Agent 标识符，默认 "main"
             model: 模型名称，如果 agent 不存在且 create_if_missing=True 则用于创建
             timeout: 单次查询超时时间（秒）
@@ -398,9 +398,6 @@ class CLIOpenClawServing(AgentServingABC):
             max_workers: 并发 worker 数量
             max_retries: 请求失败时的最大重试次数
             skill_base_dir: Skill 基础目录（必需，默认为 /root/clawhub）
-            user_simulator_api_url: 用户模拟器 LLM API URL（必需）
-            user_simulator_api_key: 用户模拟器 LLM API Key（可选）
-            user_simulator_client_params: 用户模拟器 LLM 的其他参数 (model, temperature 等)
         """
         self.logger = get_logger()
 
@@ -414,18 +411,12 @@ class CLIOpenClawServing(AgentServingABC):
             raise ValueError("skill_base_dir 不能为空，必须指定 Skill 基础目录路径")
         self.skill_base_dir = str(skill_base_dir).strip()
 
+        # 调用父类初始化，传入 user 实例
         super().__init__(
-            user_simulator_api_url=user_simulator_api_url,
-            user_simulator_api_key=user_simulator_api_key,
-            user_simulator_client_params=user_simulator_client_params,
+            user=user,
             max_workers=max_workers,
             max_retries=max_retries,
-            timeout=timeout,
         )
-
-        self._initialized = False
-        # 不再预先创建 worker agents，改为动态管理
-        # self._worker_agents: List[str] = []
 
         self.logger.info(
             f"CLIOpenClawServing 初始化：agent_id={agent_id}, model={self.model}"
@@ -832,6 +823,7 @@ class CLIOpenClawServing(AgentServingABC):
 
 
 def create_openclaw_serving(
+    user: UserSimulatorABC,
     agent_id: str = "main",
     model: Optional[str] = None,
     max_workers: int = 4,
@@ -840,8 +832,17 @@ def create_openclaw_serving(
 ) -> CLIOpenClawServing:
     """
     创建 CLIOpenClawServing 实例的工厂函数。
+
+    Args:
+        user: UserSimulatorABC 实例（必需）
+        agent_id: Agent 标识符，默认 "main"
+        model: 模型名称
+        max_workers: 最大并发数
+        max_retries: 最大重试次数
+        **kwargs: 其他参数（timeout, create_if_missing, skill_base_dir 等）
     """
     return CLIOpenClawServing(
+        user=user,
         agent_id=agent_id,
         model=model,
         max_workers=max_workers,
