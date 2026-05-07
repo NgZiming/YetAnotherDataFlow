@@ -1,18 +1,17 @@
-import json
-import logging
 import asyncio
+
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+from dataflow.logger import get_logger
 from dataflow.core.agentic import (
     LLMClientABC,
     StepSchema,
     UserStage,
     UserStep,
-    StepResponse,
 )
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger()
 
 # --- Perception Stage Models (Pydantic) ---
 

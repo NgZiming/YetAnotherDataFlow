@@ -1,16 +1,14 @@
 from typing import Any, Dict, List, Optional
-import logging
 from pydantic import BaseModel, Field
 from dataflow.core.agentic import (
     LLMClientABC,
     StepSchema,
     UserStage,
     UserStep,
-    StepResponse,
 )
+from dataflow.logger import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger()
 
 # --- Understanding Stage Models (Pydantic) ---
 
@@ -176,7 +174,11 @@ class UnderstandingStage(UserStage):
             UserStep(
                 name="TaskSynthesizer",
                 schema=StepSchema(
-                    input_keys=["milestone_status", "progress_assessment", "dialogue_context"],
+                    input_keys=[
+                        "milestone_status",
+                        "progress_assessment",
+                        "dialogue_context",
+                    ],
                     output_key="task_state",
                     output_type=TaskState,
                     prompt_template="""你是一个任务状态合成器。整合评估结果，生成结构化的任务状态。

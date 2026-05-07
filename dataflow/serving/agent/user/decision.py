@@ -1,14 +1,13 @@
 import asyncio
-import logging
 import re
+
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from dataflow.core.agentic import LLMClientABC, StepSchema, UserStage, UserStep
+from dataflow.logger import get_logger
 
-logger = logging.getLogger(__name__)
-
-
+logger = get_logger()
 # --- Decision Stage Models (Pydantic) ---
 
 
@@ -35,20 +34,17 @@ class PersonaContext(BaseModel):
     persona_traits: List[str] = Field(default_factory=list, description="用户特征列表")
     tone: str = Field(
         ...,
-        description="语气（必须严格匹配）",
-        pattern="^(正式|随意|友好|严肃|幽默|其他)$",
+        description="语气风格（如：正式、随意、友好、严肃、幽默、专业且克制等）",
         strip_whitespace=True,
     )
     language_style: str = Field(
         ...,
-        description="语言风格（必须严格匹配）",
-        pattern="^(简洁|详细|技术性|通俗化)$",
+        description="语言风格（如：简洁、详细、技术性、通俗化等）",
         strip_whitespace=True,
     )
     response_length: str = Field(
         ...,
-        description="响应长度（必须严格匹配）",
-        pattern="^(short|medium|long)$",
+        description="响应长度建议（如：short, medium, long）",
         strip_whitespace=True,
     )
     persona_context: str = Field(
@@ -162,11 +158,24 @@ class DecisionStage(UserStage):
 - 必须包含字段：
 {{
   "persona_traits": ["特征 1", "特征 2", ...],
-  "tone": "正式 | 随意 | 友好 | 严肃 | 幽默 | 其他",
-  "language_style": "简洁 | 详细 | 技术性 | 通俗化",
-  "response_length": "short|medium|long",
+  "tone": "语气风格描述（如：正式、随意、友好、严肃、幽默、专业且克制、温和等，可根据人设自由描述）",
+  "language_style": "语言风格描述（如：简洁、详细、技术性、通俗化、学术化、口语化等，可根据人设自由描述）",
+  "response_length": "响应长度建议（如：short, medium, long，或具体字数如 200 字）",
   "persona_context": "人设适配后的对话风格描述，100-200 字"
-}}""",
+}}
+
+## 重要提示
+- **tone 字段**：根据人设自由描述语气风格
+  - 如果人设是"专业且克制"，可以写 "专业且克制"、"正式而严谨"、"专业"等
+  - 如果人设是"活泼开朗"，可以写 "活泼"、"轻松"、"幽默风趣"等
+  - **不要**局限于固定选项，真实反映人设特点
+- **language_style 字段**：根据人设自由描述语言风格
+  - 可以写 "简洁明了"、"详细深入"、"技术性强"、"通俗易懂"、"学术化"等
+- **response_length 字段**：建议响应长度
+  - 可以写 "short"、"medium"、"long"，或具体如 "200 字左右"、"简短"、"详细"等
+- **persona_traits**：提取人设的关键特征（3-5 个）
+- **persona_context**：综合描述人设适配后的对话风格
+""",
                 ),
                 llm_config=self.llm_config,
             ),

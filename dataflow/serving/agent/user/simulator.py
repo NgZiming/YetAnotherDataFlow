@@ -1,14 +1,13 @@
-import logging
-
 from typing import Any, Dict, Optional
 
 from dataflow.core.agentic import UserSimulatorABC, LLMClientABC, SimulationResult
+from dataflow.logger import get_logger
 
 from .perception import PerceptionStage
 from .understanding import UnderstandingStage
 from .decision import DecisionStage
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class UserSimulator(UserSimulatorABC):
