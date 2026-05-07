@@ -91,10 +91,48 @@ class DecisionStage(UserStage):
 - 对话脚本：{dialogue_scripts}
 - 对话上下文：{dialogue_context}
 
-## 重要：判断是否为首次对话
-**首次对话检测**：
-- 如果 `dialogue_context.has_history == false`：这是首次对话，需要用户主动提问启动任务
-- 如果 `dialogue_context.has_history == true`：这是后续对话，根据进展选择策略
+## 输入字段说明
+- **task_state**: 任务状态总结，包含：
+  - **current_milestone**: 当前里程碑（如 "stage_1"）
+  - **is_completed**: 任务是否已完成
+  - **next_objective**: 下一步目标
+  - **reasoning**: 推理过程
+
+- **dialogue_scripts**: 对话脚本列表，包含每个阶段的对话设计（可能为空，当前版本不使用）
+
+- **dialogue_context**: 对话上下文，包含：
+  - **user_intent**: 用户意图
+  - **emotional_tone**: 用户情感倾向
+  - **key_questions**: 用户提出的问题
+  - **has_history**: 是否有历史对话（**关键：用于判断首次对话**）
+
+## 输出字段说明
+- **strategy_type**: 策略类型（必须从以下值中选择一个）
+  - **提问**: 首次对话，用户提出问题启动任务
+  - **提供反馈**: 对 Agent 的回答提供正面/建设性反馈
+  - **要求澄清**: Agent 回答不明确，需要进一步解释
+  - **表达不满**: Agent 回答有误或质量差
+  - **表示满意**: 对 Agent 的回答满意
+  - **催促**: 后续对话中 Agent 响应缓慢
+  - **其他**: 不属于上述分类的情况
+
+- **strategy_rationale**: 选择该策略的原因（50-200 字）
+  - 说明为什么选择这个策略
+  - 首次对话时说明"用户需要提出初始问题，启动探索任务"
+
+- **dialogue_goal**: 本次对话的目标（1-2 句话）
+  - 明确本次对话希望达到什么目的
+
+- **suggested_approach**: 建议的对话方式（1-2 句话）
+  - 如何以最佳方式表达这个策略
+
+- **strategy_details**: 详细的策略描述（50-300 字）
+  - 整合所有信息，全面描述策略
+
+## 任务
+1. **判断是否首次对话**: 检查 dialogue_context.has_history
+   - **false**: 首次对话，必须选择"提问"
+   - **true**: 后续对话，根据进展选择策略
 
 ### 场景 A：首次对话（has_history == false）
 **策略选择**：必须选择"提问"
@@ -109,14 +147,6 @@ class DecisionStage(UserStage):
 - 如果 Agent 回答不完整 → "要求澄清"或"提供反馈"
 - 如果 Agent 回答有误 → "表达不满"
 
-## 任务
-1. **判断是否首次对话**: 检查 dialogue_context.has_history
-2. **分析任务状态**: 理解当前任务的进展和需求
-3. **选择对话策略**: 
-   - 首次对话 → "提问"
-   - 后续对话 → 根据进展选择（催促/满意/澄清/不满）
-4. **制定下一步**: 确定下一步对话的目标和方式
-
 ## 输出要求（非常重要！）
 - **只输出纯 JSON，不要 Markdown 代码块（不要 ```json ... ```）**
 - **不要输出任何解释文字、前言、后语**
@@ -125,9 +155,9 @@ class DecisionStage(UserStage):
 {{
   "strategy_type": "提问",
   "strategy_rationale": "这是首次对话，用户需要提出初始问题来启动探索任务。",
-  "dialogue_goal": "获取关于作曲家 X 的基本信息和音乐风格概述",
+  "dialogue_goal": "获取关于 composer X 的基本信息和音乐风格概述",
   "suggested_approach": "以开放式问题开始，邀请 Agent 分享相关知识",
-  "strategy_details": "用户希望了解作曲家 X 的背景、代表作品和音乐风格特点。这是一个探索性任务，需要通过提问引导 Agent 提供全面的信息。首次对话应该以友好、开放的方式开始，表达对主题的興趣，并明确希望了解的具体方面。"
+  "strategy_details": "用户希望了解作曲家 X 的背景、代表作品和音乐风格特点。这是一个探索性任务，需要通过提问引导 Agent 提供全面的信息。首次对话应该以友好、开放的方式开始，表达对主题的兴趣，并明确希望了解的具体方面."
 }}
 
 ## 重要提示
@@ -151,6 +181,36 @@ class DecisionStage(UserStage):
 - 任务状态：{task_state}
 - 用户人设：{user_persona}
 
+## 输入字段说明
+- **task_state**: 任务状态总结，包含：
+  - **current_milestone**: 当前里程碑（如 "stage_1"）
+  - **is_completed**: 任务是否已完成
+  - **next_objective**: 下一步目标
+
+- **user_persona**: 用户人设描述，包含用户的性格、语气、偏好等特征
+
+## 输出字段说明
+- **persona_traits**: 用户特征列表（3-5 个）
+  - 从 user_persona 中提取关键特征
+  - 如：["关注社会热点", "有正义感", "缺乏法律知识"]
+
+- **tone**: 语气风格描述（自由描述，不限制枚举值）
+  - 根据人设自由描述语气风格
+  - 如："专业且克制"、"正式而严谨"、"活泼"、"轻松"、"幽默风趣"等
+  - **不要**局限于固定选项，真实反映人设特点
+
+- **language_style**: 语言风格描述（自由描述，不限制枚举值）
+  - 根据人设自由描述语言风格
+  - 如："简洁明了"、"详细深入"、"技术性强"、"通俗易懂"、"学术化"、"口语化"等
+
+- **response_length**: 响应长度建议（自由描述）
+  - 可以写 "short"、"medium"、"long"
+  - 或具体如 "200 字左右"、"简短"、"详细"等
+
+- **persona_context**: 人设适配后的对话风格描述（50-300 字）
+  - 综合描述人设适配后的对话风格
+  - 整合 persona_traits、tone、language_style
+
 ## 任务
 1. **理解人设特征**: 分析用户人设的关键特征（性格、语气、偏好等）
 2. **适配对话风格**: 将人设特征转化为具体的对话风格
@@ -166,7 +226,7 @@ class DecisionStage(UserStage):
   "tone": "专业且克制",
   "language_style": "通俗易懂但带有质疑",
   "response_length": "medium",
-  "persona_context": "用户是一位关注社会正义的普通市民，语气专业但不失温和，喜欢用具体案例来理解问题，对法律细节不太熟悉但希望获得清晰易懂的解释。"
+  "persona_context": "用户是一位关注社会正义的普通市民，语气专业但不失温和，喜欢用具体案例来理解问题，对法律细节不太熟悉但希望获得清晰易懂的解释."
 }}
 
 ## 重要提示
@@ -210,69 +270,122 @@ class DecisionStage(UserStage):
 - 文件上下文：{file_context}
 - 里程碑列表：{milestones}
 
-## 重要：判断是否为首次对话
-**首次对话检测**：
-- 如果 dialogue_context.has_history == false：这是首次对话
-- 如果 dialogue_context.has_history == true：这是后续对话
+## 输入字段说明
+- **dialogue_strategy**: 对话策略，包含：
+  - **strategy_type**: 策略类型（提问/提供反馈/要求澄清/表达不满/表示满意/催促/其他）
+  - **strategy_rationale**: 选择该策略的原因
+  - **dialogue_goal**: 本次对话的目标
+  - **suggested_approach**: 建议的对话方式
+  - **strategy_details**: 详细的策略描述
+
+- **persona_context**: 人设适配结果，包含：
+  - **persona_traits**: 用户特征列表
+  - **tone**: 语气风格
+  - **language_style**: 语言风格
+  - **response_length**: 响应长度建议
+  - **persona_context**: 综合描述
+
+- **task_state**: 任务状态，包含：
+  - **current_milestone**: 当前里程碑
+  - **is_completed**: 任务是否已完成
+  - **next_objective**: 下一步目标
+
+- **dialogue_context**: 对话上下文，包含：
+  - **user_intent**: 用户意图
+  - **emotional_tone**: 用户情感倾向
+  - **key_questions**: 用户提出的问题
+  - **has_history**: 是否有历史对话（**关键：用于判断首次对话**）
+
+- **question**: 用户的初始问题/任务描述
+
+- **file_context**: 文件总结，说明任务相关的代码/配置/数据结构
+
+- **milestones**: 里程碑列表，包含每个里程碑的 goal 和 success_criteria
+
+## 输出字段说明
+- **judgment**: 任务状态判断（必须从以下值中选择一个）
+  - **completed**: 任务已完成，所有里程碑都满足
+  - **in_progress**: 任务仍在进行中
+  - **aborted**: 任务无法继续或已放弃
+
+- **feedback**: 具体的用户反馈内容（50-500 字）
+  - **首次对话**: 清晰的初始问题，启动任务
+  - **后续对话**: 基于历史对话的反馈，推动任务进展
+  - 体现用户人设和当前对话策略
+
+- **reasoning**: 判断依据（20-200 字）
+  - 说明为什么是这个 judgment
+  - 首次对话时说明"首次对话，提出初始问题，启动探索任务"
+
+## 任务
+1. **判断是否首次对话**: 检查 dialogue_context.has_history
+   - **false**: 首次对话，生成初始问题
+   - **true**: 后续对话，生成反馈
 
 ### 场景 A：首次对话（has_history == false）
-任务：生成初始用户问题，启动对话
+**任务**：生成初始用户问题，启动对话
 1. **理解任务目标**: 从 question 中理解用户想要完成什么
 2. **分析可用资源**: 查看 file_context 中有哪些文件可用
 3. **参考里程碑**: 了解任务需要完成的关键步骤
-4. **生成初始问题**: 
+4. **生成初始问题**:
    - 提出一个清晰、具体的问题
    - 表达对任务的期望
    - 可以提及关心的具体方面
 5. **保持人设**: 根据 persona_context 调整语气和风格
 
-首次对话输出示例：
+**首次对话输出示例**：
 {{
   "judgment": "in_progress",
   "feedback": "你好！我想了解 composer X 的音乐风格和发展历程。我注意到有一些相关的文档和代码文件，希望你能帮我梳理一下这位作曲家的背景信息、代表作品，以及他在音乐领域的影响。特别是想了解他的创作风格有什么特点，以及他的作品对后来的音乐家有什么影响。",
-  "reasoning": "首次对话，提出初始问题，启动探索任务。"
+  "reasoning": "首次对话，提出初始问题，启动探索任务."
 }}
 
 ### 场景 B：后续对话（has_history == true）
-任务：基于历史对话和 Agent 的回应，生成新的用户反馈
+**任务**：基于历史对话和 Agent 的回应，生成新的用户反馈
 1. **理解用户意图**: 从 dialogue_context.user_intent 中理解用户的核心需求
 2. **评估 Agent 回应**: 根据 task_state 判断 Agent 是否回答了用户的问题
-3. **生成反馈**: 
+3. **生成反馈**:
    - 如果 Agent 回答满意：表达感谢，提出更深入的问题
    - 如果 Agent 回答不完整：指出缺失的部分，请求补充
    - 如果 Agent 回答有误：礼貌地纠正，提供正确方向
 4. **保持人设**: 根据 persona_context 调整语气和风格
 5. **推动进展**: 确保反馈能推动任务向里程碑目标前进
 
-后续对话输出示例（满意）：
+**后续对话输出示例（满意）**：
 {{
   "judgment": "in_progress",
   "feedback": "谢谢你的详细解答！关于 composer X 的背景信息很清楚了。不过我还想了解一些更具体的内容：他的代表作品中，哪几首最能体现他的音乐风格？能否推荐一些适合入门聆听的作品？",
   "reasoning": "用户对初步回答满意，希望获得更具体的作品推荐。"
 }}
 
-后续对话输出示例（需要补充）：
+**后续对话输出示例（需要补充）**：
 {{
   "judgment": "in_progress",
   "feedback": "你提到的这些信息很有帮助，但我感觉还缺少一些关键内容。特别是关于 composer X 的音乐风格分析不够详细，能否具体说明他的作品中使用了哪些独特的作曲技巧或音乐元素？",
-  "reasoning": "Agent 的回答不够详细，需要补充更具体的风格分析。"
+  "reasoning": "Agent 的回答不够详细，需要补充更具体的风格分析."
 }}
 
-## 输出要求
-- 格式：严格的 JSON 格式（不要 Markdown）
-- 必须包含以下字段：
-  - judgment: completed|in_progress|aborted
-  - feedback: 具体的用户反馈内容，100-300 字
-  - reasoning: 判断依据，50-100 字
+## 输出要求（非常重要！）
+- **只输出纯 JSON，不要 Markdown 代码块（不要 ```json ... ```）**
+- **不要输出任何解释文字、前言、后语**
+- **必须严格包含以下字段，不能缺少**
+- 输出示例（直接复制这个格式，替换值）：
+{{
+  "judgment": "in_progress",
+  "feedback": "你好！我想了解 composer X 的音乐风格和发展历程。我注意到有一些相关的文档和代码文件，希望你能帮我梳理一下这位作曲家的背景信息、代表作品，以及他在音乐领域的影响。特别是想了解他的创作风格有什么特点，以及他的作品对后来的音乐家有什么影响。",
+  "reasoning": "首次对话，提出初始问题，启动探索任务."
+}}
 
 ## 重要提示
 - **首次对话**: feedback 应该是清晰的初始问题，启动任务
 - **后续对话**: feedback 应该基于历史对话，推动任务进展
-- judgment 为 "completed" 时：任务已满足所有要求，所有里程碑完成
-- judgment 为 "in_progress" 时：任务仍在进行中，需要继续对话
-- judgment 为 "aborted" 时：任务无法继续或已放弃
-- feedback 要体现用户人设和当前对话策略
-- 首次对话时，feedback 应该是一个问题或请求，而不是陈述""",
+- **judgment 为 "completed"** 时：任务已满足所有要求，所有里程碑完成
+- **judgment 为 "in_progress"** 时：任务仍在进行中，需要继续对话
+- **judgment 为 "aborted"** 时：任务无法继续或已放弃
+- **feedback 要体现用户人设和当前对话策略**
+- **首次对话时，feedback 应该是一个问题或请求，而不是陈述**
+- **确保 JSON 格式正确**：所有字符串用双引号，不要用单引号
+""",
                 ),
                 llm_config=self.llm_config,
             ),

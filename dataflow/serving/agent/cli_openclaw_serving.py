@@ -385,6 +385,8 @@ class CLIOpenClawServing(AgentServingABC):
         max_workers: int = 4,
         max_retries: int = 3,
         skill_base_dir: str = "/root/clawhub",
+        identity_content: Optional[str] = None,
+        user_content: Optional[str] = None,
     ) -> None:
         """
         初始化 CLIOpenClawServing。
@@ -398,6 +400,8 @@ class CLIOpenClawServing(AgentServingABC):
             max_workers: 并发 worker 数量
             max_retries: 请求失败时的最大重试次数
             skill_base_dir: Skill 基础目录（必需，默认为 /root/clawhub）
+            identity_content: 要写入 IDENTITY.md 的内容
+            user_content: 要写入 USER.md 的内容
         """
         self.logger = get_logger()
 
@@ -405,6 +409,8 @@ class CLIOpenClawServing(AgentServingABC):
         self.model: str = model or "vllm//data/share/models/Qwen3.5-122B-A10B/"
         self.timeout = timeout
         self.create_if_missing = create_if_missing
+        self.identity_content = identity_content
+        self.user_content = user_content
 
         # skill_base_dir 必须是有效的非空字符串
         if not skill_base_dir or not str(skill_base_dir).strip():
@@ -571,6 +577,16 @@ class CLIOpenClawServing(AgentServingABC):
             input_skills_data,
             self.skill_base_dir,
         )
+
+        # 新增：将 identity 和 user 内容写入 workspace
+        if self.identity_content:
+            (workspace_path / "IDENTITY.md").write_text(
+                self.identity_content, encoding="utf-8"
+            )
+            self.logger.debug(f"写入 IDENTITY.md 到 {workspace_path}")
+        if self.user_content:
+            (workspace_path / "USER.md").write_text(self.user_content, encoding="utf-8")
+            self.logger.debug(f"写入 USER.md 到 {workspace_path}")
 
         # 执行 /new 创建新 session
         new_cmd = [
