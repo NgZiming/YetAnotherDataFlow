@@ -55,7 +55,7 @@ class TaskDefinition(TypedDict):
     任务定义的结构化契约，用于传递完整的任务信息到 Serving 层。
 
     包含：
-    - 核心引导数据：question, milestones, user_dialogue_scripts
+    - 核心引导数据：question, milestones, dialogue_scripts
     - 资源定义：input_files_data, input_skills_data
     - 执行控制：max_rounds, global_context
     """
@@ -63,7 +63,7 @@ class TaskDefinition(TypedDict):
     task_id: str
     question: str
     milestones: List[Dict[str, Any]]
-    user_dialogue_scripts: List[Dict[str, Any]]
+    dialogue_scripts: List[Dict[str, Any]]
     files_contents: Dict[str, Any]
     skills: List[str]
     max_rounds: int
@@ -440,7 +440,7 @@ class AgentServingABC(ABC):
                     input_skills_data=task["skills"],
                     question=task["question"],
                     milestones=task["milestones"],
-                    user_dialogue_scripts=task["user_dialogue_scripts"],
+                    dialogue_scripts=task["dialogue_scripts"],
                     max_rounds=task["max_rounds"],
                 )
             except Exception as e:
@@ -462,7 +462,7 @@ class AgentServingABC(ABC):
         input_skills_data: List[str],
         question: str,
         milestones: List[Dict[str, Any]],
-        user_dialogue_scripts: List[Dict[str, Any]],
+        dialogue_scripts: List[Dict[str, Any]],
         max_rounds: int = 1,
     ) -> TrajectoryDict:
         """
@@ -474,7 +474,7 @@ class AgentServingABC(ABC):
             input_skills_data: skill 路径列表
             question: 任务问题
             milestones: 合并后的里程碑列表（包含 expected_retrieval_point）
-            user_dialogue_scripts: 对话脚本列表
+            dialogue_scripts: 对话脚本列表
             max_rounds: 最大轮数 (>1 时启用验证循环)
 
         Returns:
@@ -520,7 +520,7 @@ class AgentServingABC(ABC):
                         raw_data = {
                             "question": question,
                             "milestones": milestones,
-                            "user_dialogue_scripts": user_dialogue_scripts,
+                            "dialogue_scripts": dialogue_scripts,
                             "feedbacks": all_feedbacks,
                             "agent_outputs": all_final_outputs,
                             "file_contents": self._get_new_file_contents(

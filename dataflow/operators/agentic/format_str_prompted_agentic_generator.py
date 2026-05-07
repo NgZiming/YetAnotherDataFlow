@@ -67,7 +67,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         input_question_key: str,
         input_milestones_key: str,
         input_retrieval_points_key: str,
-        input_user_dialogue_scripts_key: str,
+        input_dialogue_scripts_key: str,
         output_key: str = "generated_content",
     ) -> pd.DataFrame:
         self.logger.info(f"Loading, number of rows: {len(dataframe)}")
@@ -89,7 +89,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 # 核心引导数据（合并后的 milestones）
                 "question": row[input_question_key],
                 "milestones": merged_milestones,
-                "user_dialogue_scripts": row[input_user_dialogue_scripts_key],
+                "dialogue_scripts": row[input_dialogue_scripts_key],
                 # 资源定义
                 "files_contents": row[input_files_data_key],
                 "skills": row[input_skills_key],
@@ -114,7 +114,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
         input_question_key: str,
         input_milestones_key: str,
         input_retrieval_points_key: str,
-        input_user_dialogue_scripts_key: str,
+        input_dialogue_scripts_key: str,
         output_key: str = "generated_content",
     ):
         """
@@ -132,7 +132,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
             input_question_key,
             input_milestones_key,
             input_retrieval_points_key,
-            input_user_dialogue_scripts_key,
+            input_dialogue_scripts_key,
             output_key,
         )
 
@@ -146,7 +146,7 @@ class FormatStrPromptedAgenticGenerator(OperatorABC):
                 "基于结构化任务定义的 Agent 对话生成算子（用户模拟器版本）。\n\n"
                 "核心设计：\n"
                 "- 自动将 milestones 与 retrieval_points 按 stage 合并，形成完整的任务引导信息\n"
-                "- 支持动态 Persona：模拟用户人格随对话阶段在 user_dialogue_scripts 中自动切换\n"
+                "- 支持动态 Persona：模拟用户人格随对话阶段在 dialogue_scripts 中自动切换\n"
                 "- 输出标准的 TrajectoryDict 对话轨迹\n\n"
                 "输入参数 (均为必需)：\n"
                 "- input_files_data_key：文件内容数据的列名\n"
