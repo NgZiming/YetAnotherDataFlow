@@ -379,7 +379,7 @@ class AgentServingABC(ABC):
             "TOOLS.md",
             "USER.md",
         }
-        EXCLUDED_DIRS = {"skills", "sessions", "agent"}
+        EXCLUDED_DIRS = {"skills", "sessions", "agent", ".openclaw"}
 
         # 从 path_mapping 中提取实际生成的文件名集合
         initial_files_set = set(Path(p).name for p in path_mapping.values())
