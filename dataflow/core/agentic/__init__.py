@@ -1,5 +1,4 @@
 from .user import (
-    ContractViolationError,
     LLMClientABC,
     SimulationResult,
     StepResponse,
@@ -12,7 +11,6 @@ from .serving import TrajectoryDict, MessageDict, AgentServingABC
 
 __all__ = [
     "AgentServingABC",
-    "ContractViolationError",
     "LLMClientABC",
     "MessageDict",
     "SimulationResult",

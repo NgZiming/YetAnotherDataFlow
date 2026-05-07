@@ -14,25 +14,16 @@ logger = logging.getLogger(__name__)
 class UserSimulator(UserSimulatorABC):
     def __init__(
         self,
-        prompts: Dict[str, Dict[str, str]],
         llm_client: LLMClientABC,
         llm_config: Optional[Dict[str, Any]] = None,
     ):
         self.llm_config = llm_config or {}
         self.llm_client = llm_client
 
-        self.perception_stage = PerceptionStage(
-            prompts.get("perception", {}),
-            self.llm_config,
-        )
-        self.understanding_stage = UnderstandingStage(
-            prompts.get("understanding", {}),
-            self.llm_config,
-        )
-        self.decision_stage = DecisionStage(
-            prompts.get("decision", {}),
-            self.llm_config,
-        )
+        # ✅ Stage 自包含 prompts，无需外部传入
+        self.perception_stage = PerceptionStage(self.llm_config)
+        self.understanding_stage = UnderstandingStage(self.llm_config)
+        self.decision_stage = DecisionStage(self.llm_config)
 
     async def run(
         self,
@@ -70,7 +61,6 @@ class UserSimulator(UserSimulatorABC):
             global_context,
             self.llm_client,
         )
-        # DecisionStage 已经将结果存储到 data_pool，这里直接获取
 
         # 组装最终结果
         return {
