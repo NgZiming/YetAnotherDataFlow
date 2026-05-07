@@ -47,7 +47,7 @@ class StepResponse(TypedDict):
 
 
 class SimulationResult(TypedDict):
-    final_response: str
+    final_response: dict[str, str]
     global_context: Dict[str, Any]
 
 

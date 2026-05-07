@@ -19,7 +19,7 @@ from tqdm import tqdm
 from dataflow.logger import get_logger
 from dataflow.utils.generate_binary_files import generate_file
 
-from .user import UserSimulatorABC
+from .user import UserSimulatorABC, SimulationResult
 
 
 class MessageDict(TypedDict, total=True):
@@ -536,31 +536,18 @@ class AgentServingABC(ABC):
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
 
-                        sim_result = loop.run_until_complete(self.user.run(raw_data))
-                        final_res = sim_result.get("final_response", "")
+                        sim_result: SimulationResult = loop.run_until_complete(
+                            self.user.run(raw_data)
+                        )
+                        final_res = sim_result["final_response"]
 
-                        # 解析判定结果
-                        is_completed = False
-                        conversation = final_res
-                        try:
-                            if isinstance(final_res, str) and "{" in final_res:
-                                json_str = final_res.strip()
-                                if json_str.startswith("```json"):
-                                    json_str = json_str[7:]
-                                if json_str.endswith("```"):
-                                    json_str = json_str[:-3]
-                                data = json.loads(json_str.strip())
-                                judgment = data.get("judgment", "").lower()
-                                conversation = data.get("feedback", final_res)
-                                is_completed = judgment == "completed"
-                                if judgment == "aborted":
-                                    conversation = f"[ABORTED] {conversation}"
-                        except Exception:
-                            pass
+                        judgment = final_res.get("judgment", "aborted")
+                        is_completed = judgment == "completed"
+                        conversation = final_res.get("feedback", "")
 
                         if (
                             is_completed
-                            or conversation.startswith("[ABORTED]")
+                            or judgment == "aborted"
                             or round_num == max_rounds
                         ):
                             return {
