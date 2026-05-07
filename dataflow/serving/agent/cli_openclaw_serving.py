@@ -385,8 +385,8 @@ class CLIOpenClawServing(AgentServingABC):
         max_workers: int = 4,
         max_retries: int = 3,
         skill_base_dir: str = "/root/clawhub",
-        identity_content: Optional[str] = None,
-        user_content: Optional[str] = None,
+        identity_md_content: Optional[str] = None,
+        user_md_content: Optional[str] = None,
     ) -> None:
         """
         初始化 CLIOpenClawServing。
@@ -409,8 +409,8 @@ class CLIOpenClawServing(AgentServingABC):
         self.model: str = model or "vllm//data/share/models/Qwen3.5-122B-A10B/"
         self.timeout = timeout
         self.create_if_missing = create_if_missing
-        self.identity_content = identity_content
-        self.user_content = user_content
+        self.identity_content = identity_md_content
+        self.user_content = user_md_content
 
         # skill_base_dir 必须是有效的非空字符串
         if not skill_base_dir or not str(skill_base_dir).strip():
