@@ -3,10 +3,13 @@ import logging
 from dataflow.core.agentic import (
     LLMClientABC,
     StepSchema,
-    UnderstandingResult,
     UserStage,
     UserStep,
-    StepResponse,
+)
+from dataflow.core.agentic.user import (
+    MilestoneStatus,
+    ProgressAssessment,
+    TaskStatePydantic,
 )
 
 logger = logging.getLogger(__name__)
@@ -15,7 +18,7 @@ logger = logging.getLogger(__name__)
 class UnderstandingStage(UserStage):
     """
     Understanding Stage: Analyzes current task state.
-    Contract-driven flow.
+    Contract-driven flow with pre-check dependency validation and Pydantic models.
     """
 
     def __init__(
@@ -30,7 +33,15 @@ class UnderstandingStage(UserStage):
                 name="MilestoneMatcher",
                 prompt_template=prompts["milestone_matcher"],
                 schema=StepSchema(
-                    input_keys=["context", "milestones"], output_key="milestone_status"
+                    input_keys=[
+                        "file_context",
+                        "agent_context",
+                        "dialogue_context",
+                        "milestones",
+                        "question",
+                    ],
+                    output_key="milestone_status",
+                    output_type=MilestoneStatus,
                 ),
                 llm_config=self.llm_config,
             ),
@@ -38,8 +49,14 @@ class UnderstandingStage(UserStage):
                 name="ProgressEvaluator",
                 prompt_template=prompts["progress_evaluator"],
                 schema=StepSchema(
-                    input_keys=["milestone_status", "context"],
+                    input_keys=[
+                        "milestone_status",
+                        "file_context",
+                        "agent_context",
+                        "dialogue_context",
+                    ],
                     output_key="progress_assessment",
+                    output_type=ProgressAssessment,
                 ),
                 llm_config=self.llm_config,
             ),
@@ -49,6 +66,7 @@ class UnderstandingStage(UserStage):
                 schema=StepSchema(
                     input_keys=["milestone_status", "progress_assessment"],
                     output_key="task_state",
+                    output_type=TaskStatePydantic,
                 ),
                 llm_config=self.llm_config,
             ),
@@ -59,28 +77,18 @@ class UnderstandingStage(UserStage):
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
         llm_client: LLMClientABC,
-    ) -> UnderstandingResult:
+    ):
         logger.info("Entering Understanding Stage...")
 
-        local_pool = data_pool.copy()
-        raw_results: dict[str, StepResponse] = {}
+        # ========== 预先检查所有步骤的输入依赖 ==========
+        self._check_step_dependencies(self.steps, data_pool, "UnderstandingStage")
 
+        # ========== 执行步骤 ==========
         for step in self.steps:
-            res = await step.execute(local_pool, global_context, llm_client)
-            raw_results[step.name] = res
+            # Execute the step
+            res = await step.execute(data_pool, global_context, llm_client)
+            data_pool[step.schema.output_key] = res["json_resp"]
 
-            val = (
-                res.get(step.schema.output_key, res.get("raw_text", ""))
-                if "error" not in res
-                else res.get("raw_text", "")
-            )
-            local_pool[step.schema.output_key] = val
-
-        return {
-            "task_state": local_pool.get("task_state", {}),
-            "intermediate_understanding": {
-                "milestone_status": local_pool.get("milestone_status", ""),
-                "progress_assessment": local_pool.get("progress_assessment", ""),
-            },
-            "raw_responses": raw_results,
-        }
+        logger.info(f"MilestoneStatus: {data_pool['milestone_status']}")
+        logger.info(f"ProgressAssessment: {data_pool['progress_assessment']}")
+        logger.info(f"TaskState: {data_pool['task_state']}")

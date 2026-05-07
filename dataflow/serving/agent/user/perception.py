@@ -5,12 +5,11 @@ import asyncio
 from typing import Any, Dict, Optional
 from dataflow.core.agentic import (
     LLMClientABC,
-    PerceptionResult,
     StepSchema,
     UserStage,
     UserStep,
-    StepResponse,
 )
+from dataflow.core.agentic.user import AgentContext, DialogueContext
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +45,7 @@ class PerceptionStage(UserStage):
                 schema=StepSchema(
                     input_keys=["file_context", "agent_outputs"],
                     output_key="agent_context",
+                    output_type=AgentContext,
                 ),
                 llm_config=self.llm_config,
             ),
@@ -55,6 +55,7 @@ class PerceptionStage(UserStage):
                 schema=StepSchema(
                     input_keys=["feedbacks", "agent_context", "file_context"],
                     output_key="dialogue_context",
+                    output_type=DialogueContext,
                 ),
                 llm_config=self.llm_config,
             ),
@@ -98,14 +99,13 @@ class PerceptionStage(UserStage):
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
         llm_client: LLMClientABC,
-    ) -> PerceptionResult:
+    ):
         logger.info("Entering Perception Stage...")
 
-        # Local pool for this stage, initialized with input data
-        local_pool = data_pool.copy()
-        raw_results: dict[str, StepResponse] = {}
+        # ========== 预先检查所有步骤的输入依赖 ==========
+        self._check_step_dependencies(self.steps, data_pool, "PerceptionStage")
 
-        # FileSensor: process each file separately with parallel LLM calls
+        # ========== FileSensor: process each file separately with parallel LLM calls ==========
         file_sensor_step = self.steps[0]
         file_contents: Dict[str, str] = data_pool.get("file_contents", {})
 
@@ -128,33 +128,18 @@ class PerceptionStage(UserStage):
 
             # Convert results to dict: {file_path: summary}
             file_context = dict(results)
-            local_pool["file_context"] = file_context
-
-            # Record raw response for FileSensor (符合 StepResponse 规范)
-            # StepResponse 允许动态字段 (output_key 对应的字段)
-            raw_results["FileSensor"] = {
-                "raw_text": json.dumps(file_context, ensure_ascii=False)
-            }
+            data_pool[file_sensor_step.schema.output_key] = file_context
         else:
-            local_pool["file_context"] = {}
-            raw_results["FileSensor"] = {"raw_text": "{}"}
-
-        # Continue with AgentSensor and DialogueSensor
-        for step in self.steps[1:]:  # Skip FileSensor (already handled)
-            res = await step.execute(local_pool, global_context, llm_client)
-            raw_results[step.name] = res
-            val = (
-                res.get(step.schema.output_key, res.get("raw_text", ""))
-                if "error" not in res
-                else res.get("raw_text", "")
+            logger.warning(
+                "No file_contents provided, FileSensor will produce empty file_context"
             )
-            local_pool[step.schema.output_key] = val
+            data_pool[file_sensor_step.schema.output_key] = {}
 
-        return {
-            "context": {
-                "file_context": local_pool.get("file_context", {}),
-                "agent_context": local_pool.get("agent_context", ""),
-                "dialogue_context": local_pool.get("dialogue_context", ""),
-            },
-            "raw_responses": raw_results,
-        }
+        # ========== 执行剩余步骤 ==========
+        for step in self.steps[1:]:  # Skip FileSensor (already handled above)
+            # Execute the step
+            res = await step.execute(data_pool, global_context, llm_client)
+            data_pool[step.schema.output_key] = res["json_resp"]
+
+        for step in self.steps:
+            logger.info(f"{data_pool[step.schema.output_key]}")

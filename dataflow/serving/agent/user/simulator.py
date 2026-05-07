@@ -1,6 +1,7 @@
 import logging
 
 from typing import Any, Dict, Optional
+
 from dataflow.core.agentic import UserSimulatorABC, LLMClientABC, SimulationResult
 
 from .perception import PerceptionStage
@@ -47,36 +48,32 @@ class UserSimulator(UserSimulatorABC):
         data_pool = raw_data.copy()
 
         # --- Stage 1: Perception ---
-        perception_result = await self.perception_stage.execute(
+        logger.info("=== Stage 1: Perception ===")
+        await self.perception_stage.execute(
             data_pool,
             global_context,
             self.llm_client,
         )
-        # Update data_pool with the structured context
-        data_pool.update(perception_result.get("context", {}))
 
         # --- Stage 2: Understanding ---
-        understanding_result = await self.understanding_stage.execute(
+        logger.info("=== Stage 2: Understanding ===")
+        await self.understanding_stage.execute(
             data_pool,
             global_context,
             self.llm_client,
         )
-        # Update data_pool with the task state
-        data_pool.update({"task_state": understanding_result.get("task_state", {})})
 
         # --- Stage 3: Decision ---
-        decision_result = await self.decision_stage.execute(
+        logger.info("=== Stage 3: Decision ===")
+        await self.decision_stage.execute(
             data_pool,
             global_context,
             self.llm_client,
         )
+        # DecisionStage 已经将结果存储到 data_pool，这里直接获取
 
+        # 组装最终结果
         return {
-            "final_response": decision_result["final_response"],
-            "trajectory": {
-                "perception": perception_result,
-                "understanding": understanding_result,
-                "decision": decision_result,
-            },
+            "final_response": data_pool.get("final_response", {}),
             "global_context": global_context,
         }

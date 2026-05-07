@@ -39,7 +39,7 @@ from tqdm import tqdm
 from dataflow.logger import get_logger
 
 # 导入 AgentServingABC 基类
-from dataflow.core.llm_serving import AgentServingABC, TrajectoryDict
+from dataflow.core.agentic import AgentServingABC, TrajectoryDict
 from dataflow.utils.generate_binary_files import generate_file
 
 
