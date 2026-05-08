@@ -410,7 +410,7 @@ class SDKNanobotServing(AgentServingABC):
         async def run_query():
             # 注入自定义 Hook 以捕获详细轨迹
             return await self.bot.run(
-                {"role": "user", "content": query},
+                query,
                 session_key=session_key,
                 hooks=[capture_hook],
             )
