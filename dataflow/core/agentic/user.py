@@ -1,5 +1,6 @@
 import json
 import logging
+import json_repair
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -159,7 +160,18 @@ class UserStep:
         if cleaned_text.endswith("```"):
             cleaned_text = cleaned_text[:-3]
 
-        json_data = json.loads(cleaned_text.strip())
+        try:
+            # First attempt with standard json.loads
+            json_data = json.loads(cleaned_text.strip())
+        except json.JSONDecodeError:
+            # Fallback to json_repair for malformed JSON
+            logger.warning(
+                f"Standard JSON parsing failed for step [{self.name}], attempting json_repair. Text: {text[:100]}..."
+            )
+            json_data = json_repair.repair_json(
+                cleaned_text.strip(),
+                return_objects=True,
+            )
 
         # 如果定义了 output_type，进行 Pydantic 验证
         if self.schema.output_type:

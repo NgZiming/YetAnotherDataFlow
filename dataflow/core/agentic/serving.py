@@ -257,23 +257,33 @@ class AgentServingABC(ABC):
         """
         path_mapping = {}
 
-        # 准备文件到 assets 目录
+        # 准备文件到 workspace (保留原目录结构)
         if input_files_data:
-            assets_dir = workspace_path / "assets"
-            assets_dir.mkdir(parents=True, exist_ok=True)
-
             for original_path, content_data in input_files_data.items():
                 if not content_data or not isinstance(content_data, dict):
                     continue
 
-                # 使用原始路径的文件名作为实际文件名
-                filename = Path(original_path).name
-                actual_path = str(assets_dir / filename)
+                # 1. 将 /workspace/ 前缀去掉，获取相对路径
+                rel_path_str = original_path
+                if rel_path_str.startswith("/workspace/"):
+                    rel_path_str = rel_path_str[len("/workspace/") :]
+
+                # 2. 构建真实的绝对路径
+                actual_path_obj = workspace_path / rel_path_str
+
+                # 3. 确保父目录存在
+                actual_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+                # 4. 生成文件
+                filename = actual_path_obj.name
+                dir_path = str(actual_path_obj.parent)
 
                 generate_file(
                     {"filename": filename, "content": content_data},
-                    str(assets_dir),
+                    dir_path,
                 )
+
+                actual_path = str(actual_path_obj)
                 path_mapping[original_path] = actual_path
                 self.logger.debug(f"生成文件:{filename} -> {actual_path}")
 
@@ -283,7 +293,6 @@ class AgentServingABC(ABC):
             skills_dir.mkdir(parents=True, exist_ok=True)
 
             for skill_name in input_skills_data:
-                # skill_base_dir 现在是必需的，直接拼接
                 src_path = Path(skill_base_dir) / skill_name
 
                 if not src_path.exists() or not src_path.is_dir():

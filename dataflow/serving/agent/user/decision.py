@@ -24,7 +24,7 @@ class DialogueStrategy(BaseModel):
     dialogue_goal: str = Field(..., description="本次对话的目标")
     suggested_approach: str = Field(..., description="建议的对话方式")
     strategy_details: str = Field(
-        ..., min_length=50, max_length=300, description="详细的策略描述"
+        ..., min_length=50, max_length=1000, description="详细的策略描述"
     )
 
 
