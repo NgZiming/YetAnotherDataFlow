@@ -331,18 +331,20 @@ class DecisionStage(UserStage):
   - aborted 时说明具体失败原因（如"被反爬策略拦截"、"API 返回 403 错误"）
 
 ## 任务
-1. **判断是否首次对话**: 检查 dialogue_context.has_history
+1. **强制截断检查（最高优先级）**: 检查 agent_context 和 dialogue_context 是否包含“不可恢复失败信号”。
+   - **不可恢复信号**:
+     - Agent 明确报告 "反爬拦截"、"IP 被封"、"403 Forbidden"、"429 Too Many Requests"。
+     - Agent 在连续两轮对话中尝试同一目标但均以相同错误失败。
+     - Agent 明确表示 "无法通过当前手段获取数据" 或 "目标网站已关闭"。
+   - **如果检测到上述信号 $\rightarrow$ 必须立即选择 `judgment: \"aborted\"`**，无论任务进度如何，严禁继续要求 Agent 尝试。
+
+2. **判断是否首次对话**: 检查 dialogue_context.has_history
    - **false**: 首次对话，生成初始问题
    - **true**: 后续对话，生成反馈
 
-2. **判断是否应该 aborted**: 检查 agent_context 和 dialogue_context
-   - **检查失败信号**:
-     - Agent 报告"无法访问"、"被拒绝"、"403 错误"、"429 错误"
-     - Agent 多次尝试同一操作都失败（key_actions 中有重复的失败操作）
-     - Agent 报告"反爬策略"、"IP 被封"、"需要验证码"
-     - 关键数据源不可访问
-   - **如果满足以上条件**: 选择 `aborted`，说明任务无法继续
-   - **如果不满足**: 选择 `in_progress`，继续对话
+3. **常规进度判断 (仅在未 aborted 时执行)**:
+   - 如果任务进展顺利 $\rightarrow$ 选择 `in_progress`
+   - 如果所有里程碑均满足 $\rightarrow$ 选择 `completed`
 
 ### 场景 A：首次对话（has_history == false）
 **任务**：生成初始用户问题，启动对话
