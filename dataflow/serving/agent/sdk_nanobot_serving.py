@@ -30,11 +30,16 @@ import json
 import uuid
 import shutil
 import time
+import platform
 
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from dataflow.logger import get_logger
+
+# 导入 Nanobot 内部组件用于构建高保真 System Prompt
+from nanobot.utils.prompt_templates import render_template
+from nanobot.agent.skills import SkillsLoader
 
 # 导入 AgentServingABC 基类
 from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
@@ -240,6 +245,52 @@ class SDKNanobotServing(AgentServingABC):
             self.logger.error(f"加载 Nanobot 失败：{e}")
             raise
 
+    def _build_full_system_prompt(self, workspace_path: Path) -> str:
+        """
+        镜像 Nanobot 的 ContextBuilder.build_system_prompt 逻辑，
+        用于在轨迹中补全高保真的 System Prompt。
+        """
+        parts = []
+
+        # 1. Identity
+        try:
+            system = platform.system()
+            runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+            identity = render_template(
+                "agent/identity.md",
+                workspace_path=str(workspace_path.expanduser().resolve()),
+                runtime=runtime,
+                platform_policy=render_template(
+                    "agent/platform_policy.md", system=system
+                ),
+                channel="cli",
+            )
+            parts.append(identity)
+        except Exception as e:
+            self.logger.warning(f"构建 Identity 失败: {e}")
+
+        # 2. Bootstrap Files (AGENTS.md, SOUL.md, USER.md, TOOLS.md)
+        bootstrap_files = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+        bootstrap_parts = []
+        for filename in bootstrap_files:
+            file_path = workspace_path / filename
+            if file_path.exists():
+                content = file_path.read_text(encoding="utf-8")
+                bootstrap_parts.append(f"## {filename}\n\n{content}")
+        if bootstrap_parts:
+            parts.append("\n\n".join(bootstrap_parts))
+
+        # 3. Skills Summary
+        try:
+            loader = SkillsLoader(workspace_path)
+            skills_summary = loader.build_skills_summary()
+            if skills_summary:
+                parts.append(f"# Available Skills\n\n{skills_summary}")
+        except Exception as e:
+            self.logger.warning(f"构建 Skills Summary 失败: {e}")
+
+        return "\n\n---\n\n".join(parts)
+
     # =========================================================================
     # Trajectory Capture Hook
     # =========================================================================
@@ -349,38 +400,52 @@ class SDKNanobotServing(AgentServingABC):
         """
         # 使用 workspace_path 的哈希作为 session_key，确保同一对话在多轮验证中共享 session
         import hashlib
+
         session_key = hashlib.sha256(str(workspace_path).encode()).hexdigest()[:16]
-        
+
         # 初始化轨迹捕获 Hook
         capture_hook = self.TrajectoryCaptureHook()
-        
+
         # 执行异步查询
         async def run_query():
             # 注入自定义 Hook 以捕获详细轨迹
             return await self.bot.run(
-                query, session_key=session_key, hooks=[capture_hook]
+                {"role": "user", "content": query},
+                session_key=session_key,
+                hooks=[capture_hook],
             )
-        
+
         try:
             result = asyncio.run(run_query())
         except Exception as e:
             self.logger.error(f"Nanobot 运行失败: {e}")
-            return {
-                "task_id": "",
-                "final_output": "",
-                "total_rounds": 0,
-                "is_completed": False,
-                "messages": [],
-                "metadata": {
-                    "session_key": session_key,
-                    "error": str(e),
-                },
-            }
-        
+            raise e
+
         content = result.content if result.content else ""
-        
+
         # 从 Hook 的内存记录中构建标准轨迹字典
         formatted_messages = []
+
+        # --- 补全 System Prompt (高保真镜像 Nanobot 逻辑) ---
+        try:
+            system_prompt = self._build_full_system_prompt(workspace_path)
+            if system_prompt:
+                formatted_messages.append(
+                    {
+                        "round": 0,
+                        "role": "system",
+                        "content": system_prompt,
+                        "thought": None,
+                        "tool_calls": [],
+                        "tool_results": [],
+                        "id": None,
+                        "parentId": None,
+                        "session_id": session_key,
+                    }
+                )
+        except Exception as e:
+            self.logger.warning(f"轨迹 System Prompt 补全失败: {e}")
+        # -------------------------------------------------
         for i, step in enumerate(capture_hook.trajectory):
             if step["thought"]:
                 formatted_messages.append(
@@ -396,7 +461,7 @@ class SDKNanobotServing(AgentServingABC):
                         "session_id": session_key,
                     }
                 )
-            
+
             if step["tool_results"]:
                 formatted_messages.append(
                     {
@@ -411,7 +476,7 @@ class SDKNanobotServing(AgentServingABC):
                         "session_id": session_key,
                     }
                 )
-        
+
         if not formatted_messages:
             formatted_messages.append(
                 {
@@ -426,9 +491,9 @@ class SDKNanobotServing(AgentServingABC):
                     "session_id": session_key,
                 }
             )
-        
+
         return {
-            "task_id": "", # Will be populated by the base class verification loop if needed, or passed in
+            "task_id": "",  # Will be populated by the base class verification loop if needed, or passed in
             "final_output": content,
             "total_rounds": len(capture_hook.trajectory),
             "is_completed": True,
@@ -437,55 +502,3 @@ class SDKNanobotServing(AgentServingABC):
                 "session_key": session_key,
             },
         }
-
-    # =========================================================================
-    # 公共接口
-    # =========================================================================
-
-    def start_serving(self) -> None:
-        """启动服务（确保 nanobot 已加载）。"""
-        if self._initialized:
-            return
-
-        if not self.bot:
-            self._load_nanobot()
-
-        self._initialized = True
-        self.logger.info("SDKNanobotServing 已启动")
-
-    def cleanup(self) -> None:
-        """清理资源。"""
-        self._initialized = False
-
-        temp_base = self.workspace / ".temp"
-        if temp_base.exists():
-            try:
-                shutil.rmtree(temp_base)
-                self.logger.info("临时目录已清理")
-            except Exception as e:
-                self.logger.error(f"清理临时目录失败：{e}")
-
-        self.logger.info("SDKNanobotServing 已清理")
-
-
-def create_nanobot_serving(
-    config_path: str = "~/.nanobot/config.json",
-    workspace: str = "~/.nanobot/workspace",
-    model: Optional[str] = None,
-    provider: str = "vllm",
-    max_workers: int = 4,
-    max_retries: int = 3,
-    **kwargs,
-) -> SDKNanobotServing:
-    """
-    创建 SDKNanobotServing 实例的工厂函数。
-    """
-    return SDKNanobotServing(
-        config_path=config_path,
-        workspace=workspace,
-        model=model,
-        provider=provider,
-        max_workers=max_workers,
-        max_retries=max_retries,
-        **kwargs,
-    )
