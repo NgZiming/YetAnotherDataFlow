@@ -1,3 +1,32 @@
+## [1.0.12] - 2026-05-08
+
+### 🚀 Major Features
+
+- **Full-fledged UserSimulator Implementation**: Introduced a robust, three-stage cognitive architecture for simulating user behavior during agent trajectories.
+  - **Perception Stage**: Implements `FileSensor`, `AgentSensor`, and `DialogueSensor` to compress raw environment data, agent actions, and conversation history into structured contexts.
+  - **Understanding Stage**: Implements `MilestoneMatcher`, `ProgressEvaluator`, and `TaskSynthesizer` to track task progress against milestones and assess quality/risks.
+  - **Decision Stage**: Synthesizes perceptions and understanding into a final user response (feedback or completion judgment) based on a dialogue strategy and user persona.
+- **Standardized Agent Serving Interface**: Introduced `AgentServingABC` to unify the lifecycle of agent execution, including workspace management, multi-round verification loops, and concurrent task scheduling.
+
+### 🏗️ Architecture & Refactoring
+
+- **Resource Path Alignment**: Refactored file preparation logic to preserve original directory hierarchies within the workspace, eliminating "missing file" loops caused by path flattening.
+- **Robust JSON Parsing**: Integrated `json_repair` into the simulator's parsing logic to handle malformed LLM outputs, significantly reducing simulator crashes.
+- **Flexible LLM Integration**: Added `LLMClientAdapter` for standardized REST communication with the simulator's backend LLM.
+
+### 🔧 Bug Fixes
+
+- **Pydantic Constraint Relaxation**: Increased `max_length` for `strategy_details` from 300 to 1000 characters to resolve `ValidationError` during complex decision making.
+- **Path Cognitive Dissonance**: Fixed issues where agents could not find files because the serving layer had modified their paths.
+
+### 📊 Statistics
+
+- **14 files changed**
+- **2381 insertions(+), 1113 deletions(-)**
+- Compared to tag `v1.0.11`
+
+---
+
 ## [1.0.11] - 2026-05-04
 
 ### 🚀 Major Features
@@ -179,7 +208,6 @@
 
 ## [1.0.9] - 2026-04-22
 
-
 ### 🏗️ Architecture & Refactoring
 - **Agent Serving Decoupling**: Moved `AgentServingABC` and its related logic from `dataflow/core/llm_serving.py` to a dedicated interface file `dataflow/serving/agent/iface.py`.
 - **Type Definition Simplification**: Removed `dataflow/core/types.py` and moved `OPERATOR_CLASSES` and `LLM_SERVING_CLASSES` type aliases directly into `dataflow/core/__init__.py` for flatter imports.
@@ -189,7 +217,7 @@
 
 ### 🛠️ Robustness & Detail Improvements (`iface.py`)
 - **Path Mapping Enhancement**: Improved the replacement logic for `/workspace/assets/` paths to ensure higher accuracy when mapping to the actual workspace.
-- **Verification Parser Upgrade**: Enhanced `_parse_verification_result` to support multiple feedback markers (e.g., "反馈:", "feedback:") and added a fallback splitting mechanism to handle unstable LLM output formats.
+- **Verification Parser Upgrade**: Enhanced `_parse_verification_result` to support multiple feedback markers (e.g., \"反馈:\", \"feedback:\") and added a fallback splitting mechanism to handle unstable LLM output formats.
 - **Token Efficiency**: Reduced the truncation limit for new file contents in the verification prompt from 10,000 to 5,000 characters to optimize LLM token usage and response latency.
 
 ---
@@ -207,7 +235,7 @@
     - 通过 `prompts` 配置每个字段的生成 prompt
     - 支持批量生成，`batch_size` 可配置
   - `create_data_source()` 工厂函数增强：
-    - 支持 `source_type="generator"` 和 `source_type="llm_generator"`
+    - 支持 `source_type=\"generator\"` 和 `source_type=\"llm_generator\"`
     - 新增参数：`generator_fn`, `total_rows`, `prompts`, `num_rows`, `fields_from_base`
 
 ### Changed
