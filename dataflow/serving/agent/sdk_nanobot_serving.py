@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 import shutil
 import time
 import platform
@@ -40,6 +39,7 @@ from dataflow.logger import get_logger
 # 导入 Nanobot 内部组件用于构建高保真 System Prompt
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
+from nanobot import Nanobot
 
 # 导入 AgentServingABC 基类
 from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
@@ -76,25 +76,11 @@ class SDKNanobotServing(AgentServingABC):
     ):
         """
         初始化 SDKNanobotServing。
-
-        Args:
-            config_path: 配置文件路径
-            workspace: 工作目录
-            model: 模型名称
-            provider: LLM Provider
-            max_workers: 并发数
-            timeout: 超时时间（秒）
-            max_retries: 最大重试次数
-            auto_create_config: 是否自动创建配置
-            extra_skills_dirs: 额外技能目录列表
-            verification_api_url: 验证用 API URL
-            verification_api_key: 验证用 API Key
-            verification_client_params: 验证用 LLM 参数
         """
         self.logger = get_logger()
 
         self.config_path = Path(config_path).expanduser()
-        self.workspace = Path(workspace).expanduser()
+        self.workspace_basedir = Path(workspace).expanduser()
         self.model = model or "/data/share/models/Qwen3.5-122B-A10B/"
         self.provider = provider
         self.api_base = api_base
@@ -112,28 +98,20 @@ class SDKNanobotServing(AgentServingABC):
         )
 
         self._initialized = False
-        self.bot = None
+        # 移除了 self.bot 全局单例，改为在任务上下文中按需创建
+        self.bot_instances: Dict[Path, Any] = {}
 
         # 自动创建/更新配置
         if auto_create_config:
             self._create_config(force=True)
 
-        # 链接外部技能目录
-        self._link_extra_skills()
-
-        # 清理旧的临时目录
-        self._cleanup_old_temp_dirs()
-
-        # 加载 nanobot
-        self._load_nanobot()
-
         self.logger.info(
-            f"SDKNanobotServing 初始化：workspace={self.workspace}, model={self.model}"
+            f"SDKNanobotServing 初始化：workspace_basedir={self.workspace_basedir}, model={self.model}"
         )
 
     def _cleanup_old_temp_dirs(self, max_age_hours: int = 1) -> None:
         """清理超过指定时间的临时目录"""
-        temp_base = self.workspace / ".temp"
+        temp_base = self.workspace_basedir / ".temp"
         if not temp_base.exists():
             return
 
@@ -150,59 +128,15 @@ class SDKNanobotServing(AgentServingABC):
         except Exception as e:
             self.logger.warning(f"清理临时目录失败：{e}")
 
-    def _link_extra_skills(self) -> None:
-        """将额外技能目录符号链接到 workspace/skills"""
-        if not self.extra_skills_dirs:
-            return
-
-        workspace_skills = self.workspace / "skills"
-        workspace_skills.mkdir(parents=True, exist_ok=True)
-
-        existing_skills = {p.name for p in workspace_skills.iterdir() if p.exists()}
-
-        linked_count = 0
-        skipped_count = 0
-
-        for extra_dir in self.extra_skills_dirs:
-            if not extra_dir.exists():
-                self.logger.warning(f"额外技能目录不存在，跳过：{extra_dir}")
-                continue
-
-            skills_to_link = []
-            for skill_subdir in extra_dir.iterdir():
-                if not skill_subdir.is_dir():
-                    continue
-
-                skill_name = skill_subdir.name
-                if skill_name in existing_skills:
-                    skipped_count += 1
-                    continue
-
-                skills_to_link.append((skill_name, skill_subdir))
-                existing_skills.add(skill_name)
-
-            for skill_name, skill_subdir in skills_to_link:
-                target_link = workspace_skills / skill_name
-                try:
-                    target_link.symlink_to(skill_subdir, target_is_directory=True)
-                    linked_count += 1
-                except Exception as e:
-                    self.logger.error(f"链接技能失败 {skill_name}: {e}")
-
-        if linked_count > 0 or skipped_count > 0:
-            self.logger.info(
-                f"技能链接完成：{linked_count} 个新链接，{skipped_count} 个已存在"
-            )
-
     def _create_config(self, force: bool = False) -> None:
         """创建配置文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.workspace_basedir.mkdir(parents=True, exist_ok=True)
 
         config_data: Dict[str, Any] = {
             "agents": {
                 "defaults": {
-                    "workspace": str(self.workspace),
+                    "workspace": str(self.workspace_basedir),
                     "model": self.model,
                     "provider": self.provider,
                     "timezone": "Asia/Shanghai",
@@ -227,23 +161,6 @@ class SDKNanobotServing(AgentServingABC):
             json.dump(config_data, f, indent=2, ensure_ascii=False)
 
         self.logger.info(f"Nanobot 配置已创建：{self.config_path}")
-
-    def _load_nanobot(self) -> None:
-        """加载 nanobot 实例"""
-        try:
-            from nanobot import Nanobot
-
-            self.logger.info(
-                f"加载 Nanobot: config_path={self.config_path}, workspace={self.workspace}"
-            )
-
-            self.bot = Nanobot.from_config(
-                config_path=str(self.config_path), workspace=str(self.workspace)
-            )
-            self.logger.info("Nanobot 实例已加载")
-        except Exception as e:
-            self.logger.error(f"加载 Nanobot 失败：{e}")
-            raise
 
     def _build_full_system_prompt(self, workspace_path: Path) -> str:
         """
@@ -335,9 +252,10 @@ class SDKNanobotServing(AgentServingABC):
 
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径（临时目录）。"""
-        temp_base = self.workspace / ".temp"
+        temp_base = self.workspace_basedir / ".temp"
         temp_base.mkdir(parents=True, exist_ok=True)
-        return temp_base / f"{task_id}_{uuid.uuid4().hex[:8]}"
+        # 使用 task_id 构建路径，确保同一任务在多轮验证中共享空间，但不同任务完全隔离
+        return temp_base / f"task_{task_id}"
 
     def _prepare_execution_context(
         self,
@@ -356,9 +274,6 @@ class SDKNanobotServing(AgentServingABC):
             (workspace_path / "SOUL.md").write_text(self.soul_md, encoding="utf-8")
 
         # 2. 使用基类方法准备文件和技能，确保物理拷贝以实现完全隔离
-        # 将 input_skills_data 传给 _prepare_files，这样它会从 skill_base_dir 拷贝到 workspace_path/skills/
-
-        # 寻找第一个存在的技能基目录
         skill_base_dir = ""
         if self.extra_skills_dirs:
             for extra_dir in self.extra_skills_dirs:
@@ -373,12 +288,32 @@ class SDKNanobotServing(AgentServingABC):
             skill_base_dir=skill_base_dir,
         )
 
+        # 3. 为该隔离空间创建专属的 Nanobot 实例
+        try:
+            # 使用当前任务的隔离 workspace_path 初始化 bot
+            bot = Nanobot.from_config(
+                config_path=str(self.config_path),
+                workspace=str(workspace_path.resolve()),
+            )
+            # 将实例存储在缓存中，以便 _send_query 可以访问
+            self.bot_instances[workspace_path] = bot
+            self.logger.debug(f"为任务空间创建专属 Bot 实例: {workspace_path}")
+        except Exception as e:
+            self.logger.error(f"创建任务专属 Bot 实例失败: {e}")
+            raise e
+
         return path_mapping
 
     def _cleanup_execution_context(
         self, workspace_path: Path, task_id: Optional[str] = None
     ) -> None:
         """清理执行上下文资源（删除临时目录）。"""
+        # 1. 从缓存中移除 Bot 实例，以便垃圾回收
+        if workspace_path in self.bot_instances:
+            del self.bot_instances[workspace_path]
+            self.logger.debug(f"销毁任务专属 Bot 实例: {workspace_path}")
+
+        # 2. 删除临时目录
         if workspace_path.exists():
             try:
                 shutil.rmtree(workspace_path)
@@ -395,10 +330,17 @@ class SDKNanobotServing(AgentServingABC):
         """
         发送查询并获取响应（通过内存 Hook 实时捕获完整轨迹）。
         """
-        # 使用 workspace_path 的哈希作为 session_key，确保同一对话在多轮验证中共享 session
-        import hashlib
+        # 因为现在每个任务拥有独立的 Bot 实例和隔离的 workspace，
+        # 内部的会话状态已由 bot 实例和物理路径隔离，session_key 固定为 "main" 即可。
+        session_key = "main"
 
-        session_key = hashlib.sha256(str(workspace_path).encode()).hexdigest()[:16]
+        # 获取该任务空间专属的 Bot 实例
+        bot = self.bot_instances.get(workspace_path)
+        if not bot:
+            self.logger.error(f"未找到任务专属 Bot 实例，空间路径: {workspace_path}")
+            raise RuntimeError(
+                f"Bot instance not found for workspace: {workspace_path}"
+            )
 
         # 初始化轨迹捕获 Hook
         capture_hook = self.TrajectoryCaptureHook()
@@ -406,7 +348,7 @@ class SDKNanobotServing(AgentServingABC):
         # 执行异步查询
         async def run_query():
             # 注入自定义 Hook 以捕获详细轨迹
-            return await self.bot.run(
+            return await bot.run(
                 query,
                 session_key=session_key,
                 hooks=[capture_hook],
