@@ -238,6 +238,16 @@ class UnderstandingStage(UserStage):
 3. **评估质量**: 判断已完成工作的质量（是否满足要求）
 4. **预测风险**: 识别可能影响后续进展的风险因素
 
+## 渐进式评估原则（重要！）
+- **认知复杂度**: 意识到一个里程碑 (Stage) 通常包含多个复杂子任务，不可能在 1-2 轮对话中全部完成。
+- **宽容度设定**: 
+  - 在当前里程碑开始后的前 3 轮对话中，只要 Agent 在尝试正确的路径且有增量信息输出，即使结果不完整，也应判定 `overall_status` 为 `on_track`。
+  - **不要**因为第一轮没有交付最终结果就将其判定为 `behind` 或 `at_risk`。
+- **区分“停滞”与“分步”**: 
+  - **分步 (On Track)**: Agent 正在一个一个地解决问题，或者在请求必要的澄清。
+  - **停滞 (Behind/At Risk)**: Agent 连续两轮重复同样的错误操作，或者在没有任何新信息的情况下循环推理。
+- **质量评估**: 只要 Agent 提供的片段信息是准确且有价值的，`quality_assessment` 应保持在 `medium` 或以上，不要因为“数量不足”而直接判定为 `low`。
+
 ## 输出要求
 - 格式：严格的 JSON 格式（不要 Markdown 代码块）
 - 只输出纯 JSON，不要任何解释文字
@@ -340,8 +350,12 @@ class UnderstandingStage(UserStage):
 ### 场景 B：后续对话（has_history == true）
 任务状态：
 - 根据 milestone_status 判断当前进展
-- 如果进展缓慢，可以标记需要催促
+- **渐进式认知**: 意识到 Agent 可能需要多轮对话才能完成一个 stage。如果 Agent 正在分步提供信息，不要急于标记为“进展缓慢”。
 - 根据 progress_assessment 判断是否需要调整方向
+
+## 状态合成原则（重要！）
+- **避免过早判定“失败”**: 除非 progress_assessment 明确指出 Agent 陷入死循环或完全错误的方向，否则应倾向于认为任务在 `in_progress`。
+- **目标分解**: 在 `next_objective` 中，不要直接写“完成 Stage X”，而应将其分解为更小、更自然的下一步目标（例如：“引导 Agent 补充 XX 细节” $\rightarrow$ "要求 Agent 分析 XX 文件"）。
 
 ## 输出要求
 - 格式：严格的 JSON 格式（不要 Markdown 代码块）
