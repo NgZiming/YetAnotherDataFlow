@@ -355,26 +355,23 @@ class SDKNanobotServing(AgentServingABC):
         if self.soul_md:
             (workspace_path / "SOUL.md").write_text(self.soul_md, encoding="utf-8")
 
-        # 2. 使用基类方法准备文件，确保路径映射和目录结构正确
+        # 2. 使用基类方法准备文件和技能，确保物理拷贝以实现完全隔离
+        # 将 input_skills_data 传给 _prepare_files，这样它会从 skill_base_dir 拷贝到 workspace_path/skills/
+
+        # 寻找第一个存在的技能基目录
+        skill_base_dir = ""
+        if self.extra_skills_dirs:
+            for extra_dir in self.extra_skills_dirs:
+                if extra_dir.exists() and extra_dir.is_dir():
+                    skill_base_dir = str(extra_dir)
+                    break
+
         path_mapping = self._prepare_files(
             workspace_path=workspace_path,
             input_files_data=input_files_data,
-            input_skills_data=[],  # 技能由下面的逻辑处理
-            skill_base_dir="",
+            input_skills_data=input_skills_data,
+            skill_base_dir=skill_base_dir,
         )
-
-        # 3. 链接技能目录
-        if input_skills_data and self.extra_skills_dirs:
-            skills_dir = workspace_path / "skills"
-            skills_dir.mkdir(parents=True, exist_ok=True)
-            for skill_name in input_skills_data:
-                for extra_dir in self.extra_skills_dirs:
-                    src_path = extra_dir / skill_name
-                    if src_path.exists() and src_path.is_dir():
-                        dst_path = skills_dir / skill_name
-                        if not dst_path.exists():
-                            dst_path.symlink_to(src_path, target_is_directory=True)
-                        break
 
         return path_mapping
 
