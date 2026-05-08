@@ -30,17 +30,14 @@ import json
 import uuid
 import shutil
 import time
-from contextlib import contextmanager
-from pathlib import Path
-from typing import List, Dict, Optional, Any, Iterator
 
-from tqdm import tqdm
+from pathlib import Path
+from typing import List, Dict, Optional, Any
 
 from dataflow.logger import get_logger
 
 # 导入 AgentServingABC 基类
-from dataflow.core.agentic import AgentServingABC, TrajectoryDict
-from dataflow.utils.generate_binary_files import generate_file
+from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
 
 
 class SDKNanobotServing(AgentServingABC):
@@ -58,6 +55,7 @@ class SDKNanobotServing(AgentServingABC):
 
     def __init__(
         self,
+        user: UserSimulatorABC,
         config_path: str = "~/.nanobot/config.json",
         workspace: str = "~/.nanobot/workspace",
         model: Optional[str] = None,
@@ -65,13 +63,11 @@ class SDKNanobotServing(AgentServingABC):
         api_base: str = "http://localhost:8000/v1",
         api_key: str = "EMPTY",
         max_workers: int = 4,
-        timeout: int = 300,
         max_retries: int = 3,
         auto_create_config: bool = True,
         extra_skills_dirs: Optional[List[str]] = None,
-        verification_api_url: Optional[str] = None,
-        verification_api_key: Optional[str] = None,
-        verification_client_params: Optional[Dict[str, Any]] = None,
+        user_md: Optional[str] = None,
+        soul_md: Optional[str] = None,
     ):
         """
         初始化 SDKNanobotServing。
@@ -101,14 +97,13 @@ class SDKNanobotServing(AgentServingABC):
         self.extra_skills_dirs = [
             Path(d).expanduser() for d in (extra_skills_dirs or [])
         ]
+        self.user_md = user_md
+        self.soul_md = soul_md
 
         super().__init__(
+            user=user,
             max_workers=max_workers,
             max_retries=max_retries,
-            timeout=timeout,
-            verification_api_url=verification_api_url,
-            verification_api_key=verification_api_key,
-            verification_client_params=verification_client_params,
         )
 
         self._initialized = False
@@ -246,8 +241,46 @@ class SDKNanobotServing(AgentServingABC):
             raise
 
     # =========================================================================
-    # AgentServingABC 抽象方法实现
+    # Trajectory Capture Hook
     # =========================================================================
+
+    class TrajectoryCaptureHook:
+        """
+        Custom hook to capture full agent trajectory in memory.
+        Implements the AgentHook interface required by nanobot.
+        """
+
+        def __init__(self) -> None:
+            self.trajectory: List[Dict[str, Any]] = []
+
+        def wants_streaming(self) -> bool:
+            return False
+
+        async def after_iteration(self, context: Any) -> None:
+            # context is AgentHookContext
+            iteration = context.iteration
+
+            thought = None
+            if context.response:
+                thought = context.response.content
+
+            tool_calls = []
+            for tc in context.tool_calls:
+                tool_calls.append({"name": tc.name, "arguments": tc.arguments})
+
+            tool_results = []
+            for tr in context.tool_results:
+                tool_results.append(str(tr))
+
+            self.trajectory.append(
+                {
+                    "iteration": iteration,
+                    "thought": thought,
+                    "tool_calls": tool_calls,
+                    "tool_results": tool_results,
+                    "messages": list(context.messages),
+                }
+            )
 
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径（临时目录）。"""
@@ -261,30 +294,27 @@ class SDKNanobotServing(AgentServingABC):
         input_files_data: Dict,
         input_skills_data: List[str],
         task_id: Optional[str] = None,
-    ) -> Optional[List[str]]:
-        """准备执行上下文（创建临时目录、生成文件）。"""
+    ) -> Dict[str, str]:
+        """准备执行上下文（创建临时目录、生成文件、注入性格）。"""
         workspace_path.mkdir(parents=True, exist_ok=True)
 
-        assets_dir = workspace_path / "assets"
-        skills_dir = workspace_path / "skills"
+        # 1. 性格注入: Nanobot ContextBuilder 自动加载根目录的 USER.md 和 SOUL.md
+        if self.user_md:
+            (workspace_path / "USER.md").write_text(self.user_md, encoding="utf-8")
+        if self.soul_md:
+            (workspace_path / "SOUL.md").write_text(self.soul_md, encoding="utf-8")
 
-        new_file_paths: List[str] = []
+        # 2. 使用基类方法准备文件，确保路径映射和目录结构正确
+        path_mapping = self._prepare_files(
+            workspace_path=workspace_path,
+            input_files_data=input_files_data,
+            input_skills_data=[],  # 技能由下面的逻辑处理
+            skill_base_dir="",
+        )
 
-        # 生成文件到 assets 目录
-        if input_files_data:
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            for filename, content_data in input_files_data.items():
-                if not content_data or not isinstance(content_data, dict):
-                    continue
-                new_path = assets_dir / Path(filename).name
-                generate_file(
-                    {"filename": new_path.name, "content": content_data},
-                    str(assets_dir),
-                )
-                new_file_paths.append(str(new_path))
-
-        # 链接技能目录（从 extra_skills_dirs）
+        # 3. 链接技能目录
         if input_skills_data and self.extra_skills_dirs:
+            skills_dir = workspace_path / "skills"
             skills_dir.mkdir(parents=True, exist_ok=True)
             for skill_name in input_skills_data:
                 for extra_dir in self.extra_skills_dirs:
@@ -295,7 +325,7 @@ class SDKNanobotServing(AgentServingABC):
                             dst_path.symlink_to(src_path, target_is_directory=True)
                         break
 
-        return [Path(p).name for p in new_file_paths]
+        return path_mapping
 
     def _cleanup_execution_context(
         self, workspace_path: Path, task_id: Optional[str] = None
@@ -315,60 +345,74 @@ class SDKNanobotServing(AgentServingABC):
         current_time: Optional[str] = None,
     ) -> TrajectoryDict:
         """
-        发送查询并获取响应（从 session 文件提取完整轨迹）。
-
-        Args:
-            workspace_path: workspace 路径
-            query: 用户查询
-            current_time: 当前时间字符串，如果为 None 则使用默认时间
-
-        Returns:
-            标准轨迹字典 (AgentServingABC.TrajectoryDict)
+        发送查询并获取响应（通过内存 Hook 实时捕获完整轨迹）。
         """
-        session_key = f"serving-{id(self)}-{uuid.uuid4().hex[:8]}"
-
+        # 使用 workspace_path 的哈希作为 session_key，确保同一对话在多轮验证中共享 session
+        import hashlib
+        session_key = hashlib.sha256(str(workspace_path).encode()).hexdigest()[:16]
+        
+        # 初始化轨迹捕获 Hook
+        capture_hook = self.TrajectoryCaptureHook()
+        
         # 执行异步查询
         async def run_query():
-            return await self.bot.run(query, session_key=session_key)
-
-        result = asyncio.run(run_query())
+            # 注入自定义 Hook 以捕获详细轨迹
+            return await self.bot.run(
+                query, session_key=session_key, hooks=[capture_hook]
+            )
+        
+        try:
+            result = asyncio.run(run_query())
+        except Exception as e:
+            self.logger.error(f"Nanobot 运行失败: {e}")
+            return {
+                "task_id": "",
+                "final_output": "",
+                "total_rounds": 0,
+                "is_completed": False,
+                "messages": [],
+                "metadata": {
+                    "session_key": session_key,
+                    "error": str(e),
+                },
+            }
+        
         content = result.content if result.content else ""
-
-        # 从 session 文件提取轨迹
-        # Nanobot 的 session 文件路径: workspace/sessions/{session_key}.jsonl
-        session_file = self.workspace / "sessions" / f"{session_key}.jsonl"
-
+        
+        # 从 Hook 的内存记录中构建标准轨迹字典
         formatted_messages = []
-        if session_file.exists():
-            try:
-                with open(session_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if not line.strip():
-                            continue
-                        try:
-                            m = json.loads(line)
-                            # 映射 Nanobot 格式到 TrajectoryDict 格式
-                            # 假设 m 包含 role, content, tool_calls 等
-                            formatted_messages.append(
-                                {
-                                    "round": 0,  # 可以在这里根据消息索引计算 round
-                                    "role": m.get("role", "unknown"),
-                                    "content": m.get("content", ""),
-                                    "thought": m.get("thought") or m.get("reasoning"),
-                                    "tool_calls": m.get("tool_calls", []),
-                                    "tool_results": m.get("tool_results", []),
-                                    "id": m.get("id"),
-                                    "parentId": m.get("parentId"),
-                                    "session_id": session_key,
-                                }
-                            )
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                self.logger.error(f"读取 session 文件失败 {session_file}: {e}")
-
+        for i, step in enumerate(capture_hook.trajectory):
+            if step["thought"]:
+                formatted_messages.append(
+                    {
+                        "round": i + 1,
+                        "role": "assistant",
+                        "content": "",
+                        "thought": step["thought"],
+                        "tool_calls": step["tool_calls"],
+                        "tool_results": [],
+                        "id": None,
+                        "parentId": None,
+                        "session_id": session_key,
+                    }
+                )
+            
+            if step["tool_results"]:
+                formatted_messages.append(
+                    {
+                        "round": i + 1,
+                        "role": "tool",
+                        "content": "\n".join(step["tool_results"]),
+                        "thought": None,
+                        "tool_calls": [],
+                        "tool_results": step["tool_results"],
+                        "id": None,
+                        "parentId": None,
+                        "session_id": session_key,
+                    }
+                )
+        
         if not formatted_messages:
-            # fallback: 仅包含最终响应
             formatted_messages.append(
                 {
                     "round": 1,
@@ -382,109 +426,21 @@ class SDKNanobotServing(AgentServingABC):
                     "session_id": session_key,
                 }
             )
-
-        # 返回标准轨迹字典
+        
         return {
-            "messages": formatted_messages,
+            "task_id": "", # Will be populated by the base class verification loop if needed, or passed in
             "final_output": content,
-            "files_created": [],
-            "errors": [],
+            "total_rounds": len(capture_hook.trajectory),
+            "is_completed": True,
+            "messages": formatted_messages,
+            "metadata": {
+                "session_key": session_key,
+            },
         }
 
     # =========================================================================
     # 公共接口
     # =========================================================================
-
-    def generate_from_input(
-        self,
-        user_inputs: List[str],
-        input_files_data: List[Dict],
-        input_skills_data: List[List[str]],
-        enable_verification: bool = False,
-        verification_prompt_template: Optional[str] = None,
-        max_verification_rounds: int = 3,
-    ) -> List[TrajectoryDict]:
-        """
-        生成轨迹字典列表（并发执行）。
-
-        Args:
-            user_inputs: 用户输入列表
-            input_files_data: 文件内容数据列表
-            input_skills_data: skill 路径列表
-            enable_verification: 是否启用验证
-            verification_prompt_template: 验证提示词模板
-            max_verification_rounds: 最大验证轮数
-
-        Returns:
-            List[Dict] - 轨迹字典列表
-        """
-        if not self._initialized:
-            self.start_serving()
-
-        if not user_inputs:
-            self.logger.warning("user_inputs 为空，直接返回")
-            return []
-
-        if len(input_files_data) != len(user_inputs):
-            raise ValueError(
-                f"input_files_data 长度 ({len(input_files_data)}) "
-                f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
-            )
-
-        if len(input_skills_data) != len(user_inputs):
-            raise ValueError(
-                f"input_skills_data 长度 ({len(input_skills_data)}) "
-                f"必须与 user_inputs 长度 ({len(user_inputs)}) 相同"
-            )
-
-        self.logger.info(f"开始处理 {len(user_inputs)} 个请求")
-
-        async def run_all():
-            semaphore = asyncio.Semaphore(self.max_workers)
-
-            async def limited_task(i: int):
-                async with semaphore:
-                    # 使用父类 AgentServingABC 提供的 _execute_single_task_with_verification
-                    return self._execute_single_task_with_verification(
-                        f"task-{i}",
-                        user_inputs[i],
-                        input_files_data[i],
-                        input_skills_data[i],
-                        verification_prompt_template,
-                        max_verification_rounds if enable_verification else 1,
-                    )
-
-            tasks = [limited_task(i) for i in range(len(user_inputs))]
-
-            results: List[Dict[str, Any]] = [{} for _ in range(len(user_inputs))]
-            completed = 0
-            failed = 0
-
-            with tqdm(total=len(user_inputs), desc="处理请求", unit="task") as pbar:
-                for i, future in enumerate(asyncio.as_completed(tasks)):
-                    try:
-                        res = await future
-                        results[i] = res
-                        completed += 1
-                    except Exception as e:
-                        self.logger.error(f"[任务 {i + 1}] 失败：{e}")
-                        results[i] = {
-                            "task_id": f"task-{i}",
-                            "task_description": user_inputs[i],
-                            "final_output": "",
-                            "total_rounds": 0,
-                            "is_completed": False,
-                            "messages": [],
-                            "files_created": [],
-                            "errors": [str(e)],
-                            "metadata": {},
-                        }
-                        failed += 1
-                    pbar.update(1)
-
-            return results
-
-        return asyncio.run(run_all())  # type: ignore
 
     def start_serving(self) -> None:
         """启动服务（确保 nanobot 已加载）。"""
