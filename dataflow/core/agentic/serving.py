@@ -306,51 +306,55 @@ class AgentServingABC(ABC):
 
     def _replace_file_paths_in_text(
         self,
-        text: str,
+        data: Any,
         path_mapping: Dict[str, str],
         workspace_path: Optional[Path] = None,
-    ) -> str:
+    ) -> Any:
         """
-        在文本中替换文件路径。
-
-        Args:
-            text: 原始文本
-            path_mapping: 路径映射 {原始路径：实际路径}
-            workspace_path: agent 的 workspace 路径 (用于处理 /workspace/ 到实际 workspace 的映射)
-
-        Returns:
-            替换后的文本
+        递归地在文本、列表或字典中替换文件路径。
+        支持处理 /workspace/ 前缀的通用映射。
         """
+        if isinstance(data, dict):
+            return {
+                k: self._replace_file_paths_in_text(v, path_mapping, workspace_path)
+                for k, v in data.items()
+            }
+        elif isinstance(data, list):
+            return [
+                self._replace_file_paths_in_text(item, path_mapping, workspace_path)
+                for item in data
+            ]
+        elif not isinstance(data, str):
+            return data
+
+        # 针对字符串的路径替换逻辑
+        result = data
         if not path_mapping and not workspace_path:
-            return text
-
-        result = text
+            return result
 
         # 1. 先应用 path_mapping 中的精确替换 (按长度降序排序，避免部分匹配)
         if path_mapping:
             for original_path, actual_path in sorted(
-                path_mapping.items(), key=lambda x: len(x[0]), reverse=True
+                path_mapping.items(),
+                key=lambda x: len(x[0]),
+                reverse=True,
             ):
                 result = result.replace(original_path, actual_path)
 
         # 2. 处理 /workspace/ 前缀的通用映射
-        # 只要出现 /workspace/xxx，都映射到真实的 workspace_path/xxx
         if workspace_path:
-            # 匹配 /workspace/ 及其后面直到空白或引号的部分
-            workspace_pattern = r'/workspace/([^\s"\'<>]+)'
+            workspace_pattern = r"/workspace/([^\\s\"\'<>]+)"
 
             def replace_workspace(match):
                 relative_path = match.group(1)
-                # 构建绝对路径并规范化 (解决 ../ 等问题)
                 actual_path = (workspace_path / relative_path).resolve()
                 return str(actual_path)
 
             result = re.sub(workspace_pattern, replace_workspace, result)
 
-            # 额外处理常见的 ~/ 缩写 (如果出现在路径上下文中)
-            # 简单处理：将 ~/ 替换为 workspace_path (仅当它像个路径时)
+            # 额外处理常见的 ~/ 缩写
             result = re.sub(
-                r"(?<=[\s\"\'\)])~/([^\s\"\'<>]+)",
+                r"(?<=[\\s\"\'\)])~/([^\\s\"\'<>]+)",
                 lambda m: str((workspace_path / m.group(1)).resolve()),
                 result,
             )
@@ -499,6 +503,14 @@ class AgentServingABC(ABC):
         # 状态变量初始化
         workspace_path = self._get_workspace_path(task_id)
 
+        # 前置清洗：将引导数据中的所有 /workspace/ 路径映射到隔离区
+        # 这确保了 Agent 从一开始就拥有正确的路径认知
+        question = self._replace_file_paths_in_text(question, {}, workspace_path)
+        milestones = self._replace_file_paths_in_text(milestones, {}, workspace_path)
+        dialogue_scripts = self._replace_file_paths_in_text(
+            dialogue_scripts, {}, workspace_path
+        )
+
         for retry_attempt in range(self.max_retries):
             round_num = 0
             conversation = ""
@@ -573,9 +585,17 @@ class AgentServingABC(ABC):
                             raise Exception("user feedback is empty")
 
                         all_feedbacks.append(conversation)
+
+                        # 实时拦截：确保 UserSimulator 生成的反馈中也没有违规路径
+                        processed_conversation = self._replace_file_paths_in_text(
+                            conversation,
+                            path_mapping,
+                            workspace_path,
+                        )
+
                         round_result = self._send_query(
                             workspace_path,
-                            conversation,
+                            processed_conversation,
                             current_time=execution_start_time,
                         )
 

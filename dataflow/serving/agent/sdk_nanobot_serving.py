@@ -152,7 +152,7 @@ class SDKNanobotServing(AgentServingABC):
             "tools": {
                 "web": {"enable": True, "search": {"provider": "duckduckgo"}},
                 "exec": {"enable": True, "timeout": 60},
-                "restrictToWorkspace": False,
+                "restrictToWorkspace": True,
             },
             "gateway": {"heartbeat": {"enabled": False}},
         }
