@@ -19,6 +19,7 @@ from dataflow.serving.agent.user_v2.models import (
 
 logger = get_logger()
 
+
 class PerceptionStageV2(UserStage):
     """
     Perception Stage V2: Evidence-Driven Context Extraction.
@@ -74,8 +75,7 @@ class PerceptionStageV2(UserStage):
   ],
   "summary": "该文件实现了基于 JWT 的用户认证核心逻辑。"
 }}
-"""
-                    ,
+""",
                     # Note: In v2, we'll handle the aggregation of multiple files in the execute method
                 ),
                 llm_config=self.llm_config,
@@ -121,8 +121,8 @@ class PerceptionStageV2(UserStage):
   "loop_analysis": "Agent 陷入了重复读取同一文件的死循环，未能向下一阶段推进。",
   "overall_summary": "Agent 在初步探索阶段陷入循环。"
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
             UserStep(
@@ -159,8 +159,8 @@ class PerceptionStageV2(UserStage):
   "has_history": true,
   "summary": "用户处于焦虑状态，对进度不满，极度渴望看到实证结果。"
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
         ]
@@ -183,22 +183,30 @@ class PerceptionStageV2(UserStage):
             resp = await llm_client.generate(prompt, config=self.llm_config)
             # Using a simple parser since we want a FileEvidence object
             import json
+
             # Remove potential markdown blocks
-            cleaned_resp = resp.strip().removeprefix("```json").removesuffix("```").strip()
+            cleaned_resp = (
+                resp.strip().removeprefix("```json").removesuffix("```").strip()
+            )
             data = json.loads(cleaned_resp)
-            
+
             # In v2, we map the result to the FileEvidence model
-            evidence = FileEvidence(**data if isinstance(data, dict) else data['evidences'][0])
+            evidence = FileEvidence(
+                **data if isinstance(data, dict) else data["evidences"][0]
+            )
             return (file_path, evidence)
         except Exception as e:
             logger.error(f"Failed to extract evidence from {file_path}: {e}")
             # Return a dummy evidence to avoid breaking the pipeline
-            return (file_path, FileEvidence(
-                path=file_path, 
-                fact="Error extracting evidence", 
-                evidence_snippet="", 
-                relevance="Error"
-            ))
+            return (
+                file_path,
+                FileEvidence(
+                    path=file_path,
+                    fact="Error extracting evidence",
+                    evidence_snippet="",
+                    relevance="Error",
+                ),
+            )
 
     async def execute(
         self,
@@ -211,37 +219,36 @@ class PerceptionStageV2(UserStage):
         # 1. FileSensor: Extract evidence from each file in parallel
         file_sensor_step = self.steps[0]
         file_contents: Dict[str, str] = global_context.get("file_contents", {})
-        
+
         all_evidences = []
         if file_contents:
             logger.info(f"Extracting evidence from {len(file_contents)} files...")
             tasks = [
                 self._extract_evidence(
-                    path, 
-                    content, 
-                    file_sensor_step.schema.prompt_template, 
-                    global_context["question"], 
-                    llm_client
+                    path,
+                    content,
+                    file_sensor_step.schema.prompt_template,
+                    global_context["question"],
+                    llm_client,
                 )
                 for path, content in file_contents.items()
             ]
             results = await asyncio.gather(*tasks)
             all_evidences = [ev for _, ev in results]
-            
+
             # Synthesize the overall file_context summary (simple LLM call or join)
             summary_prompt = f"Based on the following evidences: {all_evidences}, provide a 1-sentence summary of the workspace state."
             summary = await llm_client.generate(summary_prompt, config=self.llm_config)
             data_pool[file_sensor_step.schema.output_key] = FileContext(
-                evidences=all_evidences,
-                summary=summary
+                evidences=all_evidences, summary=summary
             )
         else:
-            data_pool[file_sensor_step.schema.output_key] = FileContext(evidences=[], summary="No files available.")
+            data_pool[file_sensor_step.schema.output_key] = FileContext(
+                evidences=[], summary="No files available."
+            )
 
         # 2. Execute remaining sensors (AgentSensor, DialogueSensor)
         for step in self.steps[1:]:
             res = await step.execute(data_pool, global_context, llm_client)
             # In v2, the execute method of UserStep should return the parsed model
             data_pool[step.schema.output_key] = res["json_resp"]
-
-        return data_pool

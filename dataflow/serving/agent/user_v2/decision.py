@@ -19,6 +19,7 @@ from dataflow.serving.agent.user_v2.models import (
 
 logger = get_logger()
 
+
 class DecisionStageV2(UserStage):
     """
     Decision Stage V2: Strategy-Driven Response Generation.
@@ -80,8 +81,8 @@ class DecisionStageV2(UserStage):
   "strategy_rationale": "Agent 虽识别了认证模块，但未提供具体实现细节",
   "strategy_details": "用户注意到 Agent 提到的 verify_token 函数在摘要中没有具体逻辑，需要引导其深入阅读代码并给出结论。"
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
             UserStep(
@@ -123,8 +124,8 @@ class DecisionStageV2(UserStage):
   "style_guide": "Do: 使用精准的技术词汇; Don't: 使用任何感叹号或情绪化词汇; Don't: 使用'你好'等寒暄",
   "length_hint": "short"
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
             UserStep(
@@ -173,8 +174,8 @@ class DecisionStageV2(UserStage):
 输出一个 `FinalResponse` JSON 对象。
 - `feedback`: 最终生成的自然语言。
 - `reasoning`: 详细说明【证据核验结果 $\rightarrow$ 策略应用 $\rightarrow$ 最终表达】的推演过程。
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
         ]
@@ -191,5 +192,3 @@ class DecisionStageV2(UserStage):
         for step in self.steps:
             res = await step.execute(data_pool, global_context, llm_client)
             data_pool[step.schema.output_key] = res["json_resp"]
-
-        return data_pool

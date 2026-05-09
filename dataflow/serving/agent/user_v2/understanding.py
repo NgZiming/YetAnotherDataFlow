@@ -96,8 +96,8 @@ class UnderstandingStageV2(UserStage):
     }}
   ]
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
             UserStep(
@@ -159,8 +159,8 @@ class UnderstandingStageV2(UserStage):
   "next_objective": "分析 composer X 的代表作品其音乐风格特点",
   "reasoning": "审计显示 stage_1 已完成，目前处于 stage_2。Agent 行为正常且有增量进展。下一步需引导 Agent 完成代表作品分析。"
 }}
-"""
-                    ),
+""",
+                ),
                 llm_config=self.llm_config,
             ),
         ]
@@ -178,5 +178,3 @@ class UnderstandingStageV2(UserStage):
             res = await step.execute(data_pool, global_context, llm_client)
             # In v2, we assume the step handles Pydantic parsing via its output_type
             data_pool[step.schema.output_key] = res["json_resp"]
-
-        return data_pool
