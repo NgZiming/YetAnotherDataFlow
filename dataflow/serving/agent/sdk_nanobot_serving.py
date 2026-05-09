@@ -109,25 +109,6 @@ class SDKNanobotServing(AgentServingABC):
             f"SDKNanobotServing 初始化：workspace_basedir={self.workspace_basedir}, model={self.model}"
         )
 
-    def _cleanup_old_temp_dirs(self, max_age_hours: int = 1) -> None:
-        """清理超过指定时间的临时目录"""
-        temp_base = self.workspace_basedir / ".temp"
-        if not temp_base.exists():
-            return
-
-        current_time = time.time()
-        max_age_seconds = max_age_hours * 3600
-
-        try:
-            for temp_dir in temp_base.iterdir():
-                if temp_dir.is_dir():
-                    mtime = temp_dir.stat().st_mtime
-                    if current_time - mtime > max_age_seconds:
-                        shutil.rmtree(temp_dir)
-                        self.logger.debug(f"清理旧临时目录：{temp_dir}")
-        except Exception as e:
-            self.logger.warning(f"清理临时目录失败：{e}")
-
     def _create_config(self, force: bool = False) -> None:
         """创建配置文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,10 +231,9 @@ class SDKNanobotServing(AgentServingABC):
 
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径（临时目录）。"""
-        temp_base = self.workspace_basedir / ".temp"
-        temp_base.mkdir(parents=True, exist_ok=True)
-        # 使用 task_id 构建路径，确保同一任务在多轮验证中共享空间，但不同任务完全隔离
-        workspace_path = temp_base / f"task_{task_id}"
+        # 直接在 workspace_basedir 下创建任务目录，避开 .temp 排除名单
+        workspace_path = self.workspace_basedir / f"task_{task_id}"
+        workspace_path.mkdir(parents=True, exist_ok=True)
         self.logger.info(
             f"Determined workspace path for task {task_id}: {workspace_path.resolve()}"
         )
