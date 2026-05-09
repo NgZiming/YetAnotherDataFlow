@@ -584,14 +584,14 @@ class AgentServingABC(ABC):
                         if not conversation:
                             raise Exception("user feedback is empty")
 
-                        all_feedbacks.append(conversation)
-
                         # 实时拦截：确保 UserSimulator 生成的反馈中也没有违规路径
                         processed_conversation = self._replace_file_paths_in_text(
                             conversation,
                             path_mapping,
                             workspace_path,
                         )
+
+                        all_feedbacks.append(processed_conversation)
 
                         round_result = self._send_query(
                             workspace_path,
