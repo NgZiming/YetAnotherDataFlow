@@ -39,7 +39,7 @@ from dataflow.logger import get_logger
 # 导入 Nanobot 内部组件用于构建高保真 System Prompt
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
-from nanobot import Nanobot
+from nanobot.agent.hook import AgentHook
 
 # 导入 AgentServingABC 基类
 from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
@@ -212,21 +212,15 @@ class SDKNanobotServing(AgentServingABC):
     # Trajectory Capture Hook
     # =========================================================================
 
-    class TrajectoryCaptureHook:
+    class TrajectoryCaptureHook(AgentHook):
         """
         Custom hook to capture full agent trajectory in memory.
         Implements the AgentHook interface required by nanobot.
         """
 
         def __init__(self) -> None:
+            super().__init__()
             self.trajectory: List[Dict[str, Any]] = []
-
-        def wants_streaming(self) -> bool:
-            return False
-
-        async def before_iteration(self, context: Any) -> None:
-            """Empty implementation to satisfy Nanobot AgentHook interface."""
-            pass
 
         async def after_iteration(self, context: Any) -> None:
             # context is AgentHookContext
@@ -260,7 +254,9 @@ class SDKNanobotServing(AgentServingABC):
         temp_base.mkdir(parents=True, exist_ok=True)
         # 使用 task_id 构建路径，确保同一任务在多轮验证中共享空间，但不同任务完全隔离
         workspace_path = temp_base / f"task_{task_id}"
-        self.logger.info(f"Determined workspace path for task {task_id}: {workspace_path.resolve()}")
+        self.logger.info(
+            f"Determined workspace path for task {task_id}: {workspace_path.resolve()}"
+        )
         return workspace_path
 
     def _prepare_execution_context(
@@ -271,7 +267,9 @@ class SDKNanobotServing(AgentServingABC):
         task_id: Optional[str] = None,
     ) -> Dict[str, str]:
         """准备执行上下文（创建临时目录、生成文件、注入性格）。"""
-        self.logger.info(f"Preparing execution context for workspace: {workspace_path.resolve()}")
+        self.logger.info(
+            f"Preparing execution context for workspace: {workspace_path.resolve()}"
+        )
         workspace_path.mkdir(parents=True, exist_ok=True)
 
         # 1. 为该隔离空间创建专属的 Nanobot 实例
@@ -279,14 +277,18 @@ class SDKNanobotServing(AgentServingABC):
         try:
             from nanobot import Nanobot
 
-            self.logger.info(f"Creating Nanobot instance for workspace: {workspace_path.resolve()}")
+            self.logger.info(
+                f"Creating Nanobot instance for workspace: {workspace_path.resolve()}"
+            )
             bot = Nanobot.from_config(
                 config_path=str(self.config_path),
                 workspace=str(workspace_path.resolve()),
             )
             # 将实例存储在缓存中，以便 _send_query 可以访问
             self.bot_instances[workspace_path] = bot
-            self.logger.info(f"Successfully created Bot instance for: {workspace_path.resolve()}")
+            self.logger.info(
+                f"Successfully created Bot instance for: {workspace_path.resolve()}"
+            )
         except Exception as e:
             self.logger.error(f"创建任务专属 Bot 实例失败: {e}")
             raise e
@@ -309,7 +311,9 @@ class SDKNanobotServing(AgentServingABC):
                     skill_base_dir = str(extra_dir)
                     break
 
-        self.logger.info(f"Preparing files and skills. Base skill dir: {skill_base_dir}")
+        self.logger.info(
+            f"Preparing files and skills. Base skill dir: {skill_base_dir}"
+        )
         path_mapping = self._prepare_files(
             workspace_path=workspace_path,
             input_files_data=input_files_data,
@@ -324,7 +328,9 @@ class SDKNanobotServing(AgentServingABC):
         self, workspace_path: Path, task_id: Optional[str] = None
     ) -> None:
         """清理执行上下文资源（删除临时目录）。"""
-        self.logger.info(f"Cleaning up execution context for workspace: {workspace_path.resolve()}")
+        self.logger.info(
+            f"Cleaning up execution context for workspace: {workspace_path.resolve()}"
+        )
         # 1. 从缓存中移除 Bot 实例，以便垃圾回收
         if workspace_path in self.bot_instances:
             del self.bot_instances[workspace_path]
@@ -334,7 +340,9 @@ class SDKNanobotServing(AgentServingABC):
         if workspace_path.exists():
             try:
                 shutil.rmtree(workspace_path)
-                self.logger.info(f"Successfully deleted temporary directory: {workspace_path.resolve()}")
+                self.logger.info(
+                    f"Successfully deleted temporary directory: {workspace_path.resolve()}"
+                )
             except Exception as e:
                 self.logger.error(f"清理临时目录失败 {workspace_path}: {e}")
 
