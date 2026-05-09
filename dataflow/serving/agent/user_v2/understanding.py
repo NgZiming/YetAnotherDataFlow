@@ -55,8 +55,8 @@ class UnderstandingStageV2(UserStage):
 ## 输入字段说明
 - **question**: 用户的初始目标描述。它是所有审计的最高锚点，用于确保 Agent 没有偏离核心需求。
 - **milestones**: 任务定义的里程碑列表。每个元素包含 `success_criteria`（验收标准），这是你判定状态的唯一法典。
-- **file_context**: 从工作空间提取的物理证据集。包含 `evidences` (path, fact, snippet)。
-  - **审计要求**: 任何涉及“生成文件”、“修改代码”的里程碑，必须在此找到对应的 snippet 才能判定为 completed。
+- **file_context**: 从工作空间提取的物理证据集。包含 `evidences` 列表，每个元素包含 (path, fact, snippet)。
+  - **审计要求**: 任何涉及“生成文件”、“修改代码”的里程碑，必须在 `evidences` 中找到对应的 snippet 才能判定为 completed。
 - **agent_context**: Agent 的行为轨迹总结。
   - **审计要求**: 对于“分析”、“识别”等认知类里程碑，需核对 `key_findings` 是否覆盖了验收标准中的关键点。
 - **dialogue_context**: 用户与 Agent 的互动状态。用于辅助判断 Agent 是否在对话中已承诺交付某项结果。
@@ -85,7 +85,7 @@ class UnderstandingStageV2(UserStage):
       "milestone_id": "字符串, 如 stage_1",
       "status": "枚举值: completed | in_progress | not_started | blocked",
       "completion_percentage": 整数 (0-100),
-      "evidence_ref": ["字符串, 引用 FileEvidence 的 path"],
+      "evidence_ref": ["字符串, 引用证据的 path"],
       "reasoning": "详细的审计推理过程"
     }}
   ]
@@ -129,9 +129,9 @@ class UnderstandingStageV2(UserStage):
 - 初始问题：{question}
 
 ## 输入字段说明
-- **milestone_status**: `MilestoneAuditor` 的输出。包含每个里程碑的 status 和 completion_percentage。它是判定 `is_completed` 的直接依据。
-- **agent_context**: 包含 `is_looping` 标志。这是判定 `final_status == ABORTED` 的最高优先级信号。
-- **dialogue_context**: 包含 `emotional_tone` 和 `has_history`。这两个字段必须原样传递到最终状态中。
+- **milestone_status**: 审计结果。包含每个里程碑的 status 和 completion_percentage。它是判定 `is_completed` 的直接依据。
+- **agent_context**: 行为分析结果。包含 `is_looping` 标志。这是判定 `final_status == ABORTED` 的最高优先级信号。
+- **dialogue_context**: 对话状态。包含 `emotional_tone` 和 `has_history`。这两个字段必须原样传递到最终状态中。
 - **question**: 用户的初始问题，用于在合成 `next_objective` 时进行目标锚定检查，防止目标漂移。
 
 ## 状态合成算法 (Synthesis Algorithm)

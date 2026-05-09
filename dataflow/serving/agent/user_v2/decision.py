@@ -161,9 +161,9 @@ class DecisionStageV2(UserStage):
 ## 输入字段说明
 - **dialogue_strategy**: 由 Strategizer 生成的战略指令。包含 `goal` (核心目的)、`approach` (表达方式) 和 `strategy_details` (具体披露量和引导方向)。它是你生成文本的最高指导。
 - **persona_style**: 由 PersonaAdapter 生成的风格约束。包含 `style_guide` (Do's and Don'ts) 和 `tone`。确保你的语言符合人设，绝无 AI 味。
-- **task_state**: 当前任务状态。你需要根据 `has_history` 判定是首次对话还是后续反馈。
+- **task_state**: 当前任务状态。包含 `has_history` (用于判定场景) 和 `final_status`。
 - **question**: 用户的初始问题。在【首次对话】场景中，它是你需要渐进式披露的核心目标。
-- **file_context**: 物理实证集。用于在【后续对话】中核验 Agent 的声明是否属实。
+- **file_context**: 物理实证集。包含 `evidences` 列表，用于在【后续对话】中核验 Agent 的声明是否属实。
 - **milestones**: 里程碑定义。用于确保你的反馈能准确推动 `task_state.next_objective` 的实现。
 
 ## 核心生成算法 (Generation Algorithm)
@@ -194,7 +194,7 @@ class DecisionStageV2(UserStage):
 - ❌ 禁止文学化描述（例如：“我的内心感到空虚”）。
 
 ## 输出要求
-输出一个 `FinalResponse` JSON 对象。
+必须输出一个 JSON 对象，包含以下字段：
 - `judgment`: 判定结果。严格映射：`CONTINUE` -> `in_progress`, `FINISHED` -> `completed`, `ABORTED` -> `aborted`。
 - `feedback`: 最终生成的自然语言。
 - `reasoning`: 详细说明【证据核验结果 -> 策略应用 -> 最终表达】的推演过程。

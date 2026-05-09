@@ -54,7 +54,7 @@ class PerceptionStageV2(UserStage):
 ## 认知逻辑
 1. **目标锚定**：分析用户问题，确定该文件在任务中扮演的角色（如：定义了核心类、提供了配置参数、记录了分析结论）。
 2. **实证提取**：在文件中寻找能直接证明或反驳任务目标的具体片段。
-3. **证据构建**：为每一个发现构建一个 `FileEvidence` 对象。
+3. **证据构建**：为每一个发现构建一个包含 path, fact, evidence_snippet, relevance 的 JSON 对象。
 
 ## 提取标准 (Evidence Standard)
 - **具体化**：禁止使用“文件讨论了 X”这种模糊描述。必须写成“文件中明确定义了 X 函数，其逻辑是 Y”。
@@ -62,24 +62,21 @@ class PerceptionStageV2(UserStage):
 - **相关性**：只提取与 {question} 强相关的信息。无关内容直接忽略。
 
 ## 输出格式
-请输出一个包含 `evidences` 列表和 `summary` 的 JSON 对象。
-- `evidences`: 列表，每个元素包含 path, fact, evidence_snippet, relevance。
-- `summary`: 对该文件在任务中价值的 1-2 句极简总结。
+必须输出一个单一的 JSON 对象（不要包装在列表或其他对象中），包含以下字段：
+- `path`: 文件的完整路径。
+- `fact`: 提取的实证事实。
+- `evidence_snippet`: 原封不动的文本截取。
+- `relevance`: 该证据与 {question} 的相关性分析。
 
 ## 示例
 问题："如何实现用户认证？"
 输出：
-{{
-  "evidences": [
-    {{
-      "path": "auth.py",
-      "fact": "使用 JWT 令牌进行身份验证，核心逻辑在 verify_token 函数中",
-      "evidence_snippet": "def verify_token(token):\\n    payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])",
-      "relevance": "直接定义了认证的实现机制"
-    }}
-  ],
-  "summary": "该文件实现了基于 JWT 的用户认证核心逻辑。"
-}}
+{
+  "path": "auth.py",
+  "fact": "使用 JWT 令牌进行身份验证，核心逻辑在 verify_token 函数中",
+  "evidence_snippet": "def verify_token(token):\\n    payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])",
+  "relevance": "直接定义了认证的实现机制"
+}
 """,
                     # Note: In v2, we'll handle the aggregation of multiple files in the execute method
                 ),
