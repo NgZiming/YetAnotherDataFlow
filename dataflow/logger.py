@@ -64,6 +64,7 @@ def _make_colored_formatter():
         fmt=(
             "%(asctime_log_color)s%(asctime)s.%(msecs)03d%(reset)s"
             " | %(levelname_log_color)s%(levelname)-8s%(reset)s"
+            " | %(thread_log_color)s%(thread)d%(reset)s"
             " | %(name_log_color)s%(name)s%(reset)s"
             ":%(funcName_log_color)s%(filename)s%(reset)s"
             ":%(funcName_log_color)s%(funcName)s%(reset)s"
@@ -72,7 +73,10 @@ def _make_colored_formatter():
         ),
         datefmt="%Y-%m-%d %H:%M:%S",
         log_colors=log_colors,
-        secondary_log_colors=secondary,
+        secondary_log_colors={
+            **secondary,
+            "thread": {k: "magenta" for k in log_colors},
+        },
         style="%",
     )
 
