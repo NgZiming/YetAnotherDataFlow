@@ -259,7 +259,9 @@ class SDKNanobotServing(AgentServingABC):
         temp_base = self.workspace_basedir / ".temp"
         temp_base.mkdir(parents=True, exist_ok=True)
         # 使用 task_id 构建路径，确保同一任务在多轮验证中共享空间，但不同任务完全隔离
-        return temp_base / f"task_{task_id}"
+        workspace_path = temp_base / f"task_{task_id}"
+        self.logger.info(f"Determined workspace path for task {task_id}: {workspace_path.resolve()}")
+        return workspace_path
 
     def _prepare_execution_context(
         self,
@@ -269,6 +271,7 @@ class SDKNanobotServing(AgentServingABC):
         task_id: Optional[str] = None,
     ) -> Dict[str, str]:
         """准备执行上下文（创建临时目录、生成文件、注入性格）。"""
+        self.logger.info(f"Preparing execution context for workspace: {workspace_path.resolve()}")
         workspace_path.mkdir(parents=True, exist_ok=True)
 
         # 1. 为该隔离空间创建专属的 Nanobot 实例
@@ -276,22 +279,27 @@ class SDKNanobotServing(AgentServingABC):
         try:
             from nanobot import Nanobot
 
+            self.logger.info(f"Creating Nanobot instance for workspace: {workspace_path.resolve()}")
             bot = Nanobot.from_config(
                 config_path=str(self.config_path),
                 workspace=str(workspace_path.resolve()),
             )
             # 将实例存储在缓存中，以便 _send_query 可以访问
             self.bot_instances[workspace_path] = bot
-            self.logger.debug(f"为任务空间创建专属 Bot 实例: {workspace_path}")
+            self.logger.info(f"Successfully created Bot instance for: {workspace_path.resolve()}")
         except Exception as e:
             self.logger.error(f"创建任务专属 Bot 实例失败: {e}")
             raise e
 
         # 2. 性格注入: Nanobot ContextBuilder 自动加载根目录的 USER.md 和 SOUL.md
         if self.user_md:
-            (workspace_path / "USER.md").write_text(self.user_md, encoding="utf-8")
+            target = workspace_path / "USER.md"
+            target.write_text(self.user_md, encoding="utf-8")
+            self.logger.info(f"Injected USER.md into {target.resolve()}")
         if self.soul_md:
-            (workspace_path / "SOUL.md").write_text(self.soul_md, encoding="utf-8")
+            target = workspace_path / "SOUL.md"
+            target.write_text(self.soul_md, encoding="utf-8")
+            self.logger.info(f"Injected SOUL.md into {target.resolve()}")
 
         # 3. 使用基类方法准备文件和技能，确保物理拷贝以实现完全隔离
         skill_base_dir = ""
@@ -301,12 +309,14 @@ class SDKNanobotServing(AgentServingABC):
                     skill_base_dir = str(extra_dir)
                     break
 
+        self.logger.info(f"Preparing files and skills. Base skill dir: {skill_base_dir}")
         path_mapping = self._prepare_files(
             workspace_path=workspace_path,
             input_files_data=input_files_data,
             input_skills_data=input_skills_data,
             skill_base_dir=skill_base_dir,
         )
+        self.logger.info(f"Files prepared. Path mapping: {path_mapping}")
 
         return path_mapping
 
@@ -314,16 +324,17 @@ class SDKNanobotServing(AgentServingABC):
         self, workspace_path: Path, task_id: Optional[str] = None
     ) -> None:
         """清理执行上下文资源（删除临时目录）。"""
+        self.logger.info(f"Cleaning up execution context for workspace: {workspace_path.resolve()}")
         # 1. 从缓存中移除 Bot 实例，以便垃圾回收
         if workspace_path in self.bot_instances:
             del self.bot_instances[workspace_path]
-            self.logger.debug(f"销毁任务专属 Bot 实例: {workspace_path}")
+            self.logger.info(f"Destroyed Bot instance for: {workspace_path.resolve()}")
 
         # 2. 删除临时目录
         if workspace_path.exists():
             try:
                 shutil.rmtree(workspace_path)
-                self.logger.debug(f"清理临时目录：{workspace_path}")
+                self.logger.info(f"Successfully deleted temporary directory: {workspace_path.resolve()}")
             except Exception as e:
                 self.logger.error(f"清理临时目录失败 {workspace_path}: {e}")
 
