@@ -75,7 +75,7 @@ def _make_colored_formatter():
         log_colors=log_colors,
         secondary_log_colors={
             **secondary,
-            "thread": {k: "magenta" for k in log_colors},
+            "thread": {k: "cyan" for k in log_colors},
         },
         style="%",
     )
