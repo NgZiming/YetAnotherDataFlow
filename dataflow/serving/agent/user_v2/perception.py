@@ -71,12 +71,12 @@ class PerceptionStageV2(UserStage):
 ## 示例
 问题："如何实现用户认证？"
 输出：
-{
+{{
   "path": "auth.py",
   "fact": "使用 JWT 令牌进行身份验证，核心逻辑在 verify_token 函数中",
   "evidence_snippet": "def verify_token(token):\\n    payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])",
   "relevance": "直接定义了认证的实现机制"
-}
+}}
 """,
                     # Note: In v2, we'll handle the aggregation of multiple files in the execute method
                 ),
