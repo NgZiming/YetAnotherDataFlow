@@ -423,71 +423,65 @@ class DecisionStage(UserStage):
    - **保持人设**: 根据 `persona_context` 调整语气和风格
    - **绝对禁忌**: 严禁在 `feedback` 中提及任何内部管理术语（如 "stage", "milestone", "final_status" 等）
 
-### 场景 A：首次对话（has_history == false）
-**任务**：生成初始用户问题，启动对话
-1. **理解任务目标**: 从 question 中理解用户想要完成什么
-2. **分析可用资源**: 查看 file_context 中有哪些文件可用
-3. **参考里程碑**: 了解任务需要完成的关键步骤
-4. **生成初始问题**:
-   - 提出一个清晰、具体的问题
-   - 表达对任务的期望
-   - 可以提及关心的具体方面
-5. **保持人设**: 根据 persona_context 调整语气和风格
+    # 场景 A：首次对话（has_history == false）
+    **任务**：生成初始用户问题，启动对话
+    1. **理解任务目标**: 从 question 中理解用户想要完成什么
+    2. **分析可用资源**: 查看 file_context 中有哪些文件可用
+    3. **参考里程碑**: 了解任务需要完成的关键步骤
+    4. **生成初始问题**:
+       - 提出一个直接、具体的问题
+       - 明确表达任务需求，禁止任何礼貌性开场白（如“你好”、“您好”）
+       - 避免文学化描述，直接陈述目标
+    5. **保持人设**: 根据 persona_context 调整语气和风格
 
-**首次对话输出示例**：
-{{
-  "judgment": "in_progress",
-  "feedback": "我想了解 composer X 的音乐风格和发展历程。我注意到有一些相关的文档和代码文件，希望你能帮我梳理一下这位作曲家的背景信息、代表作品，以及他在音乐领域的影响。特别是想了解他的创作风格有什么特点，以及他的作品对后来的音乐家有什么影响。",
-  "reasoning": "首次对话，提出初始问题，启动探索任务."
-}}
+    **首次对话输出示例**：
+    {{
+      "judgment": "in_progress",
+      "feedback": "我想了解 composer X 的音乐风格和发展历程，请帮我梳理其背景信息、代表作品，以及他在音乐领域的影响。",
+      "reasoning": "首次对话，直接提出核心需求，启动探索任务."
+    }}
 
-### 场景 B：后续对话（has_history == true）
-**任务**：根据 `task_state.final_status` 生成反馈
-1. **检查 `final_status`**:
-   - 如果 `final_status == "ABORTED"` → 生成终止反馈，说明原因
-   - 如果 `final_status == "FINISHED"` → 生成完成反馈，表达满意
-   - 如果 `final_status == "CONTINUE"` → 生成继续反馈，推动任务前进
-2. **理解用户意图**: 从 dialogue_context.user_intent 中理解用户的核心需求
-3. **生成反馈**:
-   - 根据 `final_status` 和 `task_state.reasoning` 生成合适的反馈内容
-   - 体现用户人设和当前对话策略
-4. **保持人设**: 根据 persona_context 调整语气和风格
-5. **推动进展**: 确保反馈能推动任务向目标前进（除非 final_status 为 ABORTED）
+    # 场景 B：后续对话（has_history == true）
+    **任务**：根据 `task_state.final_status` 生成反馈
+    1. **检查 `final_status`**:
+       - 如果 `final_status == "ABORTED"` -> 生成终止反馈，说明原因
+       - 如果 `final_status == "FINISHED"` -> 生成完成反馈，确认结束
+       - 如果 `final_status == "CONTINUE"` -> 生成继续反馈，推动任务前进
+    2. **理解用户意图**: 从 dialogue_context.user_intent 中理解用户的核心需求
+    3. **生成反馈**:
+       - **绝对禁忌**：禁止使用礼貌性开场白（如“你好”）、禁止重复 Agent 的计划内容、禁止文学化情绪堆砌。
+       - **简洁性**：在 neutral 状态下，确认方案应极其简短（如“同意，请执行”）。
+       - 体现用户人设和当前对话策略
+    4. **保持人设**: 根据 persona_context 调整语气和风格
+    5. **推动进展**: 确保反馈能推动任务向目标前进（除非 final_status 为 ABORTED）
 
-**后续对话输出示例（满意）**：
-{{
-  "judgment": "in_progress",
-  "feedback": "谢谢你的详细解答！关于 composer X 的背景信息很清楚了。不过我还想了解一些更具体的内容：他的代表作品中，哪几首最能体现他的音乐风格？能否推荐一些适合入门聆听的作品？",
-  "reasoning": "用户对初步回答满意，希望获得更具体的作品推荐。"
-}}
+    **后续对话输出示例（满意/确认）**：
+    {{
+      "judgment": "in_progress",
+      "feedback": "方案可行，同意。请先执行第一阶段的案例搜集并提供清单。",
+      "reasoning": "用户确认方案，要求立即执行第一阶段任务。"
+    }}
 
-**后续对话输出示例（需要补充）**：
-{{
-  "judgment": "in_progress",
-  "feedback": "你提到的这些信息很有帮助，但我感觉还缺少一些关键内容。特别是关于 composer X 的音乐风格分析不够详细，能否具体说明他的作品中使用了哪些独特的作曲技巧或音乐元素？",
-  "reasoning": "Agent 的回答不够详细，需要补充更具体的风格分析。"
-}}
+    **后续对话输出示例（需要补充）**：
+    {{
+      "judgment": "in_progress",
+      "feedback": "信息不够详细，特别是关于作曲技巧的部分，请具体说明使用了哪些独特元素。",
+      "reasoning": "Agent 回答不足，要求补充具体技术细节。"
+    }}
 
-**后续对话输出示例（aborted - 被反爬拦截）**：
-{{
-  "judgment": "aborted",
-  "feedback": "很遗憾，看起来我们遇到了技术障碍。Agent 多次尝试访问目标网站都被反爬策略拦截，返回 403 错误。这种情况下继续尝试可能会加重问题。建议考虑降级方案：使用公开的 API 接口，或者寻找替代的数据源。",
-  "reasoning": "Agent 被反爬策略拦截，多次尝试都返回 403 错误，任务无法继续。"
-}}
+    **后续对话输出示例（aborted - 被反爬拦截）**：
+    {{
+      "judgment": "aborted",
+      "feedback": "好吧，看来这个网站确实进不去，没法继续了，就这样吧。",
+      "reasoning": "Agent 无法访问目标网站，用户接受现实并选择终止任务。"
+    }}
 
-**后续对话输出示例（aborted - 死循环终止）**：
-{{
-  "judgment": "aborted",
-  "feedback": "我已经多次明确要求你提供实际可执行的计划，但你始终在重复相同的高层理论分析。这种沟通已经在原地打转，没有任何实质性进展。我认为你无法完成这个任务，对话至此终止。",
-  "reasoning": "task_state.final_status 为 ABORTED，表示 UnderstandingStage 已判定任务进入死循环，必须终止。"
-}}
-
-**后续对话输出示例（finished - 任务完成）**：
-{{
-  "judgment": "completed",
-  "feedback": "太棒了！你提供的信息非常全面，完全满足了我的需求。关于 composer X 的背景、代表作品和音乐风格都解释得很清楚。这次对话非常有收获，谢谢你的帮助！",
-  "reasoning": "task_state.final_status 为 FINISHED，表示任务已成功完成，所有目标都已达成。"
-}}
+    **后续对话输出示例（finished - 任务完成）**：
+    {{
+      "judgment": "completed",
+      "feedback": "没错，就是这些。信息很全面，谢谢帮我搞定！",
+      "reasoning": "任务目标全部达成，用户确认满意并结束对话。"
+    }}
 
 ## 输出要求（非常重要！）
 - **只输出纯 JSON，不要 Markdown 代码块（不要 ```json ... ```）**
