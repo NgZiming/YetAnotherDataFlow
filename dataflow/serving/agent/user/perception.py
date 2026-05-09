@@ -30,6 +30,14 @@ class AgentContext(BaseModel):
     reasoning_pattern: str = Field(
         ..., description="The current reasoning pattern (e.g., initial_exploration)"
     )
+    is_looping: bool = Field(
+        default=False,
+        description="Whether the agent is stuck in a behavioral loop (repeating actions without progress)",
+    )
+    loop_description: Optional[str] = Field(
+        default=None,
+        description="Description of the repetitive behavior if is_looping is True",
+    )
     summary: str = Field(..., description="Summary of the agent's current state")
 
 
@@ -40,7 +48,8 @@ class DialogueContext(BaseModel):
 
     user_intent: str = Field(..., description="The user's primary intent")
     emotional_tone: str = Field(
-        default="neutral", description="Emotional tone (e.g., curious, frustrated)"
+        ...,
+        description="Emotional tone (must be one of: satisfied, dissatisfied, confused, urgent, neutral)",
     )
     key_questions: List[str] = Field(
         default_factory=list, description="Key questions the user is asking"
@@ -158,6 +167,18 @@ class PerceptionStage(UserStage):
   - **hypothesis_testing**: 验证假设，确认某个猜想（如：测试某个方案是否可行）
   - **course_correction**: 发现错误，调整方向（如：发现之前的理解有误，重新开始）
 
+- **is_looping**: 是否陷入行为死循环（必须选择 true 或 false）
+  - **判定标准**:
+    - Agent 在连续 3 轮或更多对话中，采取的行动高度相似（例如：反复提供理论分析 -> 道歉 -> 再次提供理论分析）。
+    - 尽管 Agent 在尝试，但 key_findings 没有任何实质性的增量更新。
+    - 用户已明确要求具体结果（如代码、计划），但 Agent 持续以相同模式回避或重复相同形式的回答。
+    - **零增量原则**: 只要行为模式在重复，且在最近 2 轮内没有产生任何能够推动里程碑进度的实质性新发现，即判定为 true。
+  - **关键**: 不要将“分步执行”误判为“死循环”，但要极其敏锐地捕捉“原地打转”。
+
+- **loop_description**: 死循环行为描述
+  - 如果 is_looping 为 true，请详细描述 Agent 在重复什么行为（例如："Agent 反复提供高层方法论而无法给出具体执行计划，且在用户提醒后依然重复此模式"）。
+  - 如果 is_looping 为 false，则为空字符串。
+
 - **summary**: 综合总结（不超过 300 字）
   - 整合 key_actions 和 key_findings
   - 说明 Agent 当前进展和下一步方向
@@ -190,14 +211,18 @@ class PerceptionStage(UserStage):
   "key_actions": [],
   "key_findings": [],
   "reasoning_pattern": "initial_exploration",
+  "is_looping": false,
+  "loop_description": "",
   "summary": "Agent 尚未开始执行任务，等待用户提出问题。"
 }}
 
 ## 输出示例（非首次对话）
 {{
   "key_actions": ["搜索了 composer X 的音乐风格", "检索了 progressive house 的发展历史", "阅读了 composer X 的官方文档"],
-  "key_findings": ["发现 composer X 是 electronic music 领域的知名人物", "progressive house 起源于 1990 年代", "composer X 的作品融合了古典和电子元素"],
+  "key_findings": ["发现 composer X 是 electronic music 领域的知名人物", "progressive house 起源于 1990 年代", "composer X 的作品融合了古典 and 电子元素"],
   "reasoning_pattern": "initial_exploration",
+  "is_looping": false,
+  "loop_description": "",
   "summary": "Agent 进行了初步探索，搜索了目标作曲家的背景和音乐风格，获得了基础信息。发现 composer X 是 electronic music 领域的知名人物，作品融合了古典和电子元素。下一步可以深入分析其代表作品。"
 }}""",
                 ),
@@ -233,11 +258,12 @@ class PerceptionStage(UserStage):
   - **长度**: 1-2 句话概括
 
 - **emotional_tone**: 用户的情感倾向（必须从以下值中选择一个）
-  - **satisfied**: 对 Agent 的回答满意（关键词：谢谢、很好、明白了、不错）
-  - **dissatisfied**: 不满意（关键词：不对、错了、不是这个、失望）
-  - **confused**: 困惑（关键词：不太懂、为什么、什么意思、解释一下）
-  - **urgent**: 急切（关键词：快点、尽快、急需、着急）
+  - **satisfied**: 对 Agent 的回答满意（关键词：谢谢、很好、明白了、不错、太棒了）
+  - **dissatisfied**: 不满意（关键词：不对、错了、不是这个、失望、厌烦、不行）
+  - **confused**: 困惑（关键词：不太懂、为什么、什么意思、解释一下、不明白）
+  - **urgent**: 急切（关键词：快点、尽快、急需、着急、赶紧）
   - **neutral**: 中性（无明确情感倾向，如首次对话）
+  - **重要**: 根据对话中的关键词和语气强度判断，不要过度解读
 
 - **key_questions**: 用户提出的核心问题列表
   - **显式问题**: 直接以问号结尾的句子
@@ -332,11 +358,16 @@ class PerceptionStage(UserStage):
         logger.info("Entering Perception Stage...")
 
         # 预先检查所有步骤的输入依赖
-        self._check_step_dependencies(self.steps, data_pool, "PerceptionStage")
+        self._check_step_dependencies(
+            self.steps,
+            data_pool,
+            global_context,
+            "PerceptionStage",
+        )
 
         # FileSensor: process each file separately with parallel LLM calls
         file_sensor_step = self.steps[0]
-        file_contents: Dict[str, str] = data_pool.get("file_contents", {})
+        file_contents: Dict[str, str] = global_context.get("file_contents", {})
 
         if file_contents:
             logger.info(f"Processing {len(file_contents)} files in parallel...")
@@ -344,7 +375,7 @@ class PerceptionStage(UserStage):
                 self._summarize_file(
                     file_path=path,
                     file_content=content,
-                    question=data_pool["question"],
+                    question=global_context["question"],
                     prompt_template=file_sensor_step.schema.prompt_template,
                     llm_client=llm_client,
                 )

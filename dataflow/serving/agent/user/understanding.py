@@ -43,7 +43,7 @@ class ProgressAssessment(BaseModel):
     overall_status: str = Field(
         ...,
         description="整体状态",
-        pattern="^(on_track|at_risk|behind|completed)$",
+        pattern="^(on_track|at_risk|behind|completed|loop)$",
     )
     quality_assessment: str = Field(
         ...,
@@ -72,6 +72,20 @@ class TaskState(BaseModel):
     next_objective: str = Field(..., description="下一步最优先的目标")
     reasoning: str = Field(
         ..., min_length=50, max_length=500, description="详细的推理过程 (200-300 字)"
+    )
+    final_status: str = Field(
+        ...,
+        description="最终任务状态（必须从以下值中选择一个）",
+        pattern="^(CONTINUE|FINISHED|ABORTED)$",
+    )
+    emotional_tone: str = Field(
+        ...,
+        description="用户当前情绪倾向（必须从以下值中选择一个：satisfied/dissatisfied/confused/urgent/neutral），用于 Decision 阶段调整语气风格",
+        pattern="^(satisfied|dissatisfied|confused|urgent|neutral)$",
+    )
+    has_history: bool = Field(
+        ...,
+        description="是否有历史对话（从 dialogue_context 传递，用于 Decision 阶段判断首次对话）",
     )
 
 
@@ -201,10 +215,12 @@ class UnderstandingStage(UserStage):
   - **key_actions**: Agent 执行的关键行动
   - **key_findings**: Agent 获得的重要发现
   - **reasoning_pattern**: 推理模式
+  - **is_looping**: 是否陷入死循环（**最高优先级信号**）
+  - **loop_description**: 死循环的行为描述
 
 - **dialogue_context**: 对话上下文，包含：
   - **user_intent**: 用户意图
-  - **emotional_tone**: 用户情感倾向
+  - **emotional_tone**: 用户情感倾向（**关键判定信号**: satisfied/dissatisfied/confused/urgent/neutral）
   - **key_questions**: 用户提出的问题
   - **has_history**: 是否有历史对话
 
@@ -214,6 +230,7 @@ class UnderstandingStage(UserStage):
   - **at_risk**: 有风险，可能出现延误
   - **behind**: 落后于计划，需要加速
   - **completed**: 任务已完成
+  - **loop**: 陷入死循环（行为高度重复，无增量进展，无法通过当前方式达成目标）
 
 - **quality_assessment**: 质量评估（必须从以下值中选择一个）
   - **high**: 高质量，超出预期
@@ -234,9 +251,15 @@ class UnderstandingStage(UserStage):
 
 ## 任务
 1. **整体进度评估**: 基于 milestone_status 判断任务的总体完成度
-2. **识别瓶颈**: 从 agent_context 和 dialogue_context 中找出阻碍进展的关键问题
-3. **评估质量**: 判断已完成工作的质量（是否满足要求）
-4. **预测风险**: 识别可能影响后续进展的风险因素
+2. **死循环强制判定（最高优先级）**: 
+   - **检查 `agent_context.is_looping`**: 如果为 `true` -> **必须立即选择 `overall_status: "loop"`**，无论用户情绪如何
+   - **检查 `emotional_tone`**: 
+     - 如果为 `dissatisfied` 或 `urgent` 且持续 2 轮以上 -> **选择 `overall_status: "at_risk"`**
+     - 如果为 `dissatisfied` 或 `urgent` 且伴随行为重复 -> **选择 `overall_status: "loop"`**
+   - **检查行为重复**: Agent 是否陷入重复行为模式（例如：反复提供相同类型的理论框架 → 道歉 → 再次提供理论框架），且无实质性新发现。如果确认陷入循环 -> **必须选择 `overall_status: "loop"`**
+3. **识别瓶颈**: 从 agent_context 和 dialogue_context 中找出阻碍进展的关键问题
+4. **评估质量**: 判断已完成工作的质量（是否满足要求）
+5. **预测风险**: 识别可能影响后续进展的风险因素
 
 ## 渐进式评估原则（重要！）
 - **认知复杂度**: 意识到一个里程碑 (Stage) 通常包含多个复杂子任务，不可能在 1-2 轮对话中全部完成。
@@ -282,6 +305,7 @@ class UnderstandingStage(UserStage):
                         "milestone_status",
                         "progress_assessment",
                         "dialogue_context",
+                        "question",
                     ],
                     output_key="task_state",
                     output_type=TaskState,
@@ -291,6 +315,7 @@ class UnderstandingStage(UserStage):
 - 里程碑状态：{milestone_status}
 - 进度评估：{progress_assessment}
 - 对话上下文：{dialogue_context}
+- 初始问题：{question}
 
 ## 输入字段说明
 - **milestone_status**: 里程碑状态总结，包含：
@@ -299,18 +324,21 @@ class UnderstandingStage(UserStage):
   - **summary**: 综合总结
 
 - **progress_assessment**: 进度评估报告，包含：
-  - **overall_status**: 整体状态（on_track/at_risk/behind/completed）
+  - **overall_status**: 整体状态（on_track/at_risk/behind/completed/loop）
   - **quality_assessment**: 质量评估（high/medium/low）
   - **bottlenecks**: 瓶颈列表
   - **risks**: 风险列表
   - **recommendations**: 建议列表
   - **detailed_assessment**: 详细评估报告
+  - **关键**: 此字段已经整合了 is_looping 和 emotional_pressure 的判定结果
 
 - **dialogue_context**: 对话上下文，包含：
   - **user_intent**: 用户意图
-  - **emotional_tone**: 用户情感倾向
+  - **emotional_tone**: 用户情感倾向（satisfied/dissatisfied/confused/urgent/neutral）
   - **key_questions**: 用户提出的问题
   - **has_history**: 是否有历史对话（**关键：用于判断首次对话**）
+
+- **question**: 用户的初始问题/任务描述（**用于目标锚定检查**）
 
 ## 输出字段说明
 - **current_milestone**: 当前正在处理的里程碑
@@ -330,15 +358,60 @@ class UnderstandingStage(UserStage):
 
 - **next_objective**: 下一步最优先的目标
   - **首次对话**: "等待用户提出初始问题，启动任务"
-  - **后续对话**: 根据 progress_assessment 和 recommendations 提出具体目标
+  - **后续对话 (CONTINUE)**: 根据 progress_assessment 和 recommendations 提出具体目标
+  - **后续对话 (FINISHED)**: "任务已完成，无需继续"
+  - **特别情况 (ABORTED)**: 如果 `final_status` 为 "ABORTED" -> 必须写 "任务已终止，无需继续"
 
 - **reasoning**: 详细的推理过程（100-500 字）
   - 整合所有信息，说明任务当前状态和下一步方向
+
+- **final_status**: 最终任务状态（**必须从以下值中选择一个**）
+  - **CONTINUE**: 任务可以继续，Agent 需要按照 next_objective 继续工作
+  - **FINISHED**: 任务已完成，所有要求已满足
+  - **ABORTED**: 任务必须终止（触发条件：`progress_assessment.overall_status == "loop"` 或 `emotional_tone` 为 `dissatisfied`/`urgent` 且行为重复）
+
+- **emotional_tone**: 用户当前情绪倾向（**必须从 `dialogue_context.emotional_tone` 直接传递**）
+  - **必须从以下值中选择一个**: `satisfied` / `dissatisfied` / `confused` / `urgent` / `neutral`
+  - **重要**: 不要修改 `dialogue_context.emotional_tone` 的值，直接传递即可
+  - **用途**: Decision 阶段根据 `final_status` + `emotional_tone` 组合调整语气
+
+- **has_history**: 是否有历史对话（**必须从 `dialogue_context.has_history` 直接传递**）
+  - **必须从以下值中选择一个**: `true` / `false`
+  - **重要**: 不要修改 `dialogue_context.has_history` 的值，直接传递即可
+  - **用途**: Decision 阶段判断是生成初始问题还是后续反馈
 
 ## 任务
 1. **判断是否首次对话**: 检查 dialogue_context.has_history
    - **false**: 首次对话，任务尚未启动
    - **true**: 后续对话，任务已在进行中
+
+2. **最终状态判定（完全信任 ProgressEvaluator）**: 
+   - **检查 `progress_assessment.overall_status`**: 
+     - 如果为 `"loop"` -> **必须设置 `final_status: "ABORTED"`**
+     - 如果为 `"completed"` -> **必须设置 `final_status: "FINISHED"`**
+   - **检查 `is_completed`**: 
+     - 如果所有里程碑都已完成 -> **设置 `final_status: "FINISHED"`**
+   - **默认情况**: **设置 `final_status: "CONTINUE"`**
+   - **重要**: 不再直接检查 `is_looping` 或 `emotional_tone`，完全信任 `ProgressEvaluator` 的判定结果
+
+3. **情绪传递（必须执行）**: 
+   - **从 `dialogue_context.emotional_tone` 直接复制**到 `emotional_tone` 字段
+   - **不要修改**用户的原始情绪值
+   - **示例**: 如果 `dialogue_context.emotional_tone = "confused"`，则 `task_state.emotional_tone = "confused"`
+
+4. **历史对话传递（必须执行）**: 
+   - **从 `dialogue_context.has_history` 直接复制**到 `has_history` 字段
+   - **不要修改**用户的原始历史状态
+   - **示例**: 如果 `dialogue_context.has_history = false`，则 `task_state.has_history = false`
+
+5. **目标锚定检查（防止目标漂移）**: 
+   - 将 `next_objective` 与初始 `question` 进行比对
+   - 确认当前目标是否仍然服务于初始问题的核心需求
+   - 如果发现 Agent 正在偏离初始目标 -> 在 `reasoning` 中明确指出并修正 `next_objective`
+
+4. **常规状态合成 (仅在 final_status != "ABORTED" 时执行)**:
+   - 根据 milestone_status 判断当前进展
+   - 根据 progress_assessment 判断是否需要调整方向
 
 ### 场景 A：首次对话（has_history == false）
 任务状态：
@@ -370,7 +443,10 @@ class UnderstandingStage(UserStage):
   "completion_reasoning": "任务尚未启动，等待用户提出初始问题",
   "missing_requirements": [],
   "next_objective": "等待用户提出初始问题，启动探索任务",
-  "reasoning": "这是首次对话，用户尚未提出具体问题。任务处于初始状态，所有里程碑都未开始。下一步是等待用户提出问题，然后根据问题启动相应的探索任务."
+  "reasoning": "这是首次对话，用户尚未提出具体问题。任务处于初始状态，所有里程碑都未开始。下一步是等待用户提出问题，然后根据问题启动相应的探索任务.",
+  "final_status": "CONTINUE",
+  "emotional_tone": "neutral",
+  "has_history": false
 }}
 
 ## 输出示例（后续对话）
@@ -380,7 +456,23 @@ class UnderstandingStage(UserStage):
   "completion_reasoning": "stage_1 已完成（基本信息收集），但 stage_2 仍在进行中（代表作品分析）",
   "missing_requirements": ["需要完整的作品列表", "需要分析每部作品的音乐风格特点"],
   "next_objective": "搜索 composer X 的完整作品列表，并分析其代表作品的音乐风格",
-  "reasoning": "根据 milestone_status，stage_1 已完成 100%，stage_2 已完成 40%。progress_assessment 显示整体进展顺利（on_track），质量中等。下一步应该继续搜索作品列表，参考权威音乐数据库获取准确信息。用户希望获得更详细的音乐风格分析，这是当前重点。"
+  "reasoning": "根据 milestone_status，stage_1 已完成 100%，stage_2 已完成 40%。progress_assessment 显示整体进展顺利（on_track），质量中等。下一步应该继续搜索作品列表，参考权威音乐数据库获取准确信息。用户希望获得更详细的音乐风格分析，这是当前重点。",
+  "final_status": "CONTINUE",
+  "emotional_tone": "satisfied",
+  "has_history": true
+}}
+
+## 输出示例（死循环 - ABORTED）
+{{
+  "current_milestone": "stage_2",
+  "is_completed": false,
+  "completion_reasoning": "progress_assessment.overall_status 判定为 loop，任务无法继续",
+  "missing_requirements": [],
+  "next_objective": "任务已终止，无需继续",
+  "reasoning": "ProgressEvaluator 判定 overall_status 为 loop，表示 Agent 陷入死循环。根据单点真相原则，完全信任 ProgressEvaluator 的判定，设置 final_status 为 ABORTED。",
+  "final_status": "ABORTED",
+  "emotional_tone": "dissatisfied",
+  "has_history": true
 }}""",
                 ),
                 llm_config=self.llm_config,
@@ -396,7 +488,12 @@ class UnderstandingStage(UserStage):
         logger.info("Entering Understanding Stage...")
 
         # 预先检查所有步骤的输入依赖
-        self._check_step_dependencies(self.steps, data_pool, "UnderstandingStage")
+        self._check_step_dependencies(
+            self.steps,
+            data_pool,
+            global_context,
+            "UnderstandingStage",
+        )
 
         # 执行步骤
         for step in self.steps:

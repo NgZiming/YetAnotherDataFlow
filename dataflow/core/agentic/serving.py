@@ -526,7 +526,7 @@ class AgentServingABC(ABC):
                         self.logger.info(f"[轮次 {round_num}/{max_rounds}] 执行任务...")
 
                         # 构造模拟器输入
-                        raw_data = {
+                        context = {
                             "question": question,
                             "milestones": milestones,
                             "dialogue_scripts": dialogue_scripts,
@@ -535,7 +535,6 @@ class AgentServingABC(ABC):
                             "file_contents": self._get_new_file_contents(
                                 workspace_path, path_mapping
                             ),
-                            "global_context": {},
                         }
 
                         # 同步调用异步模拟器
@@ -546,7 +545,7 @@ class AgentServingABC(ABC):
                             asyncio.set_event_loop(loop)
 
                         sim_result: SimulationResult = loop.run_until_complete(
-                            self.user.run(raw_data)
+                            self.user.run({}, context)
                         )
                         final_res = sim_result["final_response"]
 

@@ -81,6 +81,7 @@ class UserStage(ABC):
         self,
         steps: List["UserStep"],
         data_pool: Dict[str, Any],
+        global_context: Dict[str, Any],
         error_prefix: str,
     ):
         """
@@ -94,7 +95,7 @@ class UserStage(ABC):
         Returns:
             Error message if dependencies are missing, None if all checks pass
         """
-        available_keys = set(data_pool.keys())
+        available_keys = set(list(global_context.keys()) + list(data_pool.keys()))
 
         for step in steps:
             missing_keys = []
