@@ -172,6 +172,7 @@ class DecisionStageV2(UserStage):
 
 ## 输出要求
 输出一个 `FinalResponse` JSON 对象。
+- `judgment`: 判定结果。严格映射：`CONTINUE` $\rightarrow$ `in_progress`, `FINISHED` $\rightarrow$ `completed`, `ABORTED` $\rightarrow$ `aborted`。
 - `feedback`: 最终生成的自然语言。
 - `reasoning`: 详细说明【证据核验结果 $\rightarrow$ 策略应用 $\rightarrow$ 最终表达】的推演过程。
 """,
