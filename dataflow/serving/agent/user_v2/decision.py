@@ -39,11 +39,18 @@ class DecisionStageV2(UserStage):
                     prompt_template="""你是一个对话策略专家。你的任务是根据当前的【任务状态】和预设的【对话脚本】，制定下一步的对话战略。
 
 ## 输入
-- 任务状态：{task_state}
-- 对话脚本：{dialogue_scripts}
+- 任务状态(task_state)：{task_state}
+- 对话脚本(dialogue_scripts)：{dialogue_scripts}
 
 ## 输入字段说明
-- **task_state**: 包含当前里程碑 (current_milestone)、最终状态 (final_status) 和历史记录 (has_history)。
+- **task_state**: 当前任务的结构化状态 (JSON 对象)，包含以下字段：
+  - `current_milestone`: 当前激活的里程碑 ID (如 "stage_1")。
+  - `is_completed`: 任务是否整体完成 (布尔值)。
+  - `final_status`: 最终判定状态 (CONTINUE | FINISHED | ABORTED)。
+  - `emotional_tone`: 当前用户情绪 (satisfied | dissatisfied | confused | urgent | neutral)。
+  - `has_history`: 是否存在历史对话 (布尔值)。
+  - `next_objective`: 下一步具体的执行目标 (字符串)。
+  - `reasoning`: 状态合成的推演逻辑。
 - **dialogue_scripts**: 预设的任务剧本，包含每个阶段 (stage_n) 的用户意图 (user_intent) 和具体披露要求。
 
 ## 战略制定逻辑 (Strategic Logic)
@@ -96,12 +103,18 @@ class DecisionStageV2(UserStage):
                     prompt_template="""你是一个语言风格适配器。将任务状态和用户人设转化为具体的语言约束。
 
 ## 输入
-- 任务状态：{task_state}
-- 用户人设：{user_persona}
+- 任务状态(task_state)：{task_state}
+- 用户人设(user_persona)：{user_persona}
 
 ## 输入字段说明
-- **task_state**: 包含当前的情绪倾向 (emotional_tone) 和最终状态 (final_status)。
-  - 你需要根据 `emotional_tone` (satisfied/dissatisfied/confused/urgent/neutral) 来决定本次对话的基调。
+- **task_state**: 当前任务的结构化状态 (JSON 对象)，包含以下字段：
+  - `current_milestone`: 当前激活的里程碑 ID (如 "stage_1")。
+  - `is_completed`: 任务是否整体完成 (布尔值)。
+  - `final_status`: 最终判定状态 (CONTINUE | FINISHED | ABORTED)。
+  - `emotional_tone`: 当前用户情绪 (satisfied | dissatisfied | confused | urgent | neutral)。
+  - `has_history`: 是否存在历史对话 (布尔值)。
+  - `next_objective`: 下一步具体的执行目标 (字符串)。
+  - `reasoning`: 状态合成的推演逻辑。
 - **user_persona**: 用户的核心人格定义，包含性格、背景和说话习惯。
 
 ## 风格映射逻辑
@@ -151,17 +164,24 @@ class DecisionStageV2(UserStage):
                     prompt_template="""你是一个用户模拟器。根据策略和风格，生成最终的自然语言反馈。
 
 ## 输入
-- 对话策略：{dialogue_strategy}
-- 语言风格：{persona_style}
-- 任务状态：{task_state}
-- 初始问题：{question}
-- 物理实证 (FileContext)：{file_context}
-- 里程碑定义：{milestones}
+- 对话策略(dialogue_strategy)：{dialogue_strategy}
+- 语言风格(persona_style)：{persona_style}
+- 任务状态(task_state)：{task_state}
+- 初始问题(question)：{question}
+- 物理实证 (FileContext)(file_context)：{file_context}
+- 里程碑定义(milestones)：{milestones}
 
 ## 输入字段说明
 - **dialogue_strategy**: 由 Strategizer 生成的战略指令。包含 `goal` (核心目的)、`approach` (表达方式) 和 `strategy_details` (具体披露量和引导方向)。它是你生成文本的最高指导。
 - **persona_style**: 由 PersonaAdapter 生成的风格约束。包含 `style_guide` (Do's and Don'ts) 和 `tone`。确保你的语言符合人设，绝无 AI 味。
-- **task_state**: 当前任务状态。包含 `has_history` (用于判定场景) 和 `final_status`。
+- **task_state**: 当前任务的结构化状态 (JSON 对象)，包含以下字段：
+  - `current_milestone`: 当前激活的里程碑 ID (如 "stage_1")。
+  - `is_completed`: 任务是否整体完成 (布尔值)。
+  - `final_status`: 最终判定状态 (CONTINUE | FINISHED | ABORTED)。
+  - `emotional_tone`: 当前用户情绪 (satisfied | dissatisfied | confused | urgent | neutral)。
+  - `has_history`: 是否存在历史对话 (布尔值)。
+  - `next_objective`: 下一步具体的执行目标 (字符串)。
+  - `reasoning`: 状态合成的推演逻辑。
 - **question**: 用户的初始问题。在【首次对话】场景中，它是你需要渐进式披露的核心目标。
 - **file_context**: 物理实证集。包含 `evidences` 列表，用于在【后续对话】中核验 Agent 的声明是否属实。
 - **milestones**: 里程碑定义。用于确保你的反馈能准确推动 `task_state.next_objective` 的实现。

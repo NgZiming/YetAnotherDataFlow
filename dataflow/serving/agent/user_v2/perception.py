@@ -39,12 +39,12 @@ class PerceptionStageV2(UserStage):
                     prompt_template="""你是一个极度严谨的证据提取专家。你的任务是从文件中提取与用户目标直接相关的【实证证据】。
 
 ## 输入
-- 文件路径：{file_path}
+- 文件路径(file_path)：{file_path}
 - 文件内容：
 ```
 {file_content}
 ```
-- 用户初始问题：{question}
+- 用户初始问题(question)：{question}
 
 ## 输入字段说明
 - **file_path**: 文件的完整路径，用于识别文件类型、模块位置及在证据引用中作为唯一标识。
@@ -91,8 +91,8 @@ class PerceptionStageV2(UserStage):
                     prompt_template="""你是一个行为分析专家。通过分析 Agent 的输出轨迹，还原其真实的认知路径和行为模式。
 
 ## 输入
-- Agent 输出轨迹：{agent_outputs}
-- 物理文件实证：{file_context}
+- Agent 输出轨迹(agent_outputs)：{agent_outputs}
+- 物理文件实证(file_context)：{file_context}
 
 ## 输入字段说明
 - **agent_outputs**: Agent 的回答历史列表。
@@ -144,9 +144,9 @@ class PerceptionStageV2(UserStage):
                     prompt_template="""你是一个心理意图分析师。分析用户与 Agent 的对话历史，提取当前真实的心理状态和意图。
 
 ## 输入
-- 用户反馈历史：{feedbacks}
-- Agent 行为分析：{agent_context}
-- 物理文件实证：{file_context}
+- 用户反馈历史(feedbacks)：{feedbacks}
+- Agent 行为分析(agent_context)：{agent_context}
+- 物理文件实证(file_context)：{file_context}
 
 ## 输入字段说明
 - **feedbacks**: 用户发送给 Agent 的反馈历史列表。

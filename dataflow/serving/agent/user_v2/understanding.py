@@ -46,11 +46,11 @@ class UnderstandingStageV2(UserStage):
                     prompt_template="""你是一个极度严谨的任务审计员。你的任务是基于【物理实证】核实每个里程碑的实际完成状态。
 
 ## 输入
-- 初始问题：{question}
-- 里程碑定义：{milestones}
-- 物理文件实证 (FileContext)：{file_context}
-- Agent 行为分析 (AgentContext)：{agent_context}
-- 对话上下文 (DialogueContext)：{dialogue_context}
+- 初始问题(question)：{question}
+- 里程碑定义(milestones)：{milestones}
+- 物理文件实证 (FileContext)(file_context)：{file_context}
+- Agent 行为分析 (AgentContext)(agent_context)：{agent_context}
+- 对话上下文 (DialogueContext)(dialogue_context)：{dialogue_context}
 
 ## 输入字段说明
 - **question**: 用户的初始目标描述。它是所有审计的最高锚点，用于确保 Agent 没有偏离核心需求。
@@ -58,21 +58,21 @@ class UnderstandingStageV2(UserStage):
 - **file_context**: 从工作空间提取的物理证据集。包含 `evidences` 列表，每个元素包含 (path, fact, snippet)。
   - **审计要求**: 任何涉及“生成文件”、“修改代码”的里程碑，必须在 `evidences` 中找到对应的 snippet 才能判定为 completed。
 - **agent_context**: Agent 的行为轨迹总结。
-  - **审计要求**: 对于“分析”、“识别”等认知类里程碑，需核对 `key_findings` 是否覆盖了验收标准中的关键点。
+  - **审计要求**: 对于“分析”、“识别”等认知类里程碑，需核对 `behavior_sequence` 中各个步骤的 `finding` 是否覆盖了验收标准中的关键点。
 - **dialogue_context**: 用户与 Agent 的互动状态。用于辅助判断 Agent 是否在对话中已承诺交付某项结果。
 
 ## 审计逻辑 (Auditing Logic)
 对于每一个里程碑，你必须执行以下核查流程：
 1. **判定交付物类型 (Delivery Type)**:
-   - **实证交付 (Physical Delivery)**: 若 `success_criteria` 要求生成文件、写入报告、输出代码等 -> **必须**在 `file_context.evidences` 中找到物理证据，否则不能判定为 completed。
-   - **认知交付 (Cognitive Delivery)**: 若要求是分析、总结、识别等无需物理输出的任务 -> 核对 `agent_context.key_findings`，确认 Agent 已在对话中提供了完整且准确的结论。
+   - **实证交付 (Physical Delivery)**: 若 `success_criteria` 要求生成文件、写入报告、修改代码、输出具体配置等 $\rightarrow$ **必须**在 `file_context.evidences` 中找到物理证据，否则绝对不能判定为 completed。
+   - **认知交付 (Cognitive Delivery)**: 若要求是分析、总结、识别、解释逻辑、寻找潜在 Bug 等无需物理输出的任务 $\rightarrow$ **以 `agent_context.behavior_sequence` 中每个步骤的 `finding` 字段为准**。只要这些 `finding` 累积起来覆盖了验收标准中的关键点，即可判定为 completed，**无需任何物理文件证明**。
 
 2. **标准对齐**：阅读该里程碑的 `success_criteria`。
 3. **证据检索**：
-   - **实证交付** -> 检索 `file_context.evidences` 中的 `evidence_snippet`。
-   - **认知交付** -> 检索 `agent_context.key_findings` 中的结论。
+   - **实证交付** $\rightarrow$ 检索 `file_context.evidences` 中的 `evidence_snippet`。
+   - **认知交付** $\rightarrow$ 检索 `agent_context.behavior_sequence` 中所有 `is_incremental=true` 步骤的 `finding` 内容。
 4. **状态判定**：
-   - **completed**: 满足上述对应的交付要求。
+   - **completed**: 满足上述对应的交付要求。注意：认知交付必须看到【具体的分析发现】，而非 Agent 的【完成声明】（例如：“我已经分析完了” $\neq$ completed）。
    - **in_progress**: 存在部分证据，或 Agent 正在执行正确路径且有增量进展。
    - **blocked**: 发现了明确的阻碍（如权限错误、API 403、关键文件缺失）。
    - **not_started**: 无任何相关证据或行动。
@@ -123,10 +123,10 @@ class UnderstandingStageV2(UserStage):
                     prompt_template="""你是一个状态合成专家。将审计结果、行为模式和用户情绪整合为最终的任务状态。
 
 ## 输入
-- 里程碑审计结果：{milestone_status}
-- Agent 行为分析：{agent_context}
-- 对话上下文：{dialogue_context}
-- 初始问题：{question}
+- 里程碑审计结果(milestone_status)：{milestone_status}
+- Agent 行为分析(agent_context)：{agent_context}
+- 对话上下文(dialogue_context)：{dialogue_context}
+- 初始问题(question)：{question}
 
 ## 输入字段说明
 - **milestone_status**: 审计结果。包含每个里程碑的 status 和 completion_percentage。它是判定 `is_completed` 的直接依据。
