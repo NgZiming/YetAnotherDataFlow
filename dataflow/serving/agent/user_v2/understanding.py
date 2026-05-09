@@ -52,16 +52,25 @@ class UnderstandingStageV2(UserStage):
 - Agent 行为分析 (AgentContext)：{agent_context}
 - 对话上下文 (DialogueContext)：{dialogue_context}
 
+## 输入字段说明
+- **question**: 用户的初始目标描述。它是所有审计的最高锚点，用于确保 Agent 没有偏离核心需求。
+- **milestones**: 任务定义的里程碑列表。每个元素包含 `success_criteria`（验收标准），这是你判定状态的唯一法典。
+- **file_context**: 从工作空间提取的物理证据集。包含 `evidences` (path, fact, snippet)。
+  - **审计要求**: 任何涉及“生成文件”、“修改代码”的里程碑，必须在此找到对应的 snippet 才能判定为 completed。
+- **agent_context**: Agent 的行为轨迹总结。
+  - **审计要求**: 对于“分析”、“识别”等认知类里程碑，需核对 `key_findings` 是否覆盖了验收标准中的关键点。
+- **dialogue_context**: 用户与 Agent 的互动状态。用于辅助判断 Agent 是否在对话中已承诺交付某项结果。
+
 ## 审计逻辑 (Auditing Logic)
 对于每一个里程碑，你必须执行以下核查流程：
 1. **判定交付物类型 (Delivery Type)**:
-   - **实证交付 (Physical Delivery)**: 若 `success_criteria` 要求生成文件、写入报告、输出代码等 $\rightarrow$ **必须**在 `file_context.evidences` 中找到物理证据，否则不能判定为 completed。
-   - **认知交付 (Cognitive Delivery)**: 若要求是分析、总结、识别等无需物理输出的任务 $\rightarrow$ 核对 `agent_context.key_findings`，确认 Agent 已在对话中提供了完整且准确的结论。
+   - **实证交付 (Physical Delivery)**: 若 `success_criteria` 要求生成文件、写入报告、输出代码等 -> **必须**在 `file_context.evidences` 中找到物理证据，否则不能判定为 completed。
+   - **认知交付 (Cognitive Delivery)**: 若要求是分析、总结、识别等无需物理输出的任务 -> 核对 `agent_context.key_findings`，确认 Agent 已在对话中提供了完整且准确的结论。
 
 2. **标准对齐**：阅读该里程碑的 `success_criteria`。
 3. **证据检索**：
-   - **实证交付** $\rightarrow$ 检索 `file_context.evidences` 中的 `evidence_snippet`。
-   - **认知交付** $\rightarrow$ 检索 `agent_context.key_findings` 中的结论。
+   - **实证交付** -> 检索 `file_context.evidences` 中的 `evidence_snippet`。
+   - **认知交付** -> 检索 `agent_context.key_findings` 中的结论。
 4. **状态判定**：
    - **completed**: 满足上述对应的交付要求。
    - **in_progress**: 存在部分证据，或 Agent 正在执行正确路径且有增量进展。
@@ -119,16 +128,22 @@ class UnderstandingStageV2(UserStage):
 - 对话上下文：{dialogue_context}
 - 初始问题：{question}
 
+## 输入字段说明
+- **milestone_status**: `MilestoneAuditor` 的输出。包含每个里程碑的 status 和 completion_percentage。它是判定 `is_completed` 的直接依据。
+- **agent_context**: 包含 `is_looping` 标志。这是判定 `final_status == ABORTED` 的最高优先级信号。
+- **dialogue_context**: 包含 `emotional_tone` 和 `has_history`。这两个字段必须原样传递到最终状态中。
+- **question**: 用户的初始问题，用于在合成 `next_objective` 时进行目标锚定检查，防止目标漂移。
+
 ## 状态合成算法 (Synthesis Algorithm)
 1. **判定 final_status (最高优先级)**:
-   - **ABORTED**: 只要 `agent_context.is_looping` 为 true $\rightarrow$ 强制设为 ABORTED。
-   - **FINISHED**: 只有当所有里程碑状态均为 `completed` 且 `is_completed` 为 true 时 $\rightarrow$ 设为 FINISHED。
-   - **CONTINUE**: 其他所有情况 $\rightarrow$ 设为 CONTINUE。
+   - **ABORTED**: 只要 `agent_context.is_looping` 为 true -> 强制设为 ABORTED。
+   - **FINISHED**: 只有当所有里程碑状态均为 `completed` 且 `is_completed` 为 true 时 -> 设为 FINISHED。
+   - **CONTINUE**: 其他所有情况 -> 设为 CONTINUE。
 
 2. **确定 next_objective**:
-   - 如果是首次对话 $\rightarrow$ "等待用户启动任务".
-   - 如果处于 CONTINUE $\rightarrow$ 找到第一个状态为 `in_progress` 或 `not_started` 的里程碑，将其 `goal` 转化为具体的下一步指令。
-   - 如果处于 ABORTED $\rightarrow$ "任务已终止，无需继续".
+   - 如果是首次对话 (dialogue_context.has_history == false) -> "等待用户启动任务"。
+   - 如果处于 CONTINUE -> 找到第一个状态为 `in_progress` 或 `not_started` 的里程碑，将其 `goal` 转化为具体的下一步指令。
+   - 如果处于 ABORTED -> "任务已终止，无需继续"。
 
 3. **情绪传递**:
    - 直接从 `dialogue_context.emotional_tone` 复制，严禁修改。

@@ -46,6 +46,11 @@ class PerceptionStageV2(UserStage):
 ```
 - 用户初始问题：{question}
 
+## 输入字段说明
+- **file_path**: 文件的完整路径，用于识别文件类型、模块位置及在证据引用中作为唯一标识。
+- **file_content**: 文件的原始内容。你必须在此文本中寻找直接证据，严禁基于常识或猜测生成内容。
+- **question**: 用户的初始目标描述。它是你判断信息“相关性”的唯一锚点。只有能直接证明或反驳该目标实现的片段才被视为相关。
+
 ## 认知逻辑
 1. **目标锚定**：分析用户问题，确定该文件在任务中扮演的角色（如：定义了核心类、提供了配置参数、记录了分析结论）。
 2. **实证提取**：在文件中寻找能直接证明或反驳任务目标的具体片段。
@@ -92,14 +97,22 @@ class PerceptionStageV2(UserStage):
 - Agent 输出轨迹：{agent_outputs}
 - 物理文件实证：{file_context}
 
+## 输入字段说明
+- **agent_outputs**: Agent 的回答历史列表。
+  - 格式：`["回答 1", "回答 2", ...]`
+  - 顺序：按时间顺序排列，索引 0 为最早的一次对话。
+  - 内容：包含 Agent 的推理、工具调用结果及最终回复。你需要从中识别其“动作”与“结论”。
+- **file_context**: 此前提取的物理文件证据。
+  - 用途：用于验证 Agent 的“发现”是否真实存在于代码中。如果 Agent 声称发现了 X，但 `file_context` 中无相关证据，应在 `overall_summary` 中标注为“潜在幻觉”。
+
 ## 行为建模逻辑 (Behavioral Modeling)
 你需要将 Agent 的轨迹分解为一系列 `AgentBehavior` 单元：
-1. **动作还原 (Action)**：Agent 实际上做了什么？（例如：阅读了 A 文件 $\rightarrow$ 发现 B 缺失 $\rightarrow$ 尝试调用 C 工具）。
+1. **动作还原 (Action)**：Agent 实际上做了什么？（例如：阅读了 A 文件 -> 发现 B 缺失 -> 尝试调用 C 工具）。
 2. **结论提取 (Finding)**：Agent 声称发现了什么？
 3. **增量判定 (Incremental Check)**：对比前一轮，本轮是否产生了实质性的新认知？如果只是重复之前的分析或道歉，则 `is_incremental = false`。
 
 ## 循环判定准则 (Loop Detection)
-- **零增量原则**：如果连续 3 轮及以上，`is_incremental` 均为 `false`，且 `action` 模式高度重复（例如：分析 $\rightarrow$ 道歉 $\rightarrow$ 分析），则必须判定 `is_looping = true`。
+- **零增量原则**：如果连续 3 轮及以上，`is_incremental` 均为 `false`，且 `action` 模式高度重复（例如：分析 -> 道歉 -> 分析），则必须判定 `is_looping = true`。
 - **行为指纹**：识别是否存在“原地打转”的指纹（如：反复读取同一个文件但得不出新结论）。
 
 ## 输出要求
@@ -137,6 +150,14 @@ class PerceptionStageV2(UserStage):
 - 用户反馈历史：{feedbacks}
 - Agent 行为分析：{agent_context}
 - 物理文件实证：{file_context}
+
+## 输入字段说明
+- **feedbacks**: 用户发送给 Agent 的反馈历史列表。
+  - 格式：`["反馈 1", "反馈 2", ...]`
+  - 顺序：按时间顺序排列。
+  - 重要：如果此列表为空 `[]`，则 `has_history` 必须为 `false`。
+- **agent_context**: 之前分析的 Agent 行为总结。用于对比“Agent 认为自己做了什么”与“用户感受到了什么”。
+- **file_context**: 物理文件实证。用于判断用户在反馈中提到的具体文件/代码是否真实存在。
 
 ## 认知分析步骤
 1. **意图演进**：分析用户从初始问题到当前反馈，意图发生了怎样的偏移或深化？

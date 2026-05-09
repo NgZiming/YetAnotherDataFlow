@@ -67,9 +67,8 @@ class UserSimulator(UserSimulatorABC):
                 if stage_match:
                     target_stage = int(stage_match.group(1))
                     for script in dialogue_scripts:
-                        if (
-                            isinstance(script, dict)
-                            and str(script.get("stage")) == str(target_stage)
+                        if isinstance(script, dict) and str(script.get("stage")) == str(
+                            target_stage
                         ):
                             user_dialogue = script.get("user_dialogue", {})
                             if isinstance(user_dialogue, dict):
@@ -89,6 +88,8 @@ class UserSimulator(UserSimulatorABC):
             # Stage 3: Decision
             await self.decision_stage.execute(raw_data, global_context, self.llm_client)
 
+            for k, v in raw_data.items():
+                logger.info(f"[{k}] [{v}]")
             return {
                 "final_response": raw_data["final_response"],
                 "global_context": global_context,
