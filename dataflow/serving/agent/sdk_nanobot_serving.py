@@ -224,6 +224,10 @@ class SDKNanobotServing(AgentServingABC):
         def wants_streaming(self) -> bool:
             return False
 
+        async def before_iteration(self, context: Any) -> None:
+            """Empty implementation to satisfy Nanobot AgentHook interface."""
+            pass
+
         async def after_iteration(self, context: Any) -> None:
             # context is AgentHookContext
             iteration = context.iteration
@@ -267,13 +271,29 @@ class SDKNanobotServing(AgentServingABC):
         """准备执行上下文（创建临时目录、生成文件、注入性格）。"""
         workspace_path.mkdir(parents=True, exist_ok=True)
 
-        # 1. 性格注入: Nanobot ContextBuilder 自动加载根目录的 USER.md 和 SOUL.md
+        # 1. 为该隔离空间创建专属的 Nanobot 实例
+        # 必须在写入文件之前创建 Bot 实例，防止 Bot 初始化过程清空 workspace 目录
+        try:
+            from nanobot import Nanobot
+
+            bot = Nanobot.from_config(
+                config_path=str(self.config_path),
+                workspace=str(workspace_path.resolve()),
+            )
+            # 将实例存储在缓存中，以便 _send_query 可以访问
+            self.bot_instances[workspace_path] = bot
+            self.logger.debug(f"为任务空间创建专属 Bot 实例: {workspace_path}")
+        except Exception as e:
+            self.logger.error(f"创建任务专属 Bot 实例失败: {e}")
+            raise e
+
+        # 2. 性格注入: Nanobot ContextBuilder 自动加载根目录的 USER.md 和 SOUL.md
         if self.user_md:
             (workspace_path / "USER.md").write_text(self.user_md, encoding="utf-8")
         if self.soul_md:
             (workspace_path / "SOUL.md").write_text(self.soul_md, encoding="utf-8")
 
-        # 2. 使用基类方法准备文件和技能，确保物理拷贝以实现完全隔离
+        # 3. 使用基类方法准备文件和技能，确保物理拷贝以实现完全隔离
         skill_base_dir = ""
         if self.extra_skills_dirs:
             for extra_dir in self.extra_skills_dirs:
@@ -287,20 +307,6 @@ class SDKNanobotServing(AgentServingABC):
             input_skills_data=input_skills_data,
             skill_base_dir=skill_base_dir,
         )
-
-        # 3. 为该隔离空间创建专属的 Nanobot 实例
-        try:
-            # 使用当前任务的隔离 workspace_path 初始化 bot
-            bot = Nanobot.from_config(
-                config_path=str(self.config_path),
-                workspace=str(workspace_path.resolve()),
-            )
-            # 将实例存储在缓存中，以便 _send_query 可以访问
-            self.bot_instances[workspace_path] = bot
-            self.logger.debug(f"为任务空间创建专属 Bot 实例: {workspace_path}")
-        except Exception as e:
-            self.logger.error(f"创建任务专属 Bot 实例失败: {e}")
-            raise e
 
         return path_mapping
 
