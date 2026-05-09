@@ -173,40 +173,18 @@ class PerceptionStageV2(UserStage):
         question: str,
         llm_client: LLMClientABC,
     ) -> tuple[str, FileEvidence]:
-        try:
-            prompt = prompt_template.format(
-                file_path=file_path,
-                file_content=file_content,
-                question=question,
-            )
-            # We expect a JSON response here for FileEvidence
-            resp = await llm_client.generate(prompt, config=self.llm_config)
-            # Using a simple parser since we want a FileEvidence object
-            import json
+        prompt = prompt_template.format(
+            file_path=file_path,
+            file_content=file_content,
+            question=question,
+        )
+        # We expect a JSON response here for FileEvidence
+        resp = await llm_client.generate(prompt, config=self.llm_config)
 
-            # Remove potential markdown blocks
-            cleaned_resp = (
-                resp.strip().removeprefix("```json").removesuffix("```").strip()
-            )
-            data = json.loads(cleaned_resp)
-
-            # In v2, we map the result to the FileEvidence model
-            evidence = FileEvidence(
-                **data if isinstance(data, dict) else data["evidences"][0]
-            )
-            return (file_path, evidence)
-        except Exception as e:
-            logger.error(f"Failed to extract evidence from {file_path}: {e}")
-            # Return a dummy evidence to avoid breaking the pipeline
-            return (
-                file_path,
-                FileEvidence(
-                    path=file_path,
-                    fact="Error extracting evidence",
-                    evidence_snippet="",
-                    relevance="Error",
-                ),
-            )
+        # Remove potential markdown blocks
+        cleaned_resp = resp.strip().removeprefix("```json").removesuffix("```").strip()
+        evidence = FileEvidence.model_validate_json(cleaned_resp)
+        return (file_path, evidence)
 
     async def execute(
         self,
@@ -241,11 +219,11 @@ class PerceptionStageV2(UserStage):
             summary = await llm_client.generate(summary_prompt, config=self.llm_config)
             data_pool[file_sensor_step.schema.output_key] = FileContext(
                 evidences=all_evidences, summary=summary
-            )
+            ).model_dump()
         else:
             data_pool[file_sensor_step.schema.output_key] = FileContext(
                 evidences=[], summary="No files available."
-            )
+            ).model_dump()
 
         # 2. Execute remaining sensors (AgentSensor, DialogueSensor)
         for step in self.steps[1:]:
