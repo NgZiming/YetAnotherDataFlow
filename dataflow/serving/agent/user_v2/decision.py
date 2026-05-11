@@ -158,6 +158,7 @@ class DecisionStageV2(UserStage):
                         "question",
                         "file_context",
                         "milestones",
+                        "current_time",
                     ],
                     output_key="final_response",
                     output_type=FinalResponse,
@@ -170,6 +171,7 @@ class DecisionStageV2(UserStage):
 - 初始问题(question)：{question}
 - 物理实证 (FileContext)(file_context)：{file_context}
 - 里程碑定义(milestones)：{milestones}
+- 现实时间(current_time)：{current_time}
 
 ## 输入字段说明
 - **dialogue_strategy**: 由 Strategizer 生成的战略指令。包含 `goal` (核心目的)、`approach` (表达方式) 和 `strategy_details` (具体披露量和引导方向)。它是你生成文本的最高指导。
@@ -185,6 +187,7 @@ class DecisionStageV2(UserStage):
 - **question**: 用户的初始问题。在【首次对话】场景中，它是你需要渐进式披露的核心目标。
 - **file_context**: 物理实证集。包含 `evidences` 列表，用于在【后续对话】中核验 Agent 的声明是否属实。
 - **milestones**: 里程碑定义。用于确保你的反馈能准确推动 `task_state.next_objective` 的实现。
+- **current_time**: 当前的绝对时间。你必须将其作为事实锚点，确保对话内容、时间引用与此时间完全一致，严禁使用预训练数据的过时时间认知。
 
 ## 核心生成算法 (Generation Algorithm)
 1. **场景适配 (Scene Adaptation - 最高优先级)**:

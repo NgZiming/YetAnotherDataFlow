@@ -44,7 +44,9 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
                         {
                             "id": tc.get("id", "unknown"),
                             "name": tc.get(tc_type, {}).get("name", "unknown"),
-                            "arguments": tc.get(tc_type, {}).get("name", "arguments"),
+                            "arguments": tc.get(tc_type, {}).get(
+                                "arguments", "unknown"
+                            ),
                         }
                     )
 

@@ -1,5 +1,6 @@
 import re
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from dataflow.logger import get_logger
 from dataflow.core.agentic import LLMClientABC
@@ -84,6 +85,7 @@ class UserSimulator(UserSimulatorABC):
                     "user_persona not found in dialogue_scripts, using empty string"
                 )
                 raw_data["user_persona"] = ""
+            raw_data["current_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # Stage 3: Decision
             await self.decision_stage.execute(raw_data, global_context, self.llm_client)
