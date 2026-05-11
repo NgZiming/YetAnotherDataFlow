@@ -28,18 +28,15 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import time
-import platform
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from dataflow.logger import get_logger
 
 # 导入 Nanobot 内部组件用于构建高保真 System Prompt
-from nanobot.utils.prompt_templates import render_template
-from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.hook import AgentHook
+from nanobot.agent.hook import AgentHook, AgentHookContext
 
 # 导入 AgentServingABC 基类
 from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
@@ -298,11 +295,12 @@ class SDKNanobotServing(AgentServingABC):
             self.logger.error(f"Nanobot 运行失败: {e}")
             raise e
 
+        context: AgentHookContext = capture_hook.context
         # DEBUG: 打印原始 capture_hook.trajectory 结构，以便分析
         self.logger.info(
-            f"[Trajectory Debug] Raw trajectory data: {json.dumps(capture_hook.context, ensure_ascii=False, indent=2)}"
+            f"[Trajectory Debug] Raw trajectory data: {json.dumps(asdict(context), ensure_ascii=False, indent=2)}"
         )
 
-        trajectory = nanobot_convert(capture_hook.context)
+        trajectory = nanobot_convert(context)
 
         return trajectory
