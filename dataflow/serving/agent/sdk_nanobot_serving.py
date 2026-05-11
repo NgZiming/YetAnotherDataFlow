@@ -43,6 +43,7 @@ from nanobot.agent.hook import AgentHook
 
 # 导入 AgentServingABC 基类
 from dataflow.core.agentic import AgentServingABC, TrajectoryDict, UserSimulatorABC
+from dataflow.serving.agent.nanobot_2_std_format import convert as nanobot_convert
 
 
 class SDKNanobotServing(AgentServingABC):
@@ -109,40 +110,6 @@ class SDKNanobotServing(AgentServingABC):
             f"SDKNanobotServing 初始化：workspace_basedir={self.workspace_basedir}, model={self.model}"
         )
 
-    @staticmethod
-    def _serialize_any(obj: Any, depth: int = 0, max_depth: int = 5) -> Any:
-        """递归地将任意对象转换为 JSON 可序列化格式，防止循环引用和深度过大。"""
-        if depth > max_depth:
-            return f"<Max Depth Reached: {type(obj).__name__}>"
-
-        if obj is None or isinstance(obj, (int, float, str, bool)):
-            return obj
-
-        if isinstance(obj, list):
-            return [
-                SDKNanobotServing._serialize_any(item, depth + 1, max_depth)
-                for item in obj
-            ]
-
-        if isinstance(obj, dict):
-            return {
-                str(k): SDKNanobotServing._serialize_any(v, depth + 1, max_depth)
-                for k, v in obj.items()
-            }
-
-        if hasattr(obj, "__dict__"):
-            # 尝试提取对象的属性
-            data = {
-                k: SDKNanobotServing._serialize_any(v, depth + 1, max_depth)
-                for k, v in obj.__dict__.items()
-                if not k.startswith("_")
-            }
-            if not data:  # 如果没有公共公共属性，记录类型和repr
-                return f"<{type(obj).__name__}: {repr(obj)}>"
-            return {"__type__": type(obj).__name__, "data": data}
-
-        return repr(obj)
-
     def _create_config(self, force: bool = False) -> None:
         """创建配置文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,52 +144,6 @@ class SDKNanobotServing(AgentServingABC):
 
         self.logger.info(f"Nanobot 配置已创建：{self.config_path}")
 
-    def _build_full_system_prompt(self, workspace_path: Path) -> str:
-        """
-        镜像 Nanobot 的 ContextBuilder.build_system_prompt 逻辑，
-        用于在轨迹中补全高保真的 System Prompt。
-        """
-        parts = []
-
-        # 1. Identity
-        try:
-            system = platform.system()
-            runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-            identity = render_template(
-                "agent/identity.md",
-                workspace_path=str(workspace_path.expanduser().resolve()),
-                runtime=runtime,
-                platform_policy=render_template(
-                    "agent/platform_policy.md", system=system
-                ),
-                channel="cli",
-            )
-            parts.append(identity)
-        except Exception as e:
-            self.logger.warning(f"构建 Identity 失败: {e}")
-
-        # 2. Bootstrap Files (AGENTS.md, SOUL.md, USER.md, TOOLS.md)
-        bootstrap_files = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
-        bootstrap_parts = []
-        for filename in bootstrap_files:
-            file_path = workspace_path / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                bootstrap_parts.append(f"## {filename}\n\n{content}")
-        if bootstrap_parts:
-            parts.append("\n\n".join(bootstrap_parts))
-
-        # 3. Skills Summary
-        try:
-            loader = SkillsLoader(workspace_path)
-            skills_summary = loader.build_skills_summary()
-            if skills_summary:
-                parts.append(f"# Available Skills\n\n{skills_summary}")
-        except Exception as e:
-            self.logger.warning(f"构建 Skills Summary 失败: {e}")
-
-        return "\n\n---\n\n".join(parts)
-
     # =========================================================================
     # Trajectory Capture Hook
     # =========================================================================
@@ -235,57 +156,11 @@ class SDKNanobotServing(AgentServingABC):
 
         def __init__(self) -> None:
             super().__init__()
-            self.trajectory: List[Dict[str, Any]] = []
+            self.context = None
             self.logger = get_logger()
 
         async def after_iteration(self, context: Any) -> None:
-            # context is AgentHookContext
-            iteration = context.iteration
-
-            # DEBUG: 记录完整的 context 序列化结果
-            try:
-                # 使用静态方法进行递归序列化，彻底剖开 context
-                serialized_context = SDKNanobotServing._serialize_any(context)
-                self.logger.info(
-                    f"[Context Debug] Iteration {iteration} Full Snapshot: {json.dumps(serialized_context, ensure_ascii=False)}"
-                )
-            except Exception as debug_err:
-                self.logger.info(f"[Context Debug] Serialization failed: {debug_err}")
-
-            thought = None
-            content = None
-            if context.response:
-                thought = getattr(context.response, "thought", None)
-
-            # 优先使用顶层的 final_content，如果没有则尝试从 response 中获取 content
-            content = getattr(context, "final_content", None) or getattr(
-                context.response, "content", None
-            )
-
-            tool_calls = []
-            for tc in context.tool_calls:
-                tool_calls.append(
-                    {
-                        "id": getattr(tc, "id", None),
-                        "name": tc.name,
-                        "arguments": tc.arguments,
-                    }
-                )
-
-            tool_results = []
-            for tr in context.tool_results:
-                tool_results.append(str(tr))
-
-            self.trajectory.append(
-                {
-                    "iteration": iteration,
-                    "thought": thought,
-                    "content": content,
-                    "tool_calls": tool_calls,
-                    "tool_results": tool_results,
-                    "messages": list(context.messages),
-                }
-            )
+            self.context = context
 
     def _get_workspace_path(self, task_id: str) -> Path:
         """获取任务的 workspace 路径（临时目录）。"""
@@ -418,107 +293,16 @@ class SDKNanobotServing(AgentServingABC):
             )
 
         try:
-            result = asyncio.run(run_query())
+            _ = asyncio.run(run_query())
         except Exception as e:
             self.logger.error(f"Nanobot 运行失败: {e}")
             raise e
 
         # DEBUG: 打印原始 capture_hook.trajectory 结构，以便分析
-        self.logger.debug(
-            f"[Trajectory Debug] Raw trajectory data: {json.dumps(capture_hook.trajectory, ensure_ascii=False, indent=2)}"
+        self.logger.info(
+            f"[Trajectory Debug] Raw trajectory data: {json.dumps(capture_hook.context, ensure_ascii=False, indent=2)}"
         )
 
-        content = result.content if result.content else ""
+        trajectory = nanobot_convert(capture_hook.context)
 
-        # 从 Hook 的内存记录中构建标准轨迹字典
-        formatted_messages = []
-
-        # --- 补全 System Prompt (高保真镜像 Nanobot 逻辑) ---
-        try:
-            system_prompt = self._build_full_system_prompt(workspace_path)
-            if system_prompt:
-                formatted_messages.append(
-                    {
-                        "round": 0,
-                        "role": "system",
-                        "content": system_prompt,
-                        "thought": None,
-                        "tool_calls": [],
-                        "tool_results": [],
-                        "id": None,
-                        "parentId": None,
-                        "session_id": session_key,
-                    }
-                )
-        except Exception as e:
-            self.logger.warning(f"轨迹 System Prompt 补全失败: {e}")
-        # -------------------------------------------------
-        for i, step in enumerate(capture_hook.trajectory):
-            # 构建该轮次的基础 ID
-            round_id = f"round_{i + 1}"
-
-            # 1. Assistant 消息 (包含思考和最终输出内容)
-            if step["thought"] or step["content"]:
-                msg_id = f"{round_id}_assistant"
-                formatted_messages.append(
-                    {
-                        "round": i + 1,
-                        "role": "assistant",
-                        "content": step["content"] or "",
-                        "thought": step["thought"],
-                        "tool_calls": step["tool_calls"],
-                        "tool_results": [],
-                        "id": msg_id,
-                        "parentId": None,
-                        "session_id": session_key,
-                    }
-                )
-
-            # 2. Tool 消息 (工具执行结果)
-            if step["tool_results"]:
-                # 如果本轮有 Assistant 消息，则将其作为父级
-                parent_id = (
-                    f"{round_id}_assistant"
-                    if (step["thought"] or step["content"])
-                    else None
-                )
-
-                formatted_messages.append(
-                    {
-                        "round": i + 1,
-                        "role": "tool",
-                        "content": "\n".join(step["tool_results"]),
-                        "thought": None,
-                        "tool_calls": [],
-                        "tool_results": step["tool_results"],
-                        "id": f"{round_id}_tool",
-                        "parentId": parent_id,
-                        "session_id": session_key,
-                    }
-                )
-
-        if not formatted_messages:
-            formatted_messages.append(
-                {
-                    "round": 1,
-                    "role": "assistant",
-                    "content": content,
-                    "thought": None,
-                    "tool_calls": [],
-                    "tool_results": [],
-                    "id": None,
-                    "parentId": None,
-                    "session_id": session_key,
-                }
-            )
-
-        return {
-            "task_id": "",  # Will be populated by the base class verification loop if needed, or passed in
-            "final_output": content,
-            "total_rounds": len(capture_hook.trajectory),
-            "is_completed": True,
-            "messages": formatted_messages,
-            "metadata": {
-                "session_key": session_key,
-            },
-        }
+        return trajectory

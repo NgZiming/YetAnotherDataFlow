@@ -787,9 +787,9 @@ class CLIOpenClawServing(AgentServingABC):
                             if item.get("type") == "toolCall":
                                 formatted_msg["tool_calls"].append(
                                     {
-                                        "id": item.get("id"),
-                                        "name": item.get("name"),
-                                        "arguments": item.get("arguments"),
+                                        "id": item.get("id", ""),
+                                        "name": item.get("name", ""),
+                                        "arguments": item.get("arguments", ""),
                                     }
                                 )
                             elif item.get("type") == "thinking":

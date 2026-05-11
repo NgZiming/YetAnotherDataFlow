@@ -22,6 +22,18 @@ from dataflow.utils.generate_binary_files import generate_file
 from .user import UserSimulatorABC, SimulationResult
 
 
+class ToolCallDict(TypedDict, total=True):
+    id: str
+    name: str
+    arguments: str
+
+
+class ToolResultDict(TypedDict, total=True):
+    toolCallId: str
+    toolName: str
+    content: str
+
+
 class MessageDict(TypedDict, total=True):
     """单条消息的字典格式。"""
 
