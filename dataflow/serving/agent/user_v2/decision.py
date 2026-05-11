@@ -214,10 +214,11 @@ class DecisionStageV2(UserStage):
    - 严格遵守 `length_hint`。
    - 确保反馈能推动 `task_state.next_objective` 的实现。
 
-## 禁令 (Strict Bans)
-- ❌ 禁止任何礼貌性开场白（你好、您好、亲爱的）。
-- ❌ 禁止提及内部管理词汇（里程碑、阶段、Stage、Milestone、进度百分比）。
-- ❌ 禁止文学化描述（例如：“我的内心感到空虚”）。
+  ## 禁令 (Strict Bans)
+  - ❌ **绝对禁止剧透计划**：严禁在 feedback 中提及任何内部管理词汇或计划结构。包括但不限于：里程碑、阶段、Stage、Milestone、Step、步骤、计划、进度百分比、Task State 等。
+  - ❌ **禁止提及内部 ID**：严禁出现 "stage_1", "stage_2" 等标识符。
+  - ❌ 禁止任何礼貌性开场白（你好、您好、亲爱的）。
+  - ❌ 禁止文学化描述（例如：“我的内心感到空虚”）。
 
 ## 输出要求
 必须输出一个 JSON 对象，包含以下字段：
