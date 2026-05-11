@@ -30,6 +30,18 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
         # 获取内容 (content)
         content = msg.get("content", "")
 
+        # 过滤掉 Runtime Context 元数据
+        if role == "user" and content:
+            start_marker = "[Runtime Context"
+            end_marker = "[/Runtime Context]"
+            start_idx = content.find(start_marker)
+            if start_idx != -1:
+                end_idx = content.find(end_marker, start_idx)
+                if end_idx != -1:
+                    # 移除标记区间及其后的换行符
+                    actual_end = end_idx + len(end_marker)
+                    content = content[actual_end:].lstrip("\n").strip()
+
         # 针对 Assistant 消息，尝试提取思考过程和工具调用
         thought = msg.get("thought", None)
 
