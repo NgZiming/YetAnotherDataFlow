@@ -135,8 +135,11 @@ class UnderstandingStageV2(UserStage):
 - **question**: 用户的初始问题，用于在合成 `next_objective` 时进行目标锚定检查，防止目标漂移。
 
 ## 状态合成算法 (Synthesis Algorithm)
-1. **判定 final_status (最高优先级)**:
-   - **ABORTED**: 只要 `agent_context.is_looping` 为 true -> 强制设为 ABORTED。
+  1. **判定 final_status (最高优先级)**:
+   - **ABORTED**: 只要满足以下任一条件 -> 强制设为 ABORTED:
+     - `agent_context.is_looping` 为 true。
+     - 审计显示 Agent 连续两轮尝试同一路径（相同工具/逻辑）但均未获得实质性进展（即 `milestone_status` 的 `completion_percentage` 停滞且 `reasoning` 显示重复失败）。
+     - 意识到当前路径已彻底失效，无法通过简单引导达成目标。
    - **FINISHED**: 只有当所有里程碑状态均为 `completed` 且 `is_completed` 为 true 时 -> 设为 FINISHED。
    - **CONTINUE**: 其他所有情况 -> 设为 CONTINUE。
 

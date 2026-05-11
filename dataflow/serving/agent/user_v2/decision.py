@@ -60,10 +60,13 @@ class DecisionStageV2(UserStage):
    - 提取该阶段的 `user_intent` 作为本次对话的**核心战略目标 (Goal)**。
    - 将脚本中定义的披露程度和具体要求转化为 `strategy_details`。
 
-2. **动态修正 (Dynamic Adjustment)**:
-   - 如果 `task_state.final_status == ABORTED` -> 覆盖策略为【其他】，目标是果断终止任务。
+  2. **动态修正 (Dynamic Adjustment)**:
+   - 如果 `task_state.final_status == ABORTED` -> 覆盖策略为【其他】，目标是引导 Agent 快速意识到路径失效 $\rightarrow$ 接受现实 $\rightarrow$ 果断终止任务。
    - 如果 `task_state.final_status == FINISHED` -> 覆盖策略为【表示满意】，目标是确认完成并结束。
    - 如果 `task_state.has_history == false` -> 必须选择【提问】策略，但目标必须基于脚本中 `stage_1` 的渐进式披露要求。
+   - **协作引导逻辑 (Guiding Logic)**:
+     - 如果 `task_state.final_status == CONTINUE` 且 `task_state.reasoning` 显示 Agent 偏离方向 -> 覆盖策略为【要求澄清】或【提供反馈】，目标是【纠偏 (Correction)】：直接指出错误并引导至正确路径。
+     - 如果 `task_state.final_status == CONTINUE` 且审计显示 Agent 陷入局部死循环 $\rightarrow$ 覆盖策略为【提供反馈】，目标是【路径切换 (Pivot)】：强制要求尝试另一种完全不同的方法。
 
 3. **状态反馈 (Status Feedback)**:
    - 如果 `task_state.final_status == CONTINUE`:
