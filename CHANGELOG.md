@@ -1,3 +1,16 @@
+## [1.0.13] - 2026-05-11
+
+### 🚀 Major Features
+- **UserSimulator V2**: Upgraded to an evidence-driven cognitive architecture, separating `global_context` and `data_pool` to enhance state tracking and reasoning.
+- **Cognitive Pipeline Enhancements**: Refactored `TaskState` to pass emotional fields, allowing the simulator to express varied tones (satisfied, confused, urgent, etc.).
+- **Nanobot Serving Improvements**: Integrated `SDKNanobotServing` with detailed magenta-colored thread logging and strict `AgentHook` protocol adherence to prevent `AttributeError`.
+
+### 🔧 Bug Fixes & Refinements
+- **Nanobot Stability**: Fixed various issues in `SDKNanobotServing` related to iteration hooks and function missing errors.
+- **Skill Management**: Fixed issues with skill copying and registration.
+- **Output Formatting**: Refined output formats and fixed template/type inconsistencies.
+- **Persona Integration**: Enhanced persona-driven responses in the simulator.
+
 ## [1.0.12] - 2026-05-08
 
 ### 🚀 Major Features
