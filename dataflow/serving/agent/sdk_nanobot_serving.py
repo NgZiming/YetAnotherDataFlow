@@ -282,11 +282,14 @@ class SDKNanobotServing(AgentServingABC):
 
         # 执行异步查询
         async def run_query():
-            # 注入自定义 Hook 以捕获详细轨迹
-            return await bot.run(
-                query,
-                session_key=session_key,
-                hooks=[capture_hook],
+            # 注入自定义 Hook 以捕获详细轨迹，并设置超时时间（600s）
+            return await asyncio.wait_for(
+                bot.run(
+                    query,
+                    session_key=session_key,
+                    hooks=[capture_hook],
+                ),
+                timeout=600,
             )
 
         try:
