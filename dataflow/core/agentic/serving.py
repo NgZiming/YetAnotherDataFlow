@@ -41,8 +41,8 @@ class MessageDict(TypedDict, total=True):
     role: str  # "system" | "user" | "assistant" | "tool" | "toolResult"
     content: str  # 消息内容
     thought: Optional[str]  # 思考内容 (如有)
-    tool_calls: List[Dict]  # 工具调用列表 (如有)
-    tool_results: List[Dict]  # 工具结果列表 (如有)
+    tool_calls: List[ToolCallDict]  # 工具调用列表 (如有)
+    tool_results: List[ToolResultDict]  # 工具结果列表 (如有)
     id: Optional[str]  # 消息 ID(用于拓扑)
     parentId: Optional[str]  # 父消息 ID(用于拓扑)
     session_id: Optional[str]  # 所属 session ID

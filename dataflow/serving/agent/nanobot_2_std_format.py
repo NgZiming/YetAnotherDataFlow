@@ -1,5 +1,5 @@
 from typing import List
-from dataflow.core.agentic import (
+from dataflow.core.agentic.serving import (
     TrajectoryDict,
     MessageDict,
     ToolCallDict,
@@ -31,7 +31,7 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
         content = msg.get("content", "")
 
         # 针对 Assistant 消息，尝试提取思考过程和工具调用
-        thought = msg.get("thought", "")
+        thought = msg.get("thought", None)
 
         tool_calls: list[ToolCallDict] = []
         if role == "assistant":
@@ -42,7 +42,7 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
                     tc_type = tc.get("type", "function")
                     tool_calls.append(
                         {
-                            "id": tc.get("id", None),
+                            "id": tc.get("id", "unknown"),
                             "name": tc.get(tc_type, {}).get("name", "unknown"),
                             "arguments": tc.get(tc_type, {}).get("name", "arguments"),
                         }
@@ -53,8 +53,8 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
         tool_call_id = None
         if role == "tool":
             # nanobot 的 tool 消息通常包含对应的 call_id 和 tool_name
-            tool_call_id = getattr(msg, "tool_call_id", None)
-            tool_name = getattr(msg, "tool_name", "unknown")
+            tool_call_id = msg.get("tool_call_id", "unknown")
+            tool_name = msg.get("name", "unknown")
 
             # tool_results 结构: [{"toolCallId": ..., "toolName": ..., "content": ...}]
             if content:
@@ -74,7 +74,7 @@ def convert(c: AgentHookContext) -> TrajectoryDict:
             "thought": thought,
             "tool_calls": tool_calls,
             "tool_results": tool_results,
-            "id": msg.get("id", f"msg_{idx}"),
+            "id": msg.get("id", None),
             "parentId": None,
             "session_id": None,
         }
