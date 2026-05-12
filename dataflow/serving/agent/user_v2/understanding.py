@@ -52,8 +52,20 @@ class UnderstandingStageV2(UserStage):
                                     "type": "object",
                                     "properties": {
                                         "milestone_id": {"type": "string"},
-                                        "status": {"type": "string"},
-                                        "completion_percentage": {"type": "integer"},
+                                        "status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "completed",
+                                                "in_progress",
+                                                "not_started",
+                                                "blocked",
+                                            ],
+                                        },
+                                        "completion_percentage": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 100,
+                                        },
                                         "evidence_ref": {
                                             "type": "array",
                                             "items": {"type": "string"},
@@ -153,8 +165,20 @@ class UnderstandingStageV2(UserStage):
                         "properties": {
                             "current_milestone": {"type": "string"},
                             "is_completed": {"type": "boolean"},
-                            "final_status": {"type": "string"},
-                            "emotional_tone": {"type": "string"},
+                            "final_status": {
+                                "type": "string",
+                                "enum": ["CONTINUE", "FINISHED", "ABORTED"],
+                            },
+                            "emotional_tone": {
+                                "type": "string",
+                                "enum": [
+                                    "satisfied",
+                                    "dissatisfied",
+                                    "confused",
+                                    "urgent",
+                                    "neutral",
+                                ],
+                            },
                             "has_history": {"type": "boolean"},
                             "next_objective": {"type": "string"},
                             "reasoning": {"type": "string"},

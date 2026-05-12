@@ -39,7 +39,18 @@ class DecisionStageV2(UserStage):
                     json_schema={
                         "type": "object",
                         "properties": {
-                            "strategy_type": {"type": "string"},
+                            "strategy_type": {
+                                "type": "string",
+                                "enum": [
+                                    "提问",
+                                    "提供反馈",
+                                    "要求澄清",
+                                    "表达不满",
+                                    "表示满意",
+                                    "催促",
+                                    "其他",
+                                ],
+                            },
                             "goal": {"type": "string"},
                             "approach": {"type": "string"},
                         },
@@ -118,7 +129,10 @@ class DecisionStageV2(UserStage):
                             "traits": {"type": "array", "items": {"type": "string"}},
                             "tone": {"type": "string"},
                             "style_guide": {"type": "string"},
-                            "length_hint": {"type": "string"},
+                            "length_hint": {
+                                "type": "string",
+                                "description": "short | medium | long",
+                            },
                         },
                         "required": ["tone", "style_guide", "length_hint"],
                     },
@@ -187,7 +201,10 @@ class DecisionStageV2(UserStage):
                     json_schema={
                         "type": "object",
                         "properties": {
-                            "judgment": {"type": "string"},
+                            "judgment": {
+                                "type": "string",
+                                "enum": ["completed", "in_progress", "aborted"],
+                            },
                             "feedback": {"type": "string"},
                             "reasoning": {"type": "string"},
                         },

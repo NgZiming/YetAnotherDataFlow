@@ -113,7 +113,10 @@ class PerceptionStageV2(UserStage):
                                     "required": ["action", "finding", "is_incremental"],
                                 },
                             },
-                            "reasoning_pattern": {"type": "string"},
+                            "reasoning_pattern": {
+                                "type": "string",
+                                "description": "initial_exploration | gap_filling | hypothesis_testing | course_correction",
+                            },
                             "is_looping": {"type": "boolean"},
                             "loop_analysis": {"type": "string"},
                             "overall_summary": {"type": "string"},
@@ -178,28 +181,17 @@ class PerceptionStageV2(UserStage):
                     input_keys=["feedbacks", "agent_context", "file_context"],
                     output_key="dialogue_context",
                     output_type=DialogueContext,
-                    json_schema={
+                    json_schema=json_schema={
                         "type": "object",
                         "properties": {
                             "user_intent": {"type": "string"},
-                            "emotional_tone": {"type": "string"},
-                            "key_questions": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "implicit_needs": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
+                            "emotional_tone": {"type": "string", "description": "satisfied | dissatisfied | confused | urgent | neutral"},
+                            "key_questions": {"type": "array", "items": {"type": "string"}},
+                            "implicit_needs": {"type": "array", "items": {"type": "string"}},
                             "has_history": {"type": "boolean"},
-                            "summary": {"type": "string"},
+                            "summary": {"type": "string"}
                         },
-                        "required": [
-                            "user_intent",
-                            "emotional_tone",
-                            "has_history",
-                            "summary",
-                        ],
+                        "required": ["user_intent", "emotional_tone", "has_history", "summary"]
                     },
                     prompt_template="""你是一个心理意图分析师。分析用户与 Agent 的对话历史，提取当前真实的心理状态和意图。
 
