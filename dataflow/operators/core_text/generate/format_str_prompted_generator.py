@@ -1,4 +1,6 @@
 import pandas as pd
+import json
+from jsonschema import validate, ValidationError
 from dataflow.utils.registry import OPERATOR_REGISTRY
 from dataflow import get_logger
 import string
@@ -23,12 +25,14 @@ class FormatStrPromptedGenerator(OperatorABC):
         system_prompt: str = "You are a helpful agent.",
         prompt_template: Union[FormatStrPrompt, DIYPromptABC] = FormatStrPrompt,
         json_schema: dict = None,
+        to_dict: bool = False,
     ):
         self.logger = get_logger()
         self.llm_serving = llm_serving
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
         self.json_schema = json_schema
+        self.to_dict = to_dict
         if prompt_template is None:
             raise ValueError("prompt_template cannot be None")
 
@@ -44,9 +48,9 @@ class FormatStrPromptedGenerator(OperatorABC):
         self.input_keys = input_keys
         need_fields = set(input_keys.keys())
         # Load the raw dataframe from the input file
-        dataframe = storage.read("dataframe")
+        dataframe: pd.DataFrame = storage.read("dataframe")
         self.logger.info(f"Loading, number of rows: {len(dataframe)}")
-        llm_inputs = []
+        llm_inputs: list[str] = []
 
         for idx, row in dataframe.iterrows():
             key_dict = {}
@@ -57,17 +61,43 @@ class FormatStrPromptedGenerator(OperatorABC):
         self.logger.info(f"Prepared {len(llm_inputs)} prompts for LLM generation.")
         # Create a list to hold all generated contents
         # Generate content using the LLM serving
-        generated_outputs = self.llm_serving.generate_from_input(
+        generated_outputs: list[str] = self.llm_serving.generate_from_input(
             user_inputs=llm_inputs,
             system_prompt=self.system_prompt,
             json_schema=self.json_schema,
         )
 
-        dataframe[self.output_key] = generated_outputs
-        dataframe[f".prompt.system.{self.output_key}"] = self.system_prompt
-        dataframe[f".prompt.user.{self.output_key}"] = llm_inputs
+        final_data = []
+        # Use zip to iterate through outputs, rows, and prompts to avoid index tracking
+        for output, row, prompt in zip(
+            generated_outputs,
+            dataframe.to_dict(orient="records"),
+            llm_inputs,
+        ):
+            # 1. Try to parse as JSON if schema is provided
+            if self.json_schema and self.to_dict:
+                try:
+                    data = json.loads(output)
+                    validate(instance=data, schema=self.json_schema)
+                    processed_output = data
+                except (json.JSONDecodeError, ValidationError) as e:
+                    self.logger.warning(
+                        f"Filtering out sample due to schema validation failure: {e}"
+                    )
+                    continue
+            else:
+                processed_output = output
 
-        output_file = self.storage.write(dataframe)
+            # 2. Append the processed result and prompt context to the row
+            row[self.output_key] = processed_output
+            row[f".prompt.system.{self.output_key}"] = self.system_prompt
+            row[f".prompt.user.{self.output_key}"] = prompt
+            final_data.append(row)
+
+        # Reconstruct dataframe from filtered data
+        dataframe = pd.DataFrame(final_data)
+
+        self.storage.write(dataframe)
         return output_key
 
     @staticmethod

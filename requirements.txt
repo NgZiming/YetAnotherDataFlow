@@ -53,3 +53,4 @@ google-cloud-bigquery
 
 # nanobot serving
 nanobot-ai>=0.1.5
+jsonschema
