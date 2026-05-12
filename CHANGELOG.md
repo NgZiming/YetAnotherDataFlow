@@ -1,3 +1,57 @@
+## [1.0.14] - 2026-05-12
+
+### ⚙️ Operator Enhancements
+
+- **FormatStrPromptedGenerator JSON Schema Support**: Added native JSON schema validation with `to_dict` flag.
+  - New `to_dict` parameter: when enabled, parses LLM output as JSON and validates against `json_schema`
+  - Automatically filters out samples that fail schema validation
+  - Stores both raw output and parsed dict in dataframe
+  - Eliminates need for external `JsonParseFilter` when using structured output
+
+### 🔧 LLM Client & Structured Output
+
+- **LLMClientABC Interface Enhancement**: Added `json_schema` parameter to `generate()` method.
+  - `StepSchema` now includes optional `json_schema` field for structured output
+  - `UserStep` passes `json_schema` from schema to LLM client
+  - `LLMClientAdapter` implements JSON Schema response format for OpenAI-compatible APIs
+    - Uses `response_format: {type: "json_schema", json_schema: {...}}` payload
+    - Enables strict schema validation at the LLM level
+
+### 🧠 UserSimulator V2 Improvements
+
+- **DecisionStageV2**: Added JSON schema constraints for all three steps.
+  - `DialogueStrategy`: Enforces `strategy_type` enum (提问/提供反馈/要求澄清/表达不满/表示满意/催促/其他)
+  - `PersonaStyle`: Enforces `length_hint` enum (short/medium/long)
+  - `FinalResponse`: Enforces `judgment` enum (completed/in_progress/aborted)
+  - Updated prompt禁令 to explicitly forbid internal management terminology (里程碑，Stage, Step, Task State, etc.)
+
+- **UnderstandingStageV2**: Added JSON schema for structured outputs.
+  - `MilestoneStatus`: Enforces milestone `status` enum (completed/in_progress/not_started/blocked)
+  - `TaskState`: Enforces `final_status` enum (CONTINUE/FINISHED/ABORTED) and `emotional_tone` enum
+
+- **PerceptionStageV2**: Added JSON schema for all three sensors.
+  - `FileContext`: Enforces required fields (path, fact, evidence_snippet, relevance)
+  - `AgentContext`: Enforces `reasoning_pattern` enum and `is_looping` boolean
+  - `DialogueContext`: Enforces `emotional_tone` enum (satisfied/dissatisfied/confused/urgent/neutral)
+
+### 🛠️ Stability & Robustness
+
+- **SDKNanobotServing**: Added 600s timeout to `bot.run()` to prevent hanging queries.
+  - Uses `asyncio.wait_for()` wrapper around bot execution
+  - Prevents indefinite blocking on stuck agent sessions
+
+### 📦 Dependencies
+
+- Added `jsonschema>=4.0.0` to requirements.txt for JSON schema validation in FormatStrPromptedGenerator.
+
+### 📊 Statistics
+
+- **8 files changed**
+- **271 insertions(+), 19 deletions(-)**
+- Compared to tag `v1.0.13`
+
+---
+
 ## [1.0.13] - 2026-05-11
 
 ### 🚀 Major Features
