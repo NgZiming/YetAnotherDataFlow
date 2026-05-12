@@ -131,7 +131,7 @@ class DecisionStageV2(UserStage):
                             "style_guide": {"type": "string"},
                             "length_hint": {
                                 "type": "string",
-                                "description": "short | medium | long",
+                                "enum": ["short", "medium", "long"],
                             },
                         },
                         "required": ["tone", "style_guide", "length_hint"],
