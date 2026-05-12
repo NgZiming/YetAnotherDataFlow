@@ -21,6 +21,7 @@ class StepSchema:
         str  # The specific key in the LLM JSON response that represents the result
     )
     prompt_template: str  # The prompt template for this step
+    json_schema: Optional[Dict[str, Any]] = None  # JSON schema for structured output
     output_type: Optional[Type] = None  # Pydantic model class for validation
 
 
@@ -32,7 +33,10 @@ class LLMClientABC(ABC):
 
     @abstractmethod
     async def generate(
-        self, prompt: str, config: Optional[Dict[str, Any]] = None
+        self,
+        prompt: str,
+        config: Optional[Dict[str, Any]] = None,
+        json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Generate a text response from the LLM.
@@ -148,7 +152,11 @@ class UserStep:
         prompt = self.schema.prompt_template.format(**input_vars)
 
         # 3. LLM Call
-        response_text = await llm_client.generate(prompt, config=self.llm_config)
+        response_text = await llm_client.generate(
+            prompt,
+            config=self.llm_config,
+            json_schema=self.schema.json_schema,
+        )
 
         # 4. JSON Parsing
         return self._parse_json(response_text)

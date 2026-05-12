@@ -36,6 +36,15 @@ class DecisionStageV2(UserStage):
                     input_keys=["task_state", "dialogue_scripts"],
                     output_key="dialogue_strategy",
                     output_type=DialogueStrategy,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "strategy_type": {"type": "string"},
+                            "goal": {"type": "string"},
+                            "approach": {"type": "string"},
+                        },
+                        "required": ["strategy_type", "goal", "approach"],
+                    },
                     prompt_template="""你是一个对话策略专家。你的任务是根据当前的【任务状态】和预设的【对话脚本】，制定下一步的对话战略。
 
 ## 输入
@@ -103,6 +112,16 @@ class DecisionStageV2(UserStage):
                     input_keys=["task_state", "user_persona"],
                     output_key="persona_style",
                     output_type=PersonaStyle,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "traits": {"type": "array", "items": {"type": "string"}},
+                            "tone": {"type": "string"},
+                            "style_guide": {"type": "string"},
+                            "length_hint": {"type": "string"},
+                        },
+                        "required": ["tone", "style_guide", "length_hint"],
+                    },
                     prompt_template="""你是一个语言风格适配器。将任务状态和用户人设转化为具体的语言约束。
 
 ## 输入
@@ -165,6 +184,15 @@ class DecisionStageV2(UserStage):
                     ],
                     output_key="final_response",
                     output_type=FinalResponse,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "judgment": {"type": "string"},
+                            "feedback": {"type": "string"},
+                            "reasoning": {"type": "string"},
+                        },
+                        "required": ["judgment", "feedback", "reasoning"],
+                    },
                     prompt_template="""你是一个用户模拟器。根据策略和风格，生成最终的自然语言反馈。
 
 ## 输入

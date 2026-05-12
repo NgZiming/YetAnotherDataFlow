@@ -36,6 +36,16 @@ class PerceptionStageV2(UserStage):
                     input_keys=["file_contents", "question"],
                     output_key="file_context",
                     output_type=FileContext,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "fact": {"type": "string"},
+                            "evidence_snippet": {"type": "string"},
+                            "relevance": {"type": "string"},
+                        },
+                        "required": ["path", "fact", "evidence_snippet", "relevance"],
+                    },
                     prompt_template="""你是一个极度严谨的证据提取专家。你的任务是从文件中提取与用户目标直接相关的【实证证据】。
 
 ## 输入
@@ -88,6 +98,33 @@ class PerceptionStageV2(UserStage):
                     input_keys=["file_context", "agent_outputs"],
                     output_key="agent_context",
                     output_type=AgentContext,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "behavior_sequence": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "action": {"type": "string"},
+                                        "finding": {"type": "string"},
+                                        "is_incremental": {"type": "boolean"},
+                                    },
+                                    "required": ["action", "finding", "is_incremental"],
+                                },
+                            },
+                            "reasoning_pattern": {"type": "string"},
+                            "is_looping": {"type": "boolean"},
+                            "loop_analysis": {"type": "string"},
+                            "overall_summary": {"type": "string"},
+                        },
+                        "required": [
+                            "behavior_sequence",
+                            "reasoning_pattern",
+                            "is_looping",
+                            "overall_summary",
+                        ],
+                    },
                     prompt_template="""你是一个行为分析专家。通过分析 Agent 的输出轨迹，还原其真实的认知路径和行为模式。
 
 ## 输入
@@ -141,6 +178,29 @@ class PerceptionStageV2(UserStage):
                     input_keys=["feedbacks", "agent_context", "file_context"],
                     output_key="dialogue_context",
                     output_type=DialogueContext,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "user_intent": {"type": "string"},
+                            "emotional_tone": {"type": "string"},
+                            "key_questions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "implicit_needs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "has_history": {"type": "boolean"},
+                            "summary": {"type": "string"},
+                        },
+                        "required": [
+                            "user_intent",
+                            "emotional_tone",
+                            "has_history",
+                            "summary",
+                        ],
+                    },
                     prompt_template="""你是一个心理意图分析师。分析用户与 Agent 的对话历史，提取当前真实的心理状态和意图。
 
 ## 输入

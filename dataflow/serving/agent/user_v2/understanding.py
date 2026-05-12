@@ -43,6 +43,34 @@ class UnderstandingStageV2(UserStage):
                     ],
                     output_key="milestone_status",
                     output_type=MilestoneStatus,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "milestones": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "milestone_id": {"type": "string"},
+                                        "status": {"type": "string"},
+                                        "completion_percentage": {"type": "integer"},
+                                        "evidence_ref": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                        "reasoning": {"type": "string"},
+                                    },
+                                    "required": [
+                                        "milestone_id",
+                                        "status",
+                                        "completion_percentage",
+                                        "reasoning",
+                                    ],
+                                },
+                            }
+                        },
+                        "required": ["milestones"],
+                    },
                     prompt_template="""你是一个极度严谨的任务审计员。你的任务是基于【物理实证】核实每个里程碑的实际完成状态。
 
 ## 输入
@@ -120,6 +148,27 @@ class UnderstandingStageV2(UserStage):
                     ],
                     output_key="task_state",
                     output_type=TaskState,
+                    json_schema={
+                        "type": "object",
+                        "properties": {
+                            "current_milestone": {"type": "string"},
+                            "is_completed": {"type": "boolean"},
+                            "final_status": {"type": "string"},
+                            "emotional_tone": {"type": "string"},
+                            "has_history": {"type": "boolean"},
+                            "next_objective": {"type": "string"},
+                            "reasoning": {"type": "string"},
+                        },
+                        "required": [
+                            "current_milestone",
+                            "is_completed",
+                            "final_status",
+                            "emotional_tone",
+                            "has_history",
+                            "next_objective",
+                            "reasoning",
+                        ],
+                    },
                     prompt_template="""你是一个状态合成专家。将审计结果、行为模式和用户情绪整合为最终的任务状态。
 
 ## 输入

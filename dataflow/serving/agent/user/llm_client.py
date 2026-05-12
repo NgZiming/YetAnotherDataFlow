@@ -35,7 +35,10 @@ class LLMClientAdapter(LLMClientABC):
             self.client_params.update(client_params)
 
     async def generate(
-        self, prompt: str, config: Optional[Dict[str, Any]] = None
+        self,
+        prompt: str,
+        config: Optional[Dict[str, Any]] = None,
+        json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Perform a synchronous HTTP POST request to the LLM API and return the generated text.
@@ -51,6 +54,17 @@ class LLMClientAdapter(LLMClientABC):
             "messages": [{"role": "user", "content": prompt}],
         }
         payload.update(current_config)
+
+        # Add json_schema for structured output if provided
+        if json_schema:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "custom_response",
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
 
         # Setup headers
         headers = {"Content-Type": "application/json"}
