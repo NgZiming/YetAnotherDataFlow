@@ -1,18 +1,20 @@
-import json
-import warnings
-import requests
-from requests.adapters import HTTPAdapter
-import os
-import logging
 import base64
-from typing import Any, Dict, List, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-from dataflow.core import LLMServingABC
+import json
+import os
 import re
 import time
+import warnings
 
-from ..logger import get_logger
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Tuple, Optional
+
+import requests
+
+from requests.adapters import HTTPAdapter
+from tqdm import tqdm
+
+from dataflow.core import LLMServingABC
+from dataflow.logger import get_logger
 from dataflow.utils.storage import MediaStorage
 
 
@@ -72,7 +74,7 @@ class APIVLMServing_request(LLMServingABC):
             configs.pop("timeout")
 
         self.configs = configs
-        self.configs.update({"temperature": temperature})
+        self.configs.update({"temperature": self.temperature})
 
         self.logger = get_logger()
 
@@ -156,8 +158,8 @@ class APIVLMServing_request(LLMServingABC):
         id: int,
         payload: List[Dict[str, Any]],
         model: str,
-        json_schema: dict = None,
-    ) -> Tuple[int, str]:
+        json_schema: Optional[dict] = None,
+    ) -> Tuple[int, Optional[str]]:
         """Send a single chat completion request.
 
         :param id: Request identifier for tracking.
@@ -261,8 +263,8 @@ class APIVLMServing_request(LLMServingABC):
         id: int,
         payload: List[Dict[str, Any]],
         model: str,
-        json_schema: dict = None,
-    ) -> Tuple[int, str]:
+        json_schema: Optional[dict] = None,
+    ) -> Tuple[int, Optional[str]]:
         """Send request with exponential backoff retry.
 
         :param id: Request identifier.
@@ -279,14 +281,16 @@ class APIVLMServing_request(LLMServingABC):
 
         return id, None
 
-    def _run_threadpool(self, task_args_list: List[dict], desc: str) -> List[str]:
+    def _run_threadpool(
+        self, task_args_list: List[dict], desc: str
+    ) -> List[Optional[str]]:
         """Execute multiple requests concurrently using thread pool.
 
         :param task_args_list: List of kwargs dicts for _api_chat_id_retry.
         :param desc: Progress bar description.
         :return: List of responses ordered by id.
         """
-        responses = [None] * len(task_args_list)
+        responses: List[Optional[str]] = [None] * len(task_args_list)
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = [
@@ -303,75 +307,12 @@ class APIVLMServing_request(LLMServingABC):
 
         return responses
 
-    def chat_with_one_image(
-        self,
-        image_path: str,
-        text_prompt: str,
-        model: str = None,
-        json_schema: dict = None,
-    ) -> str:
-        """Send a chat request with a single image.
-
-        :param image_path: Path to the image file.
-        :param text_prompt: Text prompt to accompany the image.
-        :param model: Model override (defaults to instance model_name).
-        :param json_schema: Optional JSON schema for structured output.
-        :return: Model response as string.
-        """
-        model = model or self.model_name
-        b64, fmt = self._encode_image_to_base64(image_path)
-
-        # Build VLM-compatible message content
-        content = [
-            {"type": "text", "text": text_prompt},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/{fmt};base64,{b64}"},
-            },
-        ]
-
-        payload = [{"role": "user", "content": content}]
-        _, response = self._api_chat_id_retry(0, payload, model, json_schema)
-        return response
-
-    def chat_with_one_image_with_id(
-        self,
-        request_id: Any,
-        image_path: str,
-        text_prompt: str,
-        model: str = None,
-        json_schema: dict = None,
-    ) -> Tuple[Any, str]:
-        """Same as chat_with_one_image but returns (request_id, response).
-
-        :param request_id: Identifier for tracking.
-        :param image_path: Path to the image file.
-        :param text_prompt: Text prompt.
-        :param model: Model override.
-        :param json_schema: Optional JSON schema.
-        :return: Tuple of (request_id, response).
-        """
-        model = model or self.model_name
-        b64, fmt = self._encode_image_to_base64(image_path)
-
-        content = [
-            {"type": "text", "text": text_prompt},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/{fmt};base64,{b64}"},
-            },
-        ]
-
-        payload = [{"role": "user", "content": content}]
-        _, response = self._api_chat_id_retry(request_id, payload, model, json_schema)
-        return request_id, response
-
     def generate_from_input(
         self,
         user_inputs: List[str],
         system_prompt: str = "Describe the image in detail.",
-        json_schema: dict = None,
-    ) -> List[str]:
+        json_schema: Optional[dict] = None,
+    ) -> List[Optional[str]]:
         """Batch process single-image chat requests.
 
         :param user_inputs: List of image paths.
@@ -416,9 +357,9 @@ class APIVLMServing_request(LLMServingABC):
         image_paths: List[str],
         text_prompts: List[str],
         system_prompt: str = "",
-        model: str = None,
-        json_schema: dict = None,
-    ) -> List[str]:
+        model: Optional[str] = None,
+        json_schema: Optional[dict] = None,
+    ) -> List[Optional[str]]:
         """Batch process single-image chat requests with separate prompts.
 
         :param image_paths: List of image file paths.
@@ -454,157 +395,11 @@ class APIVLMServing_request(LLMServingABC):
                         ],
                     }
                 ],
-                model=model,
+                model=model or self.model_name,
                 json_schema=json_schema,
             )
             for idx in range(len(image_paths))
         ]
-        return self._run_threadpool(
-            task_args_list, desc="Generating VLM responses......"
-        )
-
-    def analyze_images_with_gpt(
-        self,
-        image_paths: List[str],
-        image_labels: List[str],
-        system_prompt: str = "",
-        model: str = None,
-        json_schema: dict = None,
-    ) -> str:
-        """Analyze multiple images in a single request with labels.
-
-        :param image_paths: List of image file paths.
-        :param image_labels: Corresponding labels for each image.
-        :param system_prompt: Overall prompt before listing images.
-        :param model: Model override.
-        :param json_schema: Optional JSON schema.
-        :return: Combined analysis as text.
-        :raises ValueError: If lengths don't match.
-        """
-        if len(image_paths) != len(image_labels):
-            raise ValueError(
-                "`image_paths` and `image_labels` must have the same length"
-            )
-
-        model = model or self.model_name
-
-        # Build content with system prompt and image-label pairs
-        content = []
-        if system_prompt:
-            content.append({"type": "text", "text": system_prompt})
-
-        for label, path in zip(image_labels, image_paths):
-            b64, fmt = self._encode_image_to_base64(path)
-            content.append({"type": "text", "text": f"{label}:"})
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/{fmt};base64,{b64}"},
-                }
-            )
-
-        payload = [{"role": "user", "content": content}]
-        _, response = self._api_chat_id_retry(0, payload, model, json_schema)
-        return response
-
-    def analyze_images_with_gpt_with_id(
-        self,
-        request_id: Any,
-        image_paths: List[str],
-        image_labels: List[str],
-        system_prompt: str = "",
-        model: str = None,
-        json_schema: dict = None,
-    ) -> Tuple[Any, str]:
-        """Batch-tracked version of analyze_images_with_gpt.
-
-        :param request_id: Identifier for tracking.
-        :param image_paths: List of image file paths.
-        :param image_labels: Corresponding labels.
-        :param system_prompt: Overall prompt.
-        :param model: Model override.
-        :param json_schema: Optional JSON schema.
-        :return: Tuple of (request_id, analysis).
-        """
-        model = model or self.model_name
-
-        content = []
-        if system_prompt:
-            content.append({"type": "text", "text": system_prompt})
-
-        for label, path in zip(image_labels, image_paths):
-            b64, fmt = self._encode_image_to_base64(path)
-            content.append({"type": "text", "text": f"{label}:"})
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/{fmt};base64,{b64}"},
-                }
-            )
-
-        payload = [{"role": "user", "content": content}]
-        _, response = self._api_chat_id_retry(request_id, payload, model, json_schema)
-        return request_id, response
-
-    def generate_from_input_multi_images(
-        self,
-        list_of_image_paths: List[List[str]],
-        list_of_image_labels: List[List[str]],
-        system_prompt: str = "",
-        user_prompts: List[str] = None,
-        model: str = None,
-        json_schema: dict = None,
-    ) -> List[str]:
-        """Concurrently analyze multiple sets of images with labels.
-
-        :param list_of_image_paths: List of image path lists.
-        :param list_of_image_labels: Parallel list of label lists.
-        :param system_prompt: Prompt prefixed to each batch.
-        :param user_prompts: Optional per-batch user prompts.
-        :param model: Model override.
-        :param json_schema: Optional JSON schema.
-        :return: List of analysis results in input order.
-        :raises ValueError: If outer list lengths differ.
-        """
-        if len(list_of_image_paths) != len(list_of_image_labels):
-            raise ValueError(
-                "`list_of_image_paths` and `list_of_image_labels` must have the same length"
-            )
-
-        model = model or self.model_name
-
-        if user_prompts is None:
-            user_prompts = [""] * len(list_of_image_paths)
-
-        task_args_list = []
-        for idx, (paths, labels, user_prompt) in enumerate(
-            zip(list_of_image_paths, list_of_image_labels, user_prompts)
-        ):
-            content = []
-            if system_prompt:
-                content.append({"type": "text", "text": system_prompt})
-            if user_prompt:
-                content.append({"type": "text", "text": user_prompt})
-
-            for label, path in zip(labels, paths):
-                b64, fmt = self._encode_image_to_base64(path)
-                content.append({"type": "text", "text": f"{label}:"})
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/{fmt};base64,{b64}"},
-                    }
-                )
-
-            task_args_list.append(
-                dict(
-                    id=idx,
-                    payload=[{"role": "user", "content": content}],
-                    model=model,
-                    json_schema=json_schema,
-                )
-            )
-
         return self._run_threadpool(
             task_args_list, desc="Generating VLM responses......"
         )
