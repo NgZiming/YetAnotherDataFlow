@@ -379,31 +379,34 @@ class APIVLMServing_request(LLMServingABC):
         :param json_schema: Optional JSON schema for structured output.
         :return: List of responses in input order.
         """
-        task_args_list = [
-            dict(
-                id=idx,
-                payload=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": f"{system_prompt}\n{user_inputs[idx]}",
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{self._encode_image_to_base64(user_inputs[idx])[0]}"
+        task_args_list = []
+        for idx, image_path in enumerate(user_inputs):
+            b64, fmt = self._encode_image_to_base64(image_path)
+            task_args_list.append(
+                dict(
+                    id=idx,
+                    payload=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": system_prompt,
                                 },
-                            },
-                        ],
-                    }
-                ],
-                model=self.model_name,
-                json_schema=json_schema,
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/{fmt};base64,{b64}"
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                    model=self.model_name,
+                    json_schema=json_schema,
+                )
             )
-            for idx in range(len(user_inputs))
-        ]
+
         return self._run_threadpool(
             task_args_list, desc="Generating VLM responses......"
         )
