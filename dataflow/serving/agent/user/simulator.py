@@ -24,7 +24,7 @@ class UserSimulator(UserSimulatorABC):
         self.understanding_stage = UnderstandingStage(self.llm_config)
         self.decision_stage = DecisionStage(self.llm_config)
 
-    async def run(
+    def run(
         self,
         raw_data: Dict[str, Any],
         global_context: Optional[Dict[str, Any]] = None,
@@ -39,7 +39,7 @@ class UserSimulator(UserSimulatorABC):
 
         # --- Stage 1: Perception ---
         logger.info("=== Stage 1: Perception ===")
-        await self.perception_stage.execute(
+        self.perception_stage.execute(
             data_pool,
             global_context,
             self.llm_client,
@@ -47,7 +47,7 @@ class UserSimulator(UserSimulatorABC):
 
         # --- Stage 2: Understanding ---
         logger.info("=== Stage 2: Understanding ===")
-        await self.understanding_stage.execute(
+        self.understanding_stage.execute(
             data_pool,
             global_context,
             self.llm_client,
@@ -55,7 +55,7 @@ class UserSimulator(UserSimulatorABC):
 
         # --- Stage 3: Decision ---
         logger.info("=== Stage 3: Decision ===")
-        await self.decision_stage.execute(
+        self.decision_stage.execute(
             data_pool,
             global_context,
             self.llm_client,

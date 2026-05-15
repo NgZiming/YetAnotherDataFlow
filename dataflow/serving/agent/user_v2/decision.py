@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -276,7 +275,7 @@ class DecisionStageV2(UserStage):
             ),
         ]
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -286,5 +285,5 @@ class DecisionStageV2(UserStage):
 
         # Execute steps sequentially
         for step in self.steps:
-            res = await step.execute(data_pool, global_context, llm_client)
+            res = step.execute(data_pool, global_context, llm_client)
             data_pool[step.schema.output_key] = res["json_resp"]

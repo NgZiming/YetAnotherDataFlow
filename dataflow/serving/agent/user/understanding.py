@@ -479,7 +479,7 @@ class UnderstandingStage(UserStage):
             ),
         ]
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -497,7 +497,7 @@ class UnderstandingStage(UserStage):
 
         # 执行步骤
         for step in self.steps:
-            res = await step.execute(data_pool, global_context, llm_client)
+            res = step.execute(data_pool, global_context, llm_client)
             data_pool[step.schema.output_key] = res["json_resp"]
 
         logger.info(f"MilestoneStatus: {data_pool['milestone_status']}")

@@ -1,6 +1,7 @@
-import asyncio
-from typing import Any, Dict, List, Optional
+import concurrent.futures
+from datetime import datetime
 from pydantic import BaseModel, Field
+from typing import Dict, Any
 
 from dataflow.logger import get_logger
 from dataflow.core.agentic import (
@@ -260,7 +261,7 @@ class PerceptionStageV2(UserStage):
             ),
         ]
 
-    async def _extract_evidence(
+    def _extract_evidence(
         self,
         file_path: str,
         file_content: str,
@@ -274,14 +275,14 @@ class PerceptionStageV2(UserStage):
             question=question,
         )
         # We expect a JSON response here for FileEvidence
-        resp = await llm_client.generate(prompt, config=self.llm_config)
+        resp = llm_client.generate(prompt, config=self.llm_config)
 
         # Remove potential markdown blocks
         cleaned_resp = resp.strip().removeprefix("```json").removesuffix("```").strip()
         evidence = FileEvidence.model_validate_json(cleaned_resp)
         return (file_path, evidence)
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -296,22 +297,30 @@ class PerceptionStageV2(UserStage):
         all_evidences = []
         if file_contents:
             logger.info(f"Extracting evidence from {len(file_contents)} files...")
-            tasks = [
-                self._extract_evidence(
-                    path,
-                    content,
-                    file_sensor_step.schema.prompt_template,
-                    global_context["question"],
-                    llm_client,
-                )
-                for path, content in file_contents.items()
-            ]
-            results = await asyncio.gather(*tasks)
+
+            # Use ThreadPoolExecutor for concurrent LLM calls
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = {
+                    executor.submit(
+                        self._extract_evidence,
+                        path,
+                        content,
+                        file_sensor_step.schema.prompt_template,
+                        global_context["question"],
+                        llm_client,
+                    ): path
+                    for path, content in file_contents.items()
+                }
+
+                results = []
+                for future in concurrent.futures.as_completed(futures):
+                    results.append(future.result())
+
             all_evidences = [ev for _, ev in results]
 
             # Synthesize the overall file_context summary (simple LLM call or join)
             summary_prompt = f"Based on the following evidences: {all_evidences}, provide a 1-sentence summary of the workspace state."
-            summary = await llm_client.generate(summary_prompt, config=self.llm_config)
+            summary = llm_client.generate(summary_prompt, config=self.llm_config)
             data_pool[file_sensor_step.schema.output_key] = FileContext(
                 evidences=all_evidences, summary=summary
             ).model_dump()
@@ -322,6 +331,6 @@ class PerceptionStageV2(UserStage):
 
         # 2. Execute remaining sensors (AgentSensor, DialogueSensor)
         for step in self.steps[1:]:
-            res = await step.execute(data_pool, global_context, llm_client)
+            res = step.execute(data_pool, global_context, llm_client)
             # In v2, the execute method of UserStep should return the parsed model
             data_pool[step.schema.output_key] = res["json_resp"]

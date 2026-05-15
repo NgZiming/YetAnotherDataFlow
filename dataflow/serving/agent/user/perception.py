@@ -1,5 +1,4 @@
-import asyncio
-
+import concurrent.futures
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -328,7 +327,7 @@ class PerceptionStage(UserStage):
             ),
         ]
 
-    async def _summarize_file(
+    def _summarize_file(
         self,
         file_path: str,
         file_content: str,
@@ -343,13 +342,13 @@ class PerceptionStage(UserStage):
                 file_content=file_content,
                 question=question,
             )
-            summary = await llm_client.generate(prompt, config=self.llm_config)
+            summary = llm_client.generate(prompt, config=self.llm_config)
             return (file_path, summary)
         except Exception as e:
             logger.error(f"Failed to summarize file {file_path}: {e}")
             return (file_path, f"[Error summarizing file: {str(e)}]")
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -371,18 +370,27 @@ class PerceptionStage(UserStage):
 
         if file_contents:
             logger.info(f"Processing {len(file_contents)} files in parallel...")
-            tasks = [
-                self._summarize_file(
-                    file_path=path,
-                    file_content=content,
-                    question=global_context["question"],
-                    prompt_template=file_sensor_step.schema.prompt_template,
-                    llm_client=llm_client,
-                )
-                for path, content in file_contents.items()
-            ]
-            results = await asyncio.gather(*tasks)
-            file_context = dict(results)
+
+            # Use ThreadPoolExecutor for concurrent LLM calls
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = {
+                    executor.submit(
+                        self._summarize_file,
+                        file_path=path,
+                        file_content=content,
+                        question=global_context["question"],
+                        prompt_template=file_sensor_step.schema.prompt_template,
+                        llm_client=llm_client,
+                    ): path
+                    for path, content in file_contents.items()
+                }
+
+                results = {}
+                for future in concurrent.futures.as_completed(futures):
+                    file_path, summary = future.result()
+                    results[file_path] = summary
+
+            file_context = results
             data_pool[file_sensor_step.schema.output_key] = file_context
         else:
             logger.warning(
@@ -392,7 +400,7 @@ class PerceptionStage(UserStage):
 
         # 执行剩余步骤
         for step in self.steps[1:]:
-            res = await step.execute(data_pool, global_context, llm_client)
+            res = step.execute(data_pool, global_context, llm_client)
             data_pool[step.schema.output_key] = res["json_resp"]
 
         for step in self.steps:

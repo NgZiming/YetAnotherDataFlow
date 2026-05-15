@@ -35,7 +35,7 @@ class UserSimulator(UserSimulatorABC):
 
         logger.info("UserSimulator v2.0 initialized with Evidence-Driven pipeline.")
 
-    async def run(
+    def run(
         self,
         raw_data: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -46,14 +46,10 @@ class UserSimulator(UserSimulatorABC):
 
         try:
             # Stage 1: Perception
-            await self.perception_stage.execute(
-                raw_data, global_context, self.llm_client
-            )
+            self.perception_stage.execute(raw_data, global_context, self.llm_client)
 
             # Stage 2: Understanding
-            await self.understanding_stage.execute(
-                raw_data, global_context, self.llm_client
-            )
+            self.understanding_stage.execute(raw_data, global_context, self.llm_client)
 
             dialogue_scripts = global_context.get("dialogue_scripts")
             task_state = raw_data.get("task_state")
@@ -88,7 +84,7 @@ class UserSimulator(UserSimulatorABC):
             raw_data["current_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # Stage 3: Decision
-            await self.decision_stage.execute(raw_data, global_context, self.llm_client)
+            self.decision_stage.execute(raw_data, global_context, self.llm_client)
 
             for k, v in raw_data.items():
                 logger.info(f"[{k}] [{v}]")

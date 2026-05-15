@@ -1,4 +1,4 @@
-import asyncio
+import concurrent.futures
 import re
 
 from typing import Any, Dict, List, Optional
@@ -524,7 +524,7 @@ class DecisionStage(UserStage):
             ),
         ]
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -569,16 +569,24 @@ class DecisionStage(UserStage):
         )
 
         # ========== 执行并行步骤 ==========
-        strategy_task = self.steps[0].execute(data_pool, global_context, llm_client)
-        persona_task = self.steps[1].execute(data_pool, global_context, llm_client)
+        # Use ThreadPoolExecutor for concurrent LLM calls
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            strategy_future = executor.submit(
+                self.steps[0].execute, data_pool, global_context, llm_client
+            )
+            persona_future = executor.submit(
+                self.steps[1].execute, data_pool, global_context, llm_client
+            )
 
-        strategy_res, persona_res = await asyncio.gather(strategy_task, persona_task)
+            strategy_res = strategy_future.result()
+            persona_res = persona_future.result()
+
         data_pool["dialogue_strategy"] = strategy_res["json_resp"]
         data_pool["persona_context"] = persona_res["json_resp"]
 
         # ========== 执行最终合成步骤 ==========
         response_step = self.steps[2]
-        gen_res = await response_step.execute(data_pool, global_context, llm_client)
+        gen_res = response_step.execute(data_pool, global_context, llm_client)
         data_pool["final_response"] = gen_res["json_resp"]
 
         logger.info(f"DialogueStrategy: {data_pool['dialogue_strategy']}")

@@ -568,9 +568,7 @@ class AgentServingABC(ABC):
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
 
-                        sim_result: SimulationResult = loop.run_until_complete(
-                            self.user.run({}, context)
-                        )
+                        sim_result: SimulationResult = self.user.run({}, context)
                         final_res = sim_result["final_response"]
 
                         judgment = final_res.get("judgment", "aborted")
