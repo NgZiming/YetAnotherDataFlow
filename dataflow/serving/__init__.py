@@ -4,6 +4,7 @@ from .google_api_serving import PerspectiveAPIServing
 from .lite_llm_serving import LiteLLMServing
 from .localhost_llm_api_serving import LocalHostLLMAPIServing_vllm
 from .api_google_vertexai_serving import APIGoogleVertexAIServing
+from .llm_client import LLMClientAdapter
 
 # Agent-related serving (import from agent submodule)
 from .agent import (
@@ -21,6 +22,7 @@ __all__ = [
     "APIGoogleVertexAIServing",
     "APILLMServing_request",
     "APIVLMServing_openai",
+    "LLMClientAdapter",
     "PerspectiveAPIServing",
     "LiteLLMServing",
     "LocalHostLLMAPIServing_vllm",

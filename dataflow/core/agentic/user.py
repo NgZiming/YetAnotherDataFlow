@@ -4,10 +4,31 @@ import json_repair
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Literal, Optional, Type, Union
 from typing_extensions import TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+# Message content types for multimodal support
+class TextContent(TypedDict):
+    """Text content for multimodal messages."""
+
+    role: Literal["system", "user", "assistant"]
+    type: Literal["text"]
+    text: str
+
+
+class ImageContent(TypedDict):
+    """Image content for multimodal messages."""
+
+    role: Literal["system", "user", "assistant"]
+    type: Literal["image_url"]
+    image_url: Dict[str, str]  # {"url": "data:image/...;base64,..."}
+
+
+MessageContent = Union[TextContent, ImageContent]
+MessagesType = Union[str, List[Union[Dict[str, Any], MessageContent]]]
 
 
 @dataclass
@@ -29,17 +50,69 @@ class LLMClientABC(ABC):
     """
     Abstract Base Class for LLM clients used by the User Simulator.
     This allows the simulator to be agnostic of the actual transport layer (REST, gRPC, etc.)
+    Supports both text-only and multimodal (text + image) inputs through a unified interface.
     """
 
     @abstractmethod
-    async def generate(
+    def generate(
         self,
-        prompt: str,
+        prompt: MessagesType,
         config: Optional[Dict[str, Any]] = None,
         json_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Generate a text response from the LLM.
+
+        Supports both text-only and multimodal (text + image) inputs:
+
+        Text-only mode:
+            prompt: "Hello, how are you?"
+
+        Multimodal mode (text + images):
+            prompt = [
+                {"role": "user", "type": "text", "text": "Describe this image"},
+                {"role": "user", "type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+            ]
+            OR
+            prompt = [
+                {"role": "system", "content": "You are a helpful assistant"},
+                {"role": "user", "content": [{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {...}}]}
+            ]
+
+        Args:
+            prompt: Either a plain text string or a list of message dicts
+                   Each dict must have "role" key. For multimodal, use "type" key.
+            config: Optional config overrides (temperature, max_tokens, etc.)
+            json_schema: Optional JSON schema for structured output
+
+        Returns:
+            Generated text response
+
+        Raises:
+            TypeError: If prompt type is unsupported
+            ValueError: If message structure is invalid
+        """
+        pass
+
+    @abstractmethod
+    def generate_embedding(
+        self,
+        text: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> List[float]:
+        """
+        Generate embedding (vector representation) for a text input.
+
+        Args:
+            text: Input text to embed
+            config: Optional config overrides (model, etc.)
+
+        Returns:
+            List of floats representing the embedding vector
+
+        Raises:
+            TypeError: If text is not a string
+            RuntimeError: If embedding generation fails
         """
         pass
 
@@ -58,7 +131,7 @@ class SimulationResult(TypedDict):
 
 class UserSimulatorABC(ABC):
     @abstractmethod
-    async def run(
+    def run(
         self,
         raw_data: Dict[str, Any],
         global_context: Optional[Dict[str, Any]] = None,
@@ -73,7 +146,7 @@ class UserStage(ABC):
     """
 
     @abstractmethod
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -133,7 +206,7 @@ class UserStep:
         self.schema = schema
         self.llm_config = llm_config or {}
 
-    async def execute(
+    def execute(
         self,
         data_pool: Dict[str, Any],
         global_context: Dict[str, Any],
@@ -152,7 +225,7 @@ class UserStep:
         prompt = self.schema.prompt_template.format(**input_vars)
 
         # 3. LLM Call
-        response_text = await llm_client.generate(
+        response_text = llm_client.generate(
             prompt,
             config=self.llm_config,
             json_schema=self.schema.json_schema,
