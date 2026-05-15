@@ -75,7 +75,7 @@ class FormatStrPromptedGenerator(OperatorABC):
             llm_inputs,
         ):
             # 1. Try to parse as JSON if schema is provided
-            if self.json_schema and self.to_dict:
+            if output is not None and self.json_schema and self.to_dict:
                 try:
                     data = json.loads(output)
                     validate(instance=data, schema=self.json_schema)
