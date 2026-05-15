@@ -1,3 +1,67 @@
+## [1.0.15] - 2026-05-15
+
+### 🔄 Major Architecture Changes
+
+#### **Removal of Async/Await Pattern**
+- **Complete Synchronization**: Removed all `async/await` patterns from User Simulator module.
+  - Converted `LLMClientABC.generate()`, `UserSimulatorABC.run()`, `UserStage.execute()`, and `UserStep.execute()` to synchronous methods
+  - Replaced `asyncio.gather()` with `ThreadPoolExecutor` for concurrent file processing
+  - Maintained parallel execution for I/O-bound operations while simplifying the codebase
+  - **Affected Files**:
+    - `dataflow/core/agentic/user.py`: Core abstract interfaces
+    - `dataflow/serving/agent/user/` (v1): `simulator.py`, `perception.py`, `understanding.py`, `decision.py`
+    - `dataflow/serving/agent/user_v2/` (v2): `simulator.py`, `perception.py`, `understanding.py`, `decision.py`
+  - **Benefits**:
+    - Simplified codebase with synchronous programming model
+    - Easier debugging and testing
+    - Better integration with synchronous LLM clients (e.g., `requests`)
+    - Thread-based concurrency maintains performance for I/O operations
+
+### 🤖 LLM Client & Multimodal Support
+
+#### **Enhanced LLMClientAdapter**
+- **Multimodal Input Support**: Added native support for text + image inputs.
+  - New `MessageContent` types: `TextContent`, `ImageContent`
+  - `prompt` parameter accepts either plain text or list of message dicts
+  - Supports OpenAI-compatible multimodal message format with base64-encoded images
+  - Example usage:
+    ```python
+    prompt = [
+        {"role": "user", "type": "text", "text": "Describe this image"},
+        {"role": "user", "type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]
+    ```
+
+#### **Embedding Support**
+- **New Method**: Added `generate_embedding()` to `LLMClientABC` interface.
+  - Returns vector representations for text inputs
+  - Supports config overrides for model selection
+  - Implements OpenAI-compatible `/embeddings` endpoint
+
+#### **Code Refactoring**
+- **Unified Client Architecture**: Consolidated LLM client implementations.
+  - Removed deprecated `dataflow/serving/agent/user/llm_client.py`
+  - Introduced `dataflow/serving/llm_client.py` as standard client implementation
+  - Updated `LLMClientAdapter` to handle both text-only and multimodal inputs
+  - Streamlined `api_llm_serving_request.py` and `api_vlm_serving_request.py`
+
+### 🎥 Vision Language Model (VLM) Support
+
+#### **VLM Serving Infrastructure**
+- **Initial Implementation**: Added VLM request serving capabilities.
+  - Created `api_vlm_serving_request.py` with full VLM API support
+  - Integrated multimodal message handling
+  - Supports image encoding and base64 transmission
+  - Subsequent refinements reduced code complexity by ~75%
+
+### 📊 Statistics
+
+- **17 files changed**
+- **~1,400 insertions(+), ~1,300 deletions(-)**
+- **Net reduction**: Simplified codebase through async removal and client unification
+
+---
+
 ## [1.0.14] - 2026-05-12
 
 ### ⚙️ Operator Enhancements
