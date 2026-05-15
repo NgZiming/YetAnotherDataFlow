@@ -79,6 +79,7 @@ class APILLMServing_request(LLMServingABC):
             api_url=self.api_url,
             api_key=self.api_key,
             client_params=client_params,
+            max_retries=self.max_retries,
         )
 
     def generate_from_input(

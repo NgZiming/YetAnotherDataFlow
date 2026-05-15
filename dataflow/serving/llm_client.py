@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Union
+import time
 import requests
 from dataflow.core.agentic import LLMClientABC, MessagesType
 
@@ -22,6 +23,8 @@ class LLMClientAdapter(LLMClientABC):
         api_url: str = "http://localhost:8000/v1",
         api_key: Optional[str] = None,
         client_params: Optional[Dict[str, Any]] = None,
+        max_retries: int = 3,
+        retry_backoff_base: float = 2.0,
     ):
         """
         Initialize the LLM client.
@@ -30,9 +33,18 @@ class LLMClientAdapter(LLMClientABC):
             api_url: The API endpoint URL
             api_key: Optional API key for authentication
             client_params: Default parameters for LLM requests (model, temperature, etc.)
+            max_retries: Maximum number of retry attempts for transient failures
+            retry_backoff_base: Base delay in seconds for exponential backoff
         """
         self.api_url = api_url
         self.api_key = api_key
+        self.max_retries = max_retries
+        self.retry_backoff_base = retry_backoff_base
+        self.retryable_status_codes = {
+            502,
+            503,
+            504,
+        }  # Bad Gateway, Service Unavailable, Gateway Timeout
 
         # Default client parameters
         self.client_params = {
@@ -108,6 +120,80 @@ class LLMClientAdapter(LLMClientABC):
             f"Unsupported prompt type: {type(prompt)}. Expected str or list."
         )
 
+    def _retryable_post(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+        timeout: float,
+    ) -> requests.Response:
+        """
+        Perform a POST request with exponential backoff retry for transient failures.
+
+        Retry conditions:
+        - Network errors (ConnectionError, Timeout)
+        - HTTP 502, 503, 504 (gateway/server issues)
+
+        Non-retryable (fail fast):
+        - HTTP 4xx (client errors)
+        - Other HTTP errors
+
+        Args:
+            url: Request URL
+            headers: Request headers
+            payload: Request body
+            timeout: Request timeout
+
+        Returns:
+            Successful requests.Response
+
+        Raises:
+            RuntimeError: After max retries exhausted or non-retryable error
+        """
+        last_exception = None
+
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.post(
+                    url, headers=headers, json=payload, timeout=timeout
+                )
+
+                # Success
+                if response.status_code == 200:
+                    return response
+
+                # Retryable server errors
+                if response.status_code in self.retryable_status_codes:
+                    if attempt < self.max_retries - 1:
+                        # Exponential backoff
+                        wait_time = self.retry_backoff_base * (2**attempt)
+                        time.sleep(wait_time)
+                        continue
+
+                    raise Exception(
+                        f"Server error after {self.max_retries} attempts: status={response.status_code}, body={response.text[:500]}"
+                    )
+
+                # Non-retryable: client errors or other status codes
+                raise Exception(
+                    f"LLM Request failed: status={response.status_code}, body={response.text[:500]}"
+                )
+
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    wait_time = self.retry_backoff_base * (2**attempt)
+                    time.sleep(wait_time)
+                    continue
+                raise RuntimeError(
+                    f"Network error after {self.max_retries} attempts: {str(e)}"
+                ) from e
+
+        # Should not reach here, but just in case
+        raise RuntimeError(
+            f"Request failed after {self.max_retries} retries"
+        ) from last_exception
+
     def generate(
         self,
         prompt: MessagesType,
@@ -165,26 +251,16 @@ class LLMClientAdapter(LLMClientABC):
         # Request timeout
         request_timeout = current_config.get("read_timeout", 600)
 
-        try:
-            # Note: using requests.post synchronously inside an async method.
-            # In a high-concurrency environment, consider using httpx or aiohttp.
-            response = requests.post(
-                self.api_url + "/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=request_timeout,
-            )
+        # Use retryable POST
+        response = self._retryable_post(
+            self.api_url + "/chat/completions",
+            headers,
+            payload,
+            request_timeout,
+        )
 
-            if response.status_code != 200:
-                raise Exception(
-                    f"LLM Request failed: status={response.status_code}, body={response.text[:500]}"
-                )
-
-            result = response.json()
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        except Exception as e:
-            raise RuntimeError(f"LLM Client Error: {str(e)}") from e
+        result = response.json()
+        return result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
     def generate_embedding(
         self,
@@ -233,27 +309,17 @@ class LLMClientAdapter(LLMClientABC):
         # Request timeout
         request_timeout = current_config.get("read_timeout", 600)
 
-        try:
-            response = requests.post(
-                self.api_url + "/embeddings",
-                headers=headers,
-                json=payload,
-                timeout=request_timeout,
-            )
+        # Use retryable POST
+        response = self._retryable_post(
+            self.api_url + "/embeddings",
+            headers,
+            payload,
+            request_timeout,
+        )
 
-            if response.status_code != 200:
-                raise Exception(
-                    f"Embedding Request failed: status={response.status_code}, body={response.text[:500]}"
-                )
-
-            result = response.json()
-            # Extract embedding from response (OpenAI API format)
-            embedding = result.get("data", [{}])[0].get("embedding")
-            if embedding is None:
-                raise RuntimeError(
-                    f"Embedding not found in response: {result.get('data')}"
-                )
-            return embedding
-
-        except Exception as e:
-            raise RuntimeError(f"Embedding Client Error: {str(e)}") from e
+        result = response.json()
+        # Extract embedding from response (OpenAI API format)
+        embedding = result.get("data", [{}])[0].get("embedding")
+        if embedding is None:
+            raise RuntimeError(f"Embedding not found in response: {result.get('data')}")
+        return embedding
