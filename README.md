@@ -4,6 +4,8 @@
 
 It provides a unified, modular, and highly scalable architecture to manage the entire lifecycle of AI data processing—from raw data ingestion and sophisticated multi-modal reasoning to high-throughput trajectory synthesis and large-scale evaluation.
 
+**Latest Version**: v1.0.15 (2026-05-15)
+
 ---
 
 ## 🌟 Core Philosophy: Data-Centric AI
@@ -26,24 +28,65 @@ Leveraging a powerful binary and structured file generation system, `ya-dataflow
 ### 🤖 Agentic Ecosystem Integration
 Deeply integrated with the **OpenClaw** and **Nanobot** ecosystems. Through `CLIOpenClawServing` and `NanobotServing`, your data pipelines become accessible intelligence that can be dynamically invoked and orchestrated by autonomous agents.
 
+### 🎥 Multimodal & VLM Support
+Native support for Vision-Language Models with seamless image encoding, base64 transmission, and multimodal message handling. Process text, images, and their combinations in a unified pipeline.
+
+### 🧠 User Simulator with Dynamic Personas
+Advanced user simulation capabilities with evidence-driven cognitive architecture:
+- **Perception Stage**: Extract structured evidence from files and agent trajectories
+- **Understanding Stage**: Audit progress, identify milestones, assess task state
+- **Decision Stage**: Generate strategic dialogue responses with dynamic user personas
+- **Emotional Modeling**: Natural emotional tone tracking (satisfied/dissatisfied/confused/urgent/neutral)
+
+---
+
+## 🚀 What's New in v1.0.15
+
+### 🔄 Major Architecture Simplification
+- **Complete Async Removal**: Simplified codebase by removing all `async/await` patterns from User Simulator module
+- **Thread-Based Concurrency**: Replaced `asyncio.gather()` with `ThreadPoolExecutor` for better I/O parallelism
+- **Simplified Debugging**: Synchronous programming model makes testing and debugging significantly easier
+
+### 🤖 Enhanced LLM Client
+- **Multimodal Input Support**: Native text + image input handling
+  ```python
+  prompt = [
+      {"role": "user", "type": "text", "text": "Describe this image"},
+      {"role": "user", "type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+  ]
+  ```
+- **Embedding Support**: New `generate_embedding()` method for vector representations
+- **Unified Architecture**: Consolidated LLM client implementations with `LLMClientAdapter`
+
+### 🎥 VLM Infrastructure
+- **Vision Language Model Serving**: Full VLM API support with multimodal message handling
+- **Image Encoding**: Built-in base64 encoding and transmission
+- **Streamlined Design**: 75% code reduction through refactoring
+
 ---
 
 ## 🚀 Why ya-dataflow? (Advanced Features)
 
-While many frameworks handle simple tasks, `ya-dataflow` is engineered for **production-grade, massive-scale AI data engineering**.
-
 ### 💎 Enterprise-Grade Data Management
-- **Cloud-Native Storage**: Native, seamless integration with **S3** and other cloud storage providers.
-- **Read-Write Separation**: Decoupled `DataSource` and `Storage` layers for maximum flexibility and control.
-- **Intelligent Caching**: Advanced-level caching mechanisms (`CacheStorage`) to optimize I/O and accelerate repetitive workloads.
+- **Cloud-Native Storage**: Native, seamless integration with **S3** and other cloud storage providers
+- **Read-Write Separation**: Decoupled `DataSource` and `Storage` layers for maximum flexibility
+- **Intelligent Caching**: Advanced-level caching mechanisms (`CacheStorage`) to optimize I/O
+- **Checkpointing & Resumption**: Built-in support for checkpointing—resume interrupted jobs exactly where they left off
 
 ### 💎 Production-Ready Reliability
-- **Checkpointing & Resumption**: Built-in support for **checkpointing**. If a massive job (running for days) is interrupted, it can resume exactly from where it left off.
-- **Fine-Grained Parallelism**: Beyond simple task parallelism, our **Partition-level parallelism** allows you to scale throughput by splitting datasets into granular work units.
+- **Fine-Grained Parallelism**: Partition-level parallelism scales throughput by splitting datasets into granular work units
+- **Structured Output Validation**: Native JSON schema validation with automatic filtering of invalid samples
+- **Error Recovery**: Robust error handling with automatic retry and fallback mechanisms
 
 ### 💎 Seamless Agentic Connectivity
-- **OpenClaw Powered**: Use `CLIOpenClawServing` to bridge the gap between agentic reasoning and heavy-duty data pipelines.
-- **Nanobot Ready**: Integrated with `NanobotServing` for lightweight, high-performance serving within the Nanobot SDK ecosystem.
+- **OpenClaw Powered**: Use `CLIOpenClawServing` to bridge agentic reasoning with data pipelines
+- **Nanobot Ready**: Integrated with `NanobotServing` for lightweight, high-performance serving
+- **CLI Integration**: Direct CLI support for agent invocation and orchestration
+
+### 💎 Multimodal Excellence
+- **Text + Image Processing**: Unified handling of text and visual content
+- **Base64 Encoding**: Automatic image encoding for API transmission
+- **OpenAI-Compatible Format**: Standard multimodal message format support
 
 ---
 
@@ -69,6 +112,9 @@ pip install ya-dataflow[vllm,eval]
 
 # For Code and Math reasoning tasks
 pip install ya-dataflow[code,reasoning]
+
+# For User Simulator and agentic workflows
+pip install ya-dataflow[agent]
 ```
 
 ### 2. Basic Usage (Python API)
@@ -98,7 +144,6 @@ class MyProductionPipeline(PartitionPipelineParallelRun):
 
     def forward(self):
         # Step 1: Clean the raw text
-        # .step() retrieves the current partition's data
         self.clean_op.run(
             self.storage.step(),
             input_key="raw_text",
@@ -123,7 +168,60 @@ pipeline.compile()
 pipeline.run()
 ```
 
-### 4. New: Generator Data Sources (v1.0.8+)
+### 3. Multimodal Processing with VLM (v1.0.15+)
+
+Process text and images together with native multimodal support:
+
+```python
+from dataflow.serving.llm_client import LLMClientAdapter
+from dataflow.utils.storage import FileDataSource, FileStorage
+
+# Initialize multimodal client
+client = LLMClientAdapter(
+    api_url="http://localhost:8000/v1",
+    client_params={"model": "/data/share/models/Qwen-VL/"}
+)
+
+# Multimodal prompt with image
+prompt = [
+    {"role": "user", "type": "text", "text": "Describe what you see in this image"},
+    {"role": "user", "type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."}}
+]
+
+response = client.generate(prompt)
+print(response)
+```
+
+### 4. User Simulator with Dynamic Personas (v1.0.15+)
+
+Simulate realistic user interactions with evidence-driven cognitive architecture:
+
+```python
+from dataflow.serving.agent.user_v2.simulator import UserSimulator
+from dataflow.serving.llm_client import LLMClientAdapter
+
+# Initialize simulator
+llm_client = LLMClientAdapter(api_url="http://localhost:8000/v1")
+simulator = UserSimulator(llm_client=llm_client)
+
+# Run simulation
+raw_data = {
+    "file_contents": {"config.py": "...", "main.py": "..."},
+    "agent_outputs": ["Agent: I found the issue...", "Agent: Here's the fix..."],
+    "feedbacks": ["This doesn't work", "Can you explain?"]
+}
+
+global_context = {
+    "question": "How do I fix the configuration error?",
+    "dialogue_scripts": [...]  # Optional: persona scripts per stage
+}
+
+result = simulator.run(raw_data, global_context)
+print(result["final_response"])
+# Output: Natural user response with emotional tone and intent
+```
+
+### 5. Generator Data Sources (v1.0.8+)
 
 Generate data on-the-fly without relying on pre-existing files.
 
@@ -188,37 +286,7 @@ for row in source.read(chunk_size=32):
     print(row)  # Contains: question, target_skills, difficulty
 ```
 
-#### Using create_data_source Factory
-
-```python
-from dataflow.utils.storage import create_data_source
-
-# Generator data source
-source = create_data_source(
-    ["enhanced_tasks"],
-    source_type="generator",
-    generator_fn=task_generator,
-    total_rows=1000,
-    serving=CLIOpenClawServing(agent_id="main"),
-    prompt_templates={
-        "question": "基于场景 {scene} 生成问题",
-    },
-    fields_from_base=["index", "scene"],
-)
-
-# LLM generator data source
-source = create_data_source(
-    ["llm_tasks"],
-    source_type="llm_generator",
-    serving=CLIOpenClawServing(agent_id="main"),
-    prompts={
-        "question": "生成一个技能使用问题",
-    },
-    num_rows=5000,
-)
-```
-
-### 3. Advanced: High-Scale S3 Pipeline with Resumption
+### 6. High-Scale S3 Pipeline with Resumption
 
 ```python
 from dataflow.pipeline import PartitionPipelineParallelRun
@@ -250,12 +318,57 @@ pipeline = PartitionPipelineParallelRun(
     data_source=source,
     storage=storage,
     cache_storage=progress_storage,
-    partitions=1000, # Scale to thousands of partitions
+    partitions=1000,  # Scale to thousands of partitions
     max_parallelism=32
 )
 
 # Run with automatic resumption
 pipeline.run(resume_from_last=True)
+```
+
+### 7. Structured Output with JSON Schema Validation (v1.0.14+)
+
+Enforce strict schema validation at the LLM level:
+
+```python
+from dataflow.core.agentic import StepSchema, UserStep
+from dataflow.serving.llm_client import LLMClientAdapter
+
+# Define JSON schema for structured output
+json_schema = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "target_skills": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 2,
+            "maxItems": 3
+        },
+        "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+        }
+    },
+    "required": ["question", "target_skills", "difficulty"]
+}
+
+# Create step with schema validation
+step = UserStep(
+    name="TaskGenerator",
+    schema=StepSchema(
+        input_keys=["scene", "keywords"],
+        output_key="task",
+        prompt_template="Generate a task based on scene={scene} and keywords={keywords}",
+        json_schema=json_schema  # Enforce schema at LLM level
+    ),
+    llm_config={"temperature": 0.7}
+)
+
+# Execute with automatic validation
+result = step.execute(data_pool, global_context, llm_client)
+# result["json_resp"] is guaranteed to match the schema
 ```
 
 ---
@@ -265,6 +378,8 @@ pipeline.run(resume_from_last=True)
 ```text
 dataflow/
 ├── core/               # Core engine, registry, and base abstractions
+│   ├── agentic/        # User simulator interfaces (LLMClientABC, UserSimulatorABC)
+│   └── ...
 ├── operators/          # Extensive library of built-in operators
 │   ├── core_text/      # Text processing, cleaning, and extraction
 │   ├── core_vision/    # VLM and image reasoning
@@ -272,10 +387,34 @@ dataflow/
 │   ├── reasoning/      # Math and logical reasoning
 │   └── ...             # Specialized domains (RAG, PDF2VQA, etc.)
 ├── pipeline/           # Pipeline orchestration and execution logic
-├── serving/            # LLM/VLM serving integrations (vLLM, OpenAI, etc.)
+├── serving/            # LLM/VLM serving integrations
+│   ├── llm_client.py   # Unified LLM client with multimodal support
+│   ├── agent/          # User simulator (v1 & v2)
+│   └── api_*_serving_request.py  # LLM/VLM API serving
 ├── utils/              # Storage, registry, and utility helpers
+│   └── storage.py      # DataSource, Storage, CacheStorage, Generators
 └── ...
 ```
+
+---
+
+## 📊 Version History
+
+| Version | Date | Key Features |
+|---------|------|--------------|
+| **1.0.15** | 2026-05-15 | Async removal, Multimodal/VLM support, Embedding API |
+| **1.0.14** | 2026-05-12 | JSON Schema validation, UserSimulator V2 enhancements |
+| **1.0.13** | 2026-05-11 | Operator improvements, Performance optimizations |
+| **1.0.12** | 2026-05-08 | Checkpointing, S3 integration |
+| **1.0.11** | 2026-05-04 | Generator data sources, LLM synthesis |
+| **1.0.10** | 2026-04-29 | Partition parallelism, Scalability |
+| **1.0.9** | 2026-04-22 | RAG operators, Retrieval |
+| **1.0.8** | 2026-04-16 | GeneratorDataSource, Dynamic data |
+| **1.0.7** | 2026-04-15 | Code synthesis, Execution |
+| **1.0.6** | 2026-04-14 | Vision support, PDF2VQA |
+| **1.0.5** | 2026-04-13 | Initial release |
+
+---
 
 ## 🤝 Contributing
 
@@ -283,6 +422,21 @@ dataflow/
 
 [GitHub Repository](https://github.com/NgZing/YetAnotherDataFlow)
 
+---
+
 ## 📄 License
 
 This project is licensed under the **Apache-2.0** license.
+
+---
+
+## 📚 Additional Resources
+
+- [CHANGELOG.md](CHANGELOG.md) - Complete version history and change details
+- [User Simulator Guide](docs/user_simulator.md) - Deep dive into agentic simulation
+- [VLM Integration Guide](docs/vlm_integration.md) - Multimodal processing patterns
+- [Pipeline Best Practices](docs/pipeline_patterns.md) - Production deployment tips
+
+---
+
+**Built with ❤️ for the data-centric AI community**
